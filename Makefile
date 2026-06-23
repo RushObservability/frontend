@@ -1,4 +1,4 @@
-.PHONY: dev build preview install clean docker up down lint typecheck help
+.PHONY: dev build preview install test clean docker up down lint typecheck help
 
 ## Development
 
@@ -15,6 +15,9 @@ preview:              ## Preview production build locally
 	npm run preview
 
 ## Quality
+
+test:                 ## Run unit tests (vitest)
+	npm test
 
 typecheck:            ## Run vue-tsc type checking
 	npx vue-tsc --noEmit
