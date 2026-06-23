@@ -153,7 +153,6 @@ const tracesSeen = ref(false)
 const tracesLoading = ref(false)
 const funnelsSeen = ref(false)
 const funnelsRef = ref<HTMLElement | null>(null)
-const tracesRef = ref<HTMLElement | null>(null)
 // Combined Endpoints / Top Errors / APM Logs tabbed card.
 const tabsCardRef = ref<HTMLElement | null>(null)
 const activeServiceTab = ref<'endpoints' | 'errors' | 'logs'>('endpoints')
@@ -339,9 +338,6 @@ function bubbleUpUrl(svc: string, from: string, to: string): string {
   const params = new URLSearchParams({ bubbleup: '1', bu_from: from, bu_to: to, service: svc })
   return `/?${params.toString()}`
 }
-
-// Current service node
-const currentNode = computed(() => graphNodes.value.find((n) => n.service_name === serviceName.value))
 
 // Rich health verdict: combines the in-window error rate with the signals
 // attached to this service (firing alerts, breaching SLOs, active anomalies).
@@ -599,10 +595,6 @@ const svcConnected = computed(() => {
 // colored by health at a glance and listed with their golden signals.
 function edgeErrorRate(e: GraphEdge): number {
   return e.request_count > 0 ? e.error_count / e.request_count : 0
-}
-function edgeRps(e: GraphEdge): number {
-  const secs = minutes.value * 60
-  return secs > 0 ? e.request_count / secs : 0
 }
 function edgeHealth(e: GraphEdge): 'healthy' | 'degraded' | 'unhealthy' {
   const r = edgeErrorRate(e)
@@ -1411,7 +1403,7 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
         </template>
 
         <!-- APM Logs tab -->
-        <div v-else ref="tracesRef" class="svc-tab-logs">
+        <div v-else class="svc-tab-logs">
           <SpanLogTable
             :spans="traces"
             :show-service="false"

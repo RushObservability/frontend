@@ -32,7 +32,7 @@ export function useWidgetData() {
       }))
       if (widget.widget_type === 'counter') {
         // Counter from metrics: last value of the (first) series.
-        const last = series[0]?.points.at(-1)
+        const last = series[0]?.points.slice(-1)[0]
         return { type: 'counter', count: last ? last[1] : 0 }
       }
       return { type: widget.widget_type, series }

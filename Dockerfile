@@ -9,10 +9,10 @@ RUN npm install
 # Copy source; drop any host node_modules that may have leaked in, then reinstall.
 COPY . .
 RUN rm -rf node_modules && npm install
-# Bundle with vite directly, skipping the `vue-tsc -b` type gate. The app runs
-# fine at runtime (same code vite-dev serves); strict-mode type errors are
-# tracked separately. Revert to `npm run build` once those are cleaned up.
-RUN npx vite build
+# Type-check + bundle. The strict `vue-tsc` errors that once forced a bare
+# `vite build` here are fixed and enforced in CI, so the image builds the same
+# type-checked artifact.
+RUN npm run build
 
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html

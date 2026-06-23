@@ -72,7 +72,7 @@ async function load() {
   const needVac: string[] = []
   for (const k of Object.keys(dead)) {
     const total = (live[k] ?? 0) + (dead[k] ?? 0)
-    const pct = total > 0 ? (dead[k] / total) * 100 : 0
+    const pct = total > 0 ? ((dead[k] ?? 0) / total) * 100 : 0
     if (pct >= 20 && total > 1000) { const [s, t] = k.split('|'); needVac.push(`${s}.${t} — ${pct.toFixed(0)}% dead`) }
   }
   out.push({
@@ -98,8 +98,8 @@ async function load() {
   // 4. High sequential scans
   const seqHeavy: string[] = []
   for (const k of Object.keys(seq)) {
-    if (seq[k] > 50 && (live[k] ?? 0) > 1000 && seq[k] > (idxT[k] ?? 0)) {
-      const [s, t] = k.split('|'); seqHeavy.push(`${s}.${t} — ${Math.round(seq[k]).toLocaleString()} seq scans`)
+    if ((seq[k] ?? 0) > 50 && (live[k] ?? 0) > 1000 && (seq[k] ?? 0) > (idxT[k] ?? 0)) {
+      const [s, t] = k.split('|'); seqHeavy.push(`${s}.${t} — ${Math.round(seq[k] ?? 0).toLocaleString()} seq scans`)
     }
   }
   out.push({

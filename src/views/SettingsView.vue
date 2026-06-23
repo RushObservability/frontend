@@ -213,10 +213,6 @@ function parseHash(): { tab: TabId | null; sub: string } {
   return { tab: tabs.some(t => t.id === base) ? (base as TabId) : null, sub }
 }
 
-function readHashTab(): TabId | null {
-  return parseHash().tab
-}
-
 function onHashChange() {
   const { tab, sub } = parseHash()
   if (!tab) return

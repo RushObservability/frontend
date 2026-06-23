@@ -48,12 +48,12 @@ async function load() {
   ])
 
   indexes.value = Object.keys({ ...idxScans, ...idxSize }).map((k) => {
-    const [schema, table, index] = k.split('|')
+    const [schema = '', table = '', index = ''] = k.split('|')
     return { schema, table, index, scans: idxScans[k] ?? 0, size: idxSize[k] ?? 0 }
   })
 
   tables.value = Object.keys({ ...seq, ...idxScansT }).map((k) => {
-    const [schema, table] = k.split('|')
+    const [schema = '', table = ''] = k.split('|')
     return { schema, table, seq: seq[k] ?? 0, idx: idxScansT[k] ?? 0, live: live[k] ?? 0, size: tblSize[k] ?? 0 }
   })
   loading.value = false

@@ -28,13 +28,8 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      - name: Build
-        run: npm run build:novtsc
-
-      # Strict type-check. Non-blocking for now: the app builds and runs, but
-      # ~58 strict-mode `vue-tsc` errors are tracked separately and would
-      # otherwise fail every PR. Drop `continue-on-error` once they're cleaned up
-      # (and switch the Build step back to `npm run build`).
-      - name: Type-check (non-blocking)
+      - name: Type-check
         run: npm run typecheck
-        continue-on-error: true
+
+      - name: Build
+        run: npm run build

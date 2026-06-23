@@ -41,7 +41,7 @@ const unhealthyOnly = ref(false)
 const data = ref<Record<string, K8sResource[]>>({})
 const loading = ref(false)
 
-const kinds = computed(() => GROUPS[page.value] || GROUPS.workloads)
+const kinds = computed<string[]>(() => GROUPS[page.value] ?? GROUPS.workloads ?? [])
 
 async function loadSummary() {
   try { summary.value = await api.getK8sSummary() } catch { /* ignore */ }
@@ -53,7 +53,7 @@ async function loadGroup() {
   loading.value = true
   const next: Record<string, K8sResource[]> = {}
   await Promise.all(kinds.value.map(async (k) => {
-    const ns = KINDS[k].namespaced ? (selectedNs.value || undefined) : undefined
+    const ns = KINDS[k]!.namespaced ? (selectedNs.value || undefined) : undefined
     try { next[k] = await api.getK8sResources(k, ns) } catch { next[k] = [] }
   }))
   data.value = next
@@ -75,7 +75,7 @@ function rowsFor(kind: string): K8sResource[] {
 }
 // Show the Namespace column only for namespaced kinds when not scoped to one namespace.
 function showNs(kind: string): boolean {
-  return KINDS[kind].namespaced && !selectedNs.value
+  return KINDS[kind]!.namespaced && !selectedNs.value
 }
 function clickable(kind: string): boolean {
   return kind !== 'events'
@@ -128,13 +128,13 @@ function relativeTime(ts: string): string {
     <!-- One section per kind in the group -->
     <template v-for="kind in kinds" :key="kind">
       <div class="k8s-section">
-        <h3 class="k8s-section-title">{{ KINDS[kind].label }} <span class="k8s-count">{{ rowsFor(kind).length }}</span></h3>
+        <h3 class="k8s-section-title">{{ KINDS[kind]!.label }} <span class="k8s-count">{{ rowsFor(kind).length }}</span></h3>
         <div v-if="!rowsFor(kind).length" class="k8s-empty">{{ loading ? 'Loading…' : 'None' }}</div>
         <div v-else class="argo-table card">
           <div class="argo-table-header">
             <div class="col-name">Name</div>
             <div v-if="showNs(kind)" class="col-ns">Namespace</div>
-            <div v-for="c in KINDS[kind].cols" :key="c[0]" class="col-generic">{{ c[1] }}</div>
+            <div v-for="c in KINDS[kind]!.cols" :key="c[0]" class="col-generic">{{ c[1] }}</div>
             <div class="col-age">Age</div>
           </div>
           <component
@@ -147,7 +147,7 @@ function relativeTime(ts: string): string {
           >
             <div class="col-name"><span class="app-name mono">{{ r.name }}</span></div>
             <div v-if="showNs(kind)" class="col-ns mono text-secondary">{{ r.namespace }}</div>
-            <div v-for="c in KINDS[kind].cols" :key="c[0]" class="col-generic mono text-secondary" :title="r.cols[c[0]]">{{ r.cols[c[0]] || '—' }}</div>
+            <div v-for="c in KINDS[kind]!.cols" :key="c[0]" class="col-generic mono text-secondary" :title="r.cols[c[0]]">{{ r.cols[c[0]] || '—' }}</div>
             <div class="col-age mono text-muted">{{ relativeTime(r.creation_ts) }}</div>
           </component>
         </div>

@@ -83,7 +83,7 @@ function shortRev(rev: string): string {
   if (!rev) return '—'
   // e.g. "main@sha1:abcdef..." → keep ref + 7-char sha
   const m = rev.match(/^(.*[@:])([0-9a-f]{7,})/i)
-  return m ? `${m[1]}${m[2].slice(0, 7)}` : (rev.length > 28 ? rev.slice(0, 28) + '…' : rev)
+  return m ? `${m[1]}${m[2]!.slice(0, 7)}` : (rev.length > 28 ? rev.slice(0, 28) + '…' : rev)
 }
 
 function relativeTime(ts: string): string {
