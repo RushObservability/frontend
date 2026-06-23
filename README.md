@@ -4,6 +4,7 @@
 
 **The [Rush](https://github.com/RushObservability) web UI.**
 
+[![CI](https://github.com/RushObservability/frontend/actions/workflows/ci.yml/badge.svg)](https://github.com/RushObservability/frontend/actions/workflows/ci.yml)
 [![release](https://github.com/RushObservability/frontend/actions/workflows/release.yml/badge.svg)](https://github.com/RushObservability/frontend/actions/workflows/release.yml)
 ![license](https://img.shields.io/badge/license-BUSL--1.1-blue)
 
@@ -42,8 +43,11 @@ Vue 3 with `<script setup>`, TypeScript, Vite, `vue-tsc` for type-checking, ngin
 
 ```bash
 make build      # type-check + production build
+make test       # unit tests (vitest)
 make typecheck
 ```
+
+Every pull request runs [CI](.github/workflows/ci.yml): it installs deps, runs the unit tests, and builds the app.
 
 ## Part of Rush
 
