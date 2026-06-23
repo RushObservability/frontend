@@ -11,6 +11,14 @@
 
 A single-page Vue 3 app: trace and log search, the metrics explorer, dashboards, alerts, SLOs, anomalies, RUM, and settings. It talks to [query-api](https://github.com/RushObservability/query-api) over HTTP for everything and opens an SSE stream to [sre-agent](https://github.com/RushObservability/sre-agent) for live investigations. No server-side rendering — in production nginx just serves the static build.
 
+<div align="center">
+
+![Rush Explore — full-text search across traces, logs, and spans with a histogram timeline](docs/explore.png)
+
+<sub><em>Explore — search across all your telemetry (service names anonymized).</em></sub>
+
+</div>
+
 ## Quick start
 
 ```bash
