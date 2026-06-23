@@ -98,7 +98,7 @@ const partitionGroups = computed(() => {
   }
   const order = ['logs', 'traces', 'metrics', 'other']
   return order.filter(s => groups[s]?.length).map(s => {
-    const rows = groups[s].slice().sort((a, b) => b.partition.localeCompare(a.partition))
+    const rows = groups[s]!.slice().sort((a, b) => b.partition.localeCompare(a.partition))
     const hot = rows.filter(p => p.tier !== 'cold')   // local or mixed
     const cold = rows.filter(p => p.tier === 'cold')
     const bytesLocal = rows.reduce((n, p) => n + p.bytes_local, 0)
@@ -107,8 +107,8 @@ const partitionGroups = computed(() => {
     const coldDeletes = cold.map(p => p.delete_at).filter((x): x is number => !!x)
     return {
       signal: s,
-      moveAfter: rows[0].move_after_days,
-      retention: rows[0].retention_days,
+      moveAfter: rows[0]!.move_after_days,
+      retention: rows[0]!.retention_days,
       partitionCount: rows.length,
       hot, cold,
       bytesLocal, bytesCold,

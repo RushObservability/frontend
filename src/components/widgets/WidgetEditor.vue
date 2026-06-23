@@ -3,7 +3,6 @@ import { ref, computed, watch, onUnmounted } from 'vue'
 import type { Widget, WidgetType, WidgetPosition, WidgetQueryConfig, Filter, QueryFilter, DashboardVariable, WidgetData } from '../../types'
 import QueryBuilder from '../QueryBuilder.vue'
 import { useWidgetData } from '../../composables/useWidgetData'
-import { useApi } from '../../composables/useApi'
 import CounterWidget from './CounterWidget.vue'
 import BarWidget from './BarWidget.vue'
 import TableWidget from './TableWidget.vue'
@@ -27,7 +26,6 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
-const api = useApi()
 const { fetchWidgetData } = useWidgetData()
 
 // ── Form state ──

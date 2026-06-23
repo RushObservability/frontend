@@ -147,9 +147,9 @@ interface ParsedIndex { name: string; primary: boolean; unique: boolean; method:
 function indexCols(def: string): string[] {
   const m = def.match(/\((.*)\)/) // outermost parens (handles expression indexes)
   if (!m) return []
-  return m[1]
+  return m[1]!
     .split(',')
-    .map((s) => s.trim().split(/\s+/)[0].replace(/[()"]/g, ''))
+    .map((s) => s.trim().split(/\s+/)[0]!.replace(/[()"]/g, ''))
     .filter(Boolean)
 }
 function parseIndex(ix: Idx): ParsedIndex {

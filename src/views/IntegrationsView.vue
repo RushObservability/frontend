@@ -113,11 +113,11 @@ function ensureRoute() {
   if (!loaded.value) return
   if (!addonKey.value) {
     const first = addons.value[0]
-    if (first) router.replace({ name: 'integration-page', params: { addon: first.key, page: first.pages[0].key } })
+    if (first) router.replace({ name: 'integration-page', params: { addon: first.key, page: first.pages[0]!.key } })
     return
   }
   if (addon.value && !pageKey.value) {
-    router.replace({ name: 'integration-page', params: { addon: addon.value.key, page: addon.value.pages[0].key } })
+    router.replace({ name: 'integration-page', params: { addon: addon.value.key, page: addon.value.pages[0]!.key } })
   }
 }
 

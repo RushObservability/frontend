@@ -241,8 +241,8 @@ const layoutNodes = computed<LayoutNode[]>(() => {
   if (nodes.length === 0) return []
   const dims = nodes.map(() => ({ w: CW, h: CH }))
   const mk = (nd: GraphNode, i: number, x: number, y: number): LayoutNode =>
-    ({ ...nd, x, y, w: dims[i].w, h: dims[i].h })
-  if (nodes.length === 1) return [mk(nodes[0], 0, W / 2, H / 2)]
+    ({ ...nd, x, y, w: dims[i]!.w, h: dims[i]!.h })
+  if (nodes.length === 1) return [mk(nodes[0]!, 0, W / 2, H / 2)]
 
   const n = nodes.length
   const cx = W / 2, cy = H / 2
@@ -255,7 +255,7 @@ const layoutNodes = computed<LayoutNode[]>(() => {
     return { x: cx + seedR * Math.cos(a), y: cy + seedR * Math.sin(a) }
   })
   // Small graphs: the seed ring already looks clean, skip the simulation.
-  if (n <= 6) return nodes.map((nd, i) => mk(nd, i, pos[i].x, pos[i].y))
+  if (n <= 6) return nodes.map((nd, i) => mk(nd, i, pos[i]!.x, pos[i]!.y))
 
   const idx = new Map(nodes.map((nd, i) => [nd.service_name, i]))
   const links: [number, number][] = []
@@ -271,18 +271,18 @@ const layoutNodes = computed<LayoutNode[]>(() => {
     const fx = new Array(n).fill(0), fy = new Array(n).fill(0)
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
-        let dx = pos[i].x - pos[j].x, dy = pos[i].y - pos[j].y
+        let dx = pos[i]!.x - pos[j]!.x, dy = pos[i]!.y - pos[j]!.y
         let d2 = dx * dx + dy * dy || 0.01
         const d = Math.sqrt(d2)
         let f = kRep / d2
-        const minDist = rad[i] + rad[j] + 40
+        const minDist = rad[i]! + rad[j]! + 40
         if (d < minDist) f += (minDist - d) * 0.9 // collision: push apart hard
         const ux = dx / d, uy = dy / d
         fx[i] += ux * f; fy[i] += uy * f; fx[j] -= ux * f; fy[j] -= uy * f
       }
     }
     for (const [a, b] of links) {
-      const dx = pos[b].x - pos[a].x, dy = pos[b].y - pos[a].y
+      const dx = pos[b]!.x - pos[a]!.x, dy = pos[b]!.y - pos[a]!.y
       const d = Math.sqrt(dx * dx + dy * dy) || 0.01
       const f = (d - ideal) * 0.05
       const ux = dx / d, uy = dy / d
@@ -290,17 +290,17 @@ const layoutNodes = computed<LayoutNode[]>(() => {
     }
     const maxStep = ideal * 0.5 * cool + 1
     for (let i = 0; i < n; i++) {
-      fx[i] += (cx - pos[i].x) * 0.006
-      fy[i] += (cy - pos[i].y) * 0.006
+      fx[i] += (cx - pos[i]!.x) * 0.006
+      fy[i] += (cy - pos[i]!.y) * 0.006
       let dx = fx[i], dy = fy[i]
       const mag = Math.sqrt(dx * dx + dy * dy)
       if (mag > maxStep) { dx = (dx / mag) * maxStep; dy = (dy / mag) * maxStep }
-      const hw = dims[i].w / 2 + 6, hh = dims[i].h / 2 + 6
-      pos[i].x = Math.max(hw, Math.min(W - hw, pos[i].x + dx))
-      pos[i].y = Math.max(hh, Math.min(H - hh, pos[i].y + dy))
+      const hw = dims[i]!.w / 2 + 6, hh = dims[i]!.h / 2 + 6
+      pos[i]!.x = Math.max(hw, Math.min(W - hw, pos[i]!.x + dx))
+      pos[i]!.y = Math.max(hh, Math.min(H - hh, pos[i]!.y + dy))
     }
   }
-  return nodes.map((nd, i) => mk(nd, i, pos[i].x, pos[i].y))
+  return nodes.map((nd, i) => mk(nd, i, pos[i]!.x, pos[i]!.y))
 })
 
 function nodeBox(name: string): LayoutNode | null {
@@ -341,13 +341,6 @@ function edgeWidth(edge: GraphEdge): number {
 
 function nodeErrorRate(n: GraphNode): number {
   return n.request_count > 0 ? n.error_count / n.request_count : 0
-}
-
-function nodeColor(n: GraphNode): string {
-  const rate = nodeErrorRate(n)
-  if (rate > 0.1) return 'var(--error)'
-  if (rate > 0.01) return 'var(--amber)'
-  return 'var(--ok)'
 }
 
 // Connecting lines are colored by the health of the calls they carry:

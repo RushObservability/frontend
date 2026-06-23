@@ -221,12 +221,14 @@ export function useApi() {
     // to the GroupResult { key, count } shape every consumer expects (facet
     // counts, BreakdownPanel) — reading `.key` off the raw row is undefined.
     const field = req.group_by?.[0] ?? 'key'
+    const groups = (raw.groups ?? []).map((g) => ({
+      key: String(g[field] ?? g.key ?? ''),
+      count: typeof g.count === 'number' ? g.count : Number(g.count) || 0,
+    }))
     return {
       field,
-      groups: (raw.groups ?? []).map((g) => ({
-        key: String(g[field] ?? g.key ?? ''),
-        count: typeof g.count === 'number' ? g.count : Number(g.count) || 0,
-      })),
+      groups,
+      total: groups.reduce((sum, g) => sum + g.count, 0),
     }
   }
 
@@ -558,12 +560,14 @@ export function useApi() {
       body: JSON.stringify(req),
     })
     const field = req.group_by?.[0] ?? 'key'
+    const groups = (raw.groups ?? []).map((g) => ({
+      key: String(g[field] ?? g.key ?? ''),
+      count: typeof g.count === 'number' ? g.count : Number(g.count) || 0,
+    }))
     return {
       field,
-      groups: (raw.groups ?? []).map((g) => ({
-        key: String(g[field] ?? g.key ?? ''),
-        count: typeof g.count === 'number' ? g.count : Number(g.count) || 0,
-      })),
+      groups,
+      total: groups.reduce((sum, g) => sum + g.count, 0),
     }
   }
 

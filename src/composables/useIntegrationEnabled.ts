@@ -30,7 +30,7 @@ function ensureNamespace(a: AddonDef): string {
 /** Free add-ons must be enabled to be visible; licensed add-ons are always "enabled" here. */
 export function isAddonEnabled(a: AddonDef): boolean {
   if (!a.free) return true
-  return enabledState[ensureEnabled(a)]
+  return enabledState[ensureEnabled(a)] ?? false
 }
 
 export function setAddonEnabled(a: AddonDef, v: boolean): void {
@@ -39,7 +39,7 @@ export function setAddonEnabled(a: AddonDef, v: boolean): void {
 }
 
 export function addonNamespace(a: AddonDef): string {
-  return namespaceState[ensureNamespace(a)]
+  return namespaceState[ensureNamespace(a)] ?? a.key
 }
 
 export function setAddonNamespaceDraft(a: AddonDef, v: string): void {

@@ -38,7 +38,7 @@ async function fetchMap(metric: string): Promise<Record<string, number>> {
 async function scalarMax(metric: string): Promise<number> {
   try {
     const r = await api.promQuery(`max(${metric}${sel()})`)
-    return r.result.length ? parseFloat(r.result[0].value?.[1] ?? '0') : NaN
+    return r.result.length ? parseFloat(r.result[0]!.value?.[1] ?? '0') : NaN
   } catch { return NaN }
 }
 
@@ -56,12 +56,12 @@ async function load() {
   dbXidAge.value = dbXid
   const keys = new Set([...Object.keys(live), ...Object.keys(dead), ...Object.keys(xid)])
   rows.value = [...keys].map((k) => {
-    const [schema, table] = k.split('|')
+    const [schema = '', table = ''] = k.split('|')
     return {
       schema, table,
       live: live[k] ?? 0,
       dead: dead[k] ?? 0,
-      sinceAutovac: k in sinceAv ? sinceAv[k] : NaN,
+      sinceAutovac: sinceAv[k] ?? NaN,
       xidAge: xid[k] ?? 0,
       autovacCount: avCount[k] ?? 0,
       modSinceAnalyze: mod[k] ?? 0,
