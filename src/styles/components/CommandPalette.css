@@ -1,0 +1,271 @@
+/* ═══════════════════════════════════════════════════════════
+   Command Palette — Cmd+K global search & action launcher
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Overlay ── */
+.cmd-palette-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: 9000;
+}
+
+/* ── Palette container ── */
+.cmd-palette {
+  width: 600px;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-lg);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.05),
+    0 16px 48px rgba(0, 0, 0, 0.45),
+    0 0 80px rgba(59, 130, 246, 0.04);
+  overflow: hidden;
+}
+
+/* ── Search input row ── */
+.cmd-palette-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cmd-palette-search-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.cmd-palette-input {
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  caret-color: var(--amber);
+  letter-spacing: -0.01em;
+}
+
+.cmd-palette-input::placeholder {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.cmd-palette-esc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 1px 5px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+
+/* ── Results list ── */
+.cmd-palette-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-2) 0;
+  scroll-behavior: smooth;
+}
+
+/* Category label */
+.cmd-palette-category {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: var(--sp-2) var(--sp-4) var(--sp-1);
+  user-select: none;
+}
+
+.cmd-palette-category:not(:first-child) {
+  margin-top: var(--sp-1);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-3);
+}
+
+/* Result item */
+.cmd-palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 6px var(--sp-4);
+  cursor: pointer;
+  transition: background 0.08s ease;
+  border-radius: 0;
+}
+
+.cmd-palette-item.selected {
+  background: var(--amber-dim);
+}
+
+.cmd-palette-item.selected .cmd-palette-item-title {
+  color: var(--text-primary);
+}
+
+.cmd-palette-item.selected .cmd-palette-item-icon {
+  color: var(--amber);
+}
+
+.cmd-palette-item-icon {
+  width: 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: color 0.08s ease;
+}
+
+.cmd-palette-item-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 450;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.08s ease;
+}
+
+.cmd-palette-item-cat {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* ── Empty state ── */
+.cmd-palette-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-8) var(--sp-4);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── Footer ── */
+.cmd-palette-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-raised);
+}
+
+.cmd-palette-footer-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.cmd-palette-footer-hint kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 0px 4px;
+  line-height: 1.6;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* ── Transitions ── */
+.cmd-palette-enter-active {
+  transition: opacity 0.16s ease;
+}
+.cmd-palette-enter-active .cmd-palette {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.cmd-palette-leave-active {
+  transition: opacity 0.1s ease;
+}
+.cmd-palette-leave-active .cmd-palette {
+  transition: opacity 0.1s ease, transform 0.1s ease;
+}
+
+.cmd-palette-enter-from {
+  opacity: 0;
+}
+.cmd-palette-enter-from .cmd-palette {
+  opacity: 0;
+  transform: scale(0.97) translateY(-8px);
+}
+
+.cmd-palette-leave-to {
+  opacity: 0;
+}
+.cmd-palette-leave-to .cmd-palette {
+  opacity: 0;
+  transform: scale(0.97) translateY(-4px);
+}
+
+/* ── Topbar hint button ── */
+.cmd-k-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  cursor: pointer;
+  transition: all 0.15s;
+  height: 26px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.cmd-k-hint:hover {
+  border-color: var(--border-default);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.cmd-k-hint kbd {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 2px;
+  padding: 0px 3px;
+  line-height: 1.5;
+}
+
+/* ── Scrollbar inside results ── */
+.cmd-palette-results::-webkit-scrollbar { width: 4px; }
+.cmd-palette-results::-webkit-scrollbar-track { background: transparent; }
+.cmd-palette-results::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+.cmd-palette-results::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }

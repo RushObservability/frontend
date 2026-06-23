@@ -1,0 +1,7 @@
+services:
+  web-ui:
+    build: .
+    ports:
+      - "5180:80"
+    environment:
+      - QUERY_API_HOST=host.docker.internal:8080

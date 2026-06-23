@@ -1,0 +1,383 @@
+.usage-view {
+  padding: 24px 32px;
+  max-width: 1200px;
+}
+
+.usage-header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.usage-controls {
+  display: flex;
+  gap: 24px;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+
+.control-group label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.btn-group {
+  display: flex;
+  gap: 0;
+}
+
+.btn-group button {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-group button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.btn-group button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.btn-group button:not(:first-child) {
+  border-left: none;
+}
+
+.btn-group button.active {
+  background: var(--amber);
+  color: var(--text-inverse);
+  border-color: var(--amber);
+}
+
+.btn-group button:hover:not(.active) {
+  background: var(--bg-overlay);
+}
+
+.summary-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.summary-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 16px 24px;
+  min-width: 160px;
+}
+
+.summary-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.summary-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.usage-section {
+  margin-bottom: 32px;
+}
+
+.usage-section h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.badge-count {
+  background: var(--amber);
+  color: #000;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  margin-left: 8px;
+  font-weight: 500;
+}
+
+.section-desc {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin: -8px 0 12px;
+}
+
+.usage-table-wrap {
+  overflow-x: auto;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.usage-table th {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--border-default);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.usage-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.usage-table tbody tr:hover {
+  background: var(--bg-overlay);
+}
+
+.signal-name {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #fff;
+}
+
+.source-cell {
+  color: var(--text-secondary);
+}
+
+.date-cell {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cardinality table */
+.card-row {
+  cursor: pointer;
+}
+
+.card-row:hover {
+  background: var(--bg-overlay);
+}
+
+.card-row.expanded {
+  background: var(--bg-overlay);
+}
+
+.expand-icon {
+  display: inline-block;
+  width: 14px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.bar-cell {
+  width: 200px;
+  min-width: 120px;
+}
+
+.cardinality-bar {
+  height: 14px;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.cardinality-bar.card-low {
+  background: var(--ok);
+  opacity: 0.7;
+}
+
+.cardinality-bar.card-medium {
+  background: var(--amber);
+  opacity: 0.8;
+}
+
+.cardinality-bar.card-high {
+  background: var(--error);
+  opacity: 0.85;
+}
+
+/* Breakdown panel */
+.breakdown-row td {
+  padding: 0 !important;
+  border-bottom: 2px solid var(--border-default);
+}
+
+.breakdown-row:hover {
+  background: transparent !important;
+}
+
+.breakdown-panel {
+  padding: 16px 20px 20px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.breakdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.breakdown-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.breakdown-total {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.breakdown-loading,
+.breakdown-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* Treemap */
+.treemap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 16px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  min-height: 80px;
+}
+
+.treemap-block {
+  min-width: 60px;
+  min-height: 70px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  transition: opacity 0.15s;
+}
+
+.treemap-block:hover {
+  opacity: 0.85;
+}
+
+.treemap-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0,0,0,0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.treemap-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: rgba(0,0,0,0.9);
+  line-height: 1.2;
+}
+
+.treemap-pct {
+  font-size: 11px;
+  color: rgba(0,0,0,0.6);
+  font-weight: 500;
+}
+
+/* Breakdown table */
+.breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.breakdown-table th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.breakdown-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.label-key {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.label-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.share-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.share-bar {
+  height: 10px;
+  border-radius: 2px;
+  min-width: 4px;
+  transition: width 0.3s ease;
+}
+
+.share-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 40px;
+}
+
+.loading-state,
+.empty-state {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}

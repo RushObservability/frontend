@@ -1,0 +1,74 @@
+/* Wrapper fills the dashboard grid cell; the PanelCard inside stretches to it
+   so the chart body flexes to the available height (same as before). */
+.widget-wrap {
+  position: relative;
+  height: 100%;
+}
+/* Lift the hovered dashboard panel above its grid neighbors so the chart
+   tooltip (which overflows the card) isn't painted under the next panel. */
+.widget-wrap:hover { z-index: 20; }
+.widget-wrap :deep(.panel-card) {
+  height: 100%;
+}
+.widget-wrap :deep(.panel-body) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 60px;
+  padding: var(--sp-2);
+}
+
+/* Edit-mode chrome */
+.widget-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.widget-btn {
+  font-size: 13px;
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  transition: color 0.15s, background 0.15s;
+}
+.widget-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.widget-btn-danger:hover {
+  color: var(--error);
+}
+.widget-edit-mode :deep(.panel-card) {
+  outline: 1px dashed var(--border-strong);
+  outline-offset: -1px;
+}
+.drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 0 4px;
+  user-select: none;
+  transition: color 0.15s;
+  line-height: 1;
+}
+.drag-handle:hover {
+  color: var(--amber);
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.resize-handle {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  cursor: nwse-resize;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  user-select: none;
+  transition: color 0.15s;
+  z-index: 4;
+}
+.resize-handle:hover {
+  color: var(--amber);
+}

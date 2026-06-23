@@ -1,0 +1,167 @@
+/* Integrations area — left rail of add-ons + main content pane.
+   Mirrors the Settings rail visual language. */
+.integrations-shell {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  gap: var(--sp-8);
+  align-items: start;
+  padding: var(--sp-6);
+}
+
+.integrations-rail {
+  position: sticky;
+  top: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding-right: var(--sp-5);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.rail-brand {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  padding: 0 var(--sp-2);
+}
+
+.integrations-rail .rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.integrations-rail .rail-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 var(--sp-2);
+  border: none;
+  background: none;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+.integrations-rail .rail-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.integrations-rail .rail-item.active {
+  background: var(--amber-dim);
+  color: var(--amber);
+  font-weight: 500;
+}
+.rail-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: var(--sp-2);
+  line-height: 1.4;
+}
+
+.integrations-main { min-width: 0; }
+
+.integrations-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+.integrations-head .content-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 20px;
+  margin: 0;
+}
+.head-selects { display: flex; align-items: center; gap: var(--sp-5); }
+.server-select { display: flex; align-items: center; gap: var(--sp-2); }
+.server-select label { font-size: 12px; color: var(--text-tertiary); }
+.server-select select {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.page-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--sp-5);
+}
+.page-tab {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.page-tab:hover { color: var(--text-primary); }
+.page-tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+.page-body { min-width: 0; }
+
+.integrations-empty {
+  padding: var(--sp-8);
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+/* Shared bits for PostgreSQL pages */
+.pg-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-6);
+}
+.pg-stat {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+}
+.pg-stat .label { font-size: 12px; color: var(--text-tertiary); margin-bottom: 6px; }
+.pg-stat .value { font-size: 22px; font-weight: 600; color: var(--text-primary); }
+.pg-stat .sub { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+
+.pg-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pg-table th, .pg-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.pg-table th { color: var(--text-tertiary); font-weight: 500; cursor: pointer; user-select: none; }
+.pg-table td.num, .pg-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.pg-table tbody tr { cursor: pointer; }
+.pg-table tbody tr:hover { background: var(--bg-hover); }
+.pg-sql {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+}
+.pg-empty, .pg-loading {
+  padding: var(--sp-6);
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+.pg-setup { max-width: 720px; }
+.pg-setup pre {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  padding: var(--sp-4);
+  overflow-x: auto;
+  font-size: 12px;
+}

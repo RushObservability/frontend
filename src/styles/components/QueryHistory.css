@@ -1,0 +1,106 @@
+.qh { position: relative; }
+
+.qh-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  transition: all 0.15s;
+}
+.qh-trigger:hover { color: var(--amber); border-color: var(--amber); }
+
+.qh-count {
+  font-size: 9px;
+  background: var(--amber-dim);
+  color: var(--amber);
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+.qh-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  width: 320px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  padding: var(--sp-1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.qh-clear {
+  padding: 6px 8px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 0.1s;
+}
+.qh-clear:hover { background: var(--bg-hover); color: var(--error); }
+
+.qh-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 0;
+}
+
+.qh-list { max-height: 350px; overflow-y: auto; }
+
+.qh-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.1s;
+}
+.qh-item:hover { background: var(--bg-hover); }
+
+.qh-item-summary {
+  grid-column: 1;
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qh-item-time {
+  grid-column: 2;
+  align-self: center;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.qh-item-del {
+  grid-column: 3;
+  align-self: center;
+  font-size: 14px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: all 0.1s;
+  padding: 2px;
+}
+.qh-item:hover .qh-item-del { opacity: 1; }
+.qh-item-del:hover { color: var(--error); }
+
+.qh-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 11px;
+}
+
+.qh-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+}

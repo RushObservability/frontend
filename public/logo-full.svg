@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 48" fill="none">
+  <!-- Rush Observability — Full Logo (mark + wordmark) -->
+  <defs>
+    <linearGradient id="dg" x1="24" y1="2" x2="24" y2="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="ig" x1="24" y1="12" x2="24" y2="36" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0d0f17"/>
+      <stop offset="100%" stop-color="#08090f"/>
+    </linearGradient>
+  </defs>
+  <!-- Diamond mark -->
+  <path d="M24 2 L44 24 L24 46 L4 24 Z" fill="url(#dg)"/>
+  <path d="M24 10 L37 24 L24 38 L11 24 Z" fill="url(#ig)"/>
+  <polyline points="15,24 19,24 20.5,18 22,30 24,21 25.5,27 27,24 29,24 33,24"
+    stroke="#3b82f6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Wordmark "Rush" -->
+  <text x="56" y="31" font-family="'JetBrains Mono','SF Mono',monospace" font-size="22" font-weight="600" fill="#d5dae6" letter-spacing="-0.5">Rush</text>
+</svg>

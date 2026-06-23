@@ -1,0 +1,34 @@
+.channel-add-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.page-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.back-link {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  border-radius: var(--r-md);
+  transition: color 0.15s, background 0.15s;
+}
+.back-link:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
