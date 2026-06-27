@@ -9,6 +9,9 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   serviceName?: string
   minutes?: number
+  // When set, pins the view to spans or logs and hides the internal toggle —
+  // used when Spans and Logs are surfaced as separate top-level tabs.
+  forceMode?: 'spans' | 'logs'
 }>(), {
   showService: true,
   loading: false,
@@ -23,7 +26,9 @@ const emit = defineEmits<{
 const api = useApi()
 
 // ═══ Mode toggle ═══
-const mode = ref<'spans' | 'logs'>('spans')
+// Defaults to spans, or follows `forceMode` when the parent pins it.
+const mode = ref<'spans' | 'logs'>(props.forceMode ?? 'spans')
+watch(() => props.forceMode, (m) => { if (m) mode.value = m })
 
 // ═══ Search state ═══
 const searchInput = ref('')
@@ -346,7 +351,7 @@ function levelClass(level: string): string {
   <div class="slt-root">
     <!-- Header bar -->
     <div class="slt-header">
-      <div class="slt-toggle">
+      <div v-if="!forceMode" class="slt-toggle">
         <button
           class="slt-mode-btn"
           :class="{ active: mode === 'spans' }"
@@ -358,6 +363,7 @@ function levelClass(level: string): string {
           @click="mode = 'logs'"
         >Logs <span class="slt-count">{{ logs.length }}</span></button>
       </div>
+      <div v-else class="slt-count-label">{{ mode === 'spans' ? displaySpans.length : logs.length }} {{ mode }}</div>
       <button v-if="searchActive" class="slt-clear-btn" @click="clearSearch">Clear</button>
     </div>
 

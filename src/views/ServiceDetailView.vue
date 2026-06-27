@@ -153,11 +153,51 @@ const tracesSeen = ref(false)
 const tracesLoading = ref(false)
 const funnelsSeen = ref(false)
 const funnelsRef = ref<HTMLElement | null>(null)
-// Combined Endpoints / Top Errors / APM Logs tabbed card.
+// Combined Endpoints / Top Errors tabbed card (APM Logs is now its own top-level tab).
 const tabsCardRef = ref<HTMLElement | null>(null)
-const activeServiceTab = ref<'endpoints' | 'errors' | 'logs'>('endpoints')
+const activeServiceTab = ref<'endpoints' | 'errors'>('endpoints')
 let lazyObservers: IntersectionObserver[] = []
 let observersReady = false
+
+// ═══ Top-level tabs ═══
+// The page used to be one long vertical scroll (overview → charts → endpoints/
+// errors/logs → funnels). That's too much to parse at once, so the sections are
+// split into top-level tabs, deep-linkable via the `?tab=` query param so a tab
+// is shareable and survives back/forward. Overview is populated by loadData()
+// on mount; the heavier Endpoints/Spans/Logs/Funnels views load the first time
+// their tab opens (their IntersectionObserver never fires while hidden).
+type MainTab = 'overview' | 'endpoints' | 'spans' | 'logs' | 'funnels'
+const TABS: MainTab[] = ['overview', 'endpoints', 'spans', 'logs', 'funnels']
+
+function tabFromRoute(): MainTab {
+  const t = route.query.tab
+  return typeof t === 'string' && (TABS as string[]).includes(t) ? (t as MainTab) : 'overview'
+}
+const activeTab = ref<MainTab>(tabFromRoute())
+
+// Trigger the lazy fetch backing a tab (no-op if already loaded). Spans and Logs
+// share the same span feed (logs are extracted from span events).
+function loadTabData(t: MainTab) {
+  if (t === 'endpoints') loadActiveServiceTab()
+  else if (t === 'spans' || t === 'logs') { if (!tracesSeen.value) loadTraces() }
+  else if (t === 'funnels') { if (!funnelsSeen.value) { funnelsSeen.value = true; loadSvcFunnels() } }
+}
+
+// The tabs are <router-link>s that set `?tab=`; this keeps activeTab in sync with
+// the URL (clicks, deep links, and browser back/forward all flow through here).
+watch(() => route.query.tab, () => {
+  activeTab.value = tabFromRoute()
+  loadTabData(activeTab.value)
+})
+
+// Tab descriptors for the nav. `dot` mirrors service health (Overview only).
+const mainTabs = computed<{ id: MainTab; label: string; dot: string }[]>(() => [
+  { id: 'overview',  label: 'Overview',  dot: health.value },
+  { id: 'endpoints', label: 'Endpoints', dot: '' },
+  { id: 'spans',     label: 'Spans',     dot: '' },
+  { id: 'logs',      label: 'Logs',      dot: '' },
+  { id: 'funnels',   label: 'Funnels',   dot: '' },
+])
 
 function observeOnce(el: Element | null, cb: () => void) {
   if (!el) return
@@ -176,15 +216,14 @@ function setupLazyObservers() {
   observeOnce(funnelsRef.value, () => { funnelsSeen.value = true; loadSvcFunnels() })
 }
 
-// Load the data backing the active tab (Endpoints / Top Errors / APM Logs),
-// skipping the fetch if that tab has already loaded.
+// Load the data backing the active Endpoints/Top-Errors sub-tab, skipping the
+// fetch if it has already loaded.
 function loadActiveServiceTab() {
   if (activeServiceTab.value === 'endpoints') { if (!endpointsSeen.value) loadEndpoints() }
-  else if (activeServiceTab.value === 'errors') { if (!errorsSeen.value) loadErrors() }
-  else if (!tracesSeen.value) loadTraces()
+  else if (!errorsSeen.value) loadErrors()
 }
 
-function setServiceTab(t: 'endpoints' | 'errors' | 'logs') {
+function setServiceTab(t: 'endpoints' | 'errors') {
   activeServiceTab.value = t
   loadActiveServiceTab()
 }
@@ -324,6 +363,8 @@ async function loadDeploys(from: string, to: string) {
 
 onMounted(() => {
   loadData().then(() => nextTick(setupLazyObservers))
+  // Deep link (?tab=spans|logs|endpoints|funnels): load that tab's data now.
+  if (activeTab.value !== 'overview') loadTabData(activeTab.value)
   loadAttachments()
   if (features.value.deploy_markers === undefined) loadFeatures()
 })
@@ -1018,12 +1059,27 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
       </div>
     </div>
 
+    <!-- ═══ Top-level tab navigation (sticky) ═══ -->
+    <nav class="svc-tabnav" role="tablist" aria-label="Service views">
+      <router-link
+        v-for="t in mainTabs" :key="t.id"
+        :to="{ query: { ...route.query, tab: t.id } }"
+        class="svc-maintab" :class="{ active: activeTab === t.id }"
+        role="tab" :aria-selected="activeTab === t.id"
+      >
+        <span v-if="t.dot" class="svc-dot svc-maintab-dot" :class="t.dot" />
+        <span class="svc-maintab-label">{{ t.label }}</span>
+      </router-link>
+    </nav>
+
     <div v-if="loading && timeseries.length === 0" class="empty-state card">
       <div class="empty-state-icon">&#9676;</div>
       <div>Loading service data...</div>
     </div>
 
     <template v-else>
+      <!-- ░░░░ OVERVIEW ░░░░ — health KPIs, attached signals, topology -->
+      <section v-show="activeTab === 'overview'" class="svc-panel">
       <!-- Summary stats -->
       <div class="svc-stats-row">
         <div class="svc-stat card">
@@ -1281,9 +1337,12 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
             </div>
           </template>
         </PanelCard>
+      </div>
 
+      <!-- Topology: who calls this service and what it depends on -->
+      <div class="svc-overview-grid">
         <PanelCard
-          class="svc-chart-card chart-clickable"
+          class="svc-chart-card chart-clickable svc-map-card"
           title="Service Map"
           description="Upstream and downstream services connected to this service, colored by error rate. Click to expand."
           @click="openChart('map')"
@@ -1313,14 +1372,16 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
           </div>
         </PanelCard>
       </div>
+      </section><!-- /overview -->
 
-      <!-- ═══ Endpoints / Top Errors / APM Logs (tabbed) ═══ -->
+      <!-- ░░░░ ENDPOINTS ░░░░ — per-endpoint RED + top errors -->
+      <section v-show="activeTab === 'endpoints'" class="svc-panel">
+      <!-- ═══ Endpoints / Top Errors (tabbed) ═══ -->
       <div class="svc-tabs card" ref="tabsCardRef">
         <div class="ep-header">
           <div class="svc-tab-row">
             <button class="svc-tab" :class="{ active: activeServiceTab === 'endpoints' }" @click="setServiceTab('endpoints')">Endpoints</button>
             <button class="svc-tab" :class="{ active: activeServiceTab === 'errors' }" @click="setServiceTab('errors')">Top Errors</button>
-            <button class="svc-tab" :class="{ active: activeServiceTab === 'logs' }" @click="setServiceTab('logs')">APM / Logs</button>
           </div>
           <div v-if="activeServiceTab === 'endpoints'" class="ep-mode-toggle">
             <button class="ep-mode-btn" :class="{ active: endpointsMode === 'server' }" @click="setEndpointsMode('server')">Endpoints</button>
@@ -1402,9 +1463,14 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
           </table>
         </template>
 
-        <!-- APM Logs tab -->
-        <div v-else class="svc-tab-logs">
+      </div>
+      </section><!-- /endpoints -->
+
+      <!-- ░░░░ SPANS ░░░░ — recent spans for this service -->
+      <section v-show="activeTab === 'spans'" class="svc-panel">
+        <div class="svc-tab-logs card">
           <SpanLogTable
+            force-mode="spans"
             :spans="traces"
             :show-service="false"
             :loading="loading || tracesLoading || !tracesSeen"
@@ -1414,8 +1480,26 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
             @click-trace="(traceId) => router.push(`/trace/${traceId}`)"
           />
         </div>
-      </div>
+      </section><!-- /spans -->
 
+      <!-- ░░░░ LOGS ░░░░ — APM log lines extracted from span events -->
+      <section v-show="activeTab === 'logs'" class="svc-panel">
+        <div class="svc-tab-logs card">
+          <SpanLogTable
+            force-mode="logs"
+            :spans="traces"
+            :show-service="false"
+            :loading="loading || tracesLoading || !tracesSeen"
+            :service-name="serviceName"
+            :minutes="minutes"
+            @click-span="(span) => router.push(`/trace/${span.trace_id}`)"
+            @click-trace="(traceId) => router.push(`/trace/${traceId}`)"
+          />
+        </div>
+      </section><!-- /logs -->
+
+      <!-- ░░░░ FUNNELS ░░░░ — trace funnel drop-off -->
+      <section v-show="activeTab === 'funnels'" class="svc-panel">
       <!-- ═══ Trace Funnels ═══ -->
       <div class="svc-funnels card" ref="funnelsRef">
         <!-- Header row -->
@@ -1576,6 +1660,7 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
           </div>
         </div>
       </div>
+      </section><!-- /funnels -->
 
     </template>
 
