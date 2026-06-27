@@ -535,8 +535,8 @@ const ssoProvider = ref<Partial<SsoProvider>>({
   oidc_scopes: 'openid profile email groups',
   groups_claim: 'groups',
   email_claim: 'email',
-  first_name_claim: 'given_name',
-  last_name_claim: 'family_name',
+  first_name_claim: 'first_name',
+  last_name_claim: 'last_name',
   jit_provisioning: true,
   default_group_id: '',
   saml_idp_metadata_url: '',
@@ -622,8 +622,8 @@ const wizardClientSecret = ref('')
 const wizardOidcScopes = ref('openid profile email groups')
 const wizardGroupsClaim = ref('groups')
 const wizardEmailClaim = ref('email')
-const wizardFirstNameClaim = ref('given_name')
-const wizardLastNameClaim = ref('family_name')
+const wizardFirstNameClaim = ref('first_name')
+const wizardLastNameClaim = ref('last_name')
 const wizardProviderName = ref('')
 
 // ── Wizard validation helpers ──
@@ -687,8 +687,8 @@ const wizardStepValid = computed(() => {
 
   if (p === 'google') {
     if (step === 1) return true // instructional
-    if (step === 2) return true // copy values
-    if (step === 3) return !e.ssoUrl && !e.cert
+    if (step === 2) return !e.ssoUrl && !e.cert // enter IdP details
+    if (step === 3) return true // copy values
     if (step === 4) return true // instructional
     if (step === 5) return !e.ssoUrl && !e.cert && !e.emailClaim
     return true
@@ -768,8 +768,8 @@ function openWizard() {
   wizardOidcScopes.value = 'openid profile email groups'
   wizardGroupsClaim.value = 'groups'
   wizardEmailClaim.value = 'email'
-  wizardFirstNameClaim.value = 'given_name'
-  wizardLastNameClaim.value = 'family_name'
+  wizardFirstNameClaim.value = 'first_name'
+  wizardLastNameClaim.value = 'last_name'
   wizardProviderName.value = ''
   resetTouched()
   wizardMagicToken.value = null
@@ -844,8 +844,8 @@ async function wizardSave() {
       jit_provisioning: true,
       groups_claim: wizardGroupsClaim.value || 'groups',
       email_claim: wizardEmailClaim.value || 'email',
-      first_name_claim: wizardFirstNameClaim.value || 'given_name',
-      last_name_claim: wizardLastNameClaim.value || 'family_name',
+      first_name_claim: wizardFirstNameClaim.value || 'first_name',
+      last_name_claim: wizardLastNameClaim.value || 'last_name',
       default_group_id: '',
     }
     if (protocol === 'oidc') {
@@ -2542,6 +2542,21 @@ function formatDate(ts: string): string {
               </div>
 
               <div v-if="guidedStepNumber === 2" class="wizard-step-content">
+                <div class="wizard-title">Enter your IdP details</div>
+                <div class="wizard-instruction">In Google admin, download the certificate and copy the SSO URL, then paste them here:</div>
+                <div class="form-group-inline">
+                  <label class="form-label">IdP Certificate</label>
+                  <textarea v-model="wizardCert" class="cert-area" :class="['form-input', 'mono', { 'input-error': wizardTouched.cert && wizardErrors.cert }]" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" @blur="touchField('cert')"></textarea>
+                  <div v-if="wizardTouched.cert && wizardErrors.cert" class="field-error">{{ wizardErrors.cert }}</div>
+                </div>
+                <div class="form-group-inline">
+                  <label class="form-label">SSO URL</label>
+                  <input v-model="wizardSsoUrl" :class="['form-input', 'mono', { 'input-error': wizardTouched.ssoUrl && wizardErrors.ssoUrl }]" placeholder="https://accounts.google.com/o/saml2/idp?idpid=..." @blur="touchField('ssoUrl')" />
+                  <div v-if="wizardTouched.ssoUrl && wizardErrors.ssoUrl" class="field-error">{{ wizardErrors.ssoUrl }}</div>
+                </div>
+              </div>
+
+              <div v-if="guidedStepNumber === 3" class="wizard-step-content">
                 <div class="wizard-title">Copy these values into Google admin</div>
                 <div class="wizard-instruction">In the Google SAML app wizard, paste these values:</div>
                 <div class="form-group-inline">
@@ -2561,47 +2576,36 @@ function formatDate(ts: string): string {
                 <div class="wizard-instruction">Set Name ID format to <strong>Email</strong>.</div>
               </div>
 
-              <div v-if="guidedStepNumber === 3" class="wizard-step-content">
-                <div class="wizard-title">Enter your IdP details</div>
-                <div class="wizard-instruction">In Google admin, download the certificate and copy the SSO URL, then paste them here:</div>
-                <div class="form-group-inline">
-                  <label class="form-label">IdP Certificate</label>
-                  <textarea v-model="wizardCert" class="cert-area" :class="['form-input', 'mono', { 'input-error': wizardTouched.cert && wizardErrors.cert }]" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" @blur="touchField('cert')"></textarea>
-                  <div v-if="wizardTouched.cert && wizardErrors.cert" class="field-error">{{ wizardErrors.cert }}</div>
-                </div>
-                <div class="form-group-inline">
-                  <label class="form-label">SSO URL</label>
-                  <input v-model="wizardSsoUrl" :class="['form-input', 'mono', { 'input-error': wizardTouched.ssoUrl && wizardErrors.ssoUrl }]" placeholder="https://accounts.google.com/o/saml2/idp?idpid=..." @blur="touchField('ssoUrl')" />
-                  <div v-if="wizardTouched.ssoUrl && wizardErrors.ssoUrl" class="field-error">{{ wizardErrors.ssoUrl }}</div>
-                </div>
-              </div>
-
               <div v-if="guidedStepNumber === 4" class="wizard-step-content">
                 <div class="wizard-title">Configure attributes and claim mapping</div>
-                <div class="wizard-instruction">In Google admin under Attribute Mapping, add a group attribute:</div>
+                <div class="wizard-instruction">In Google admin under <strong>Attributes</strong>, map your Google Directory fields to these App attribute names:</div>
                 <div class="form-group-inline">
-                  <label class="form-label">Attribute name</label>
+                  <label class="form-label">Email Claim</label>
+                  <input v-model="wizardEmailClaim" :class="['form-input', 'mono', { 'input-error': wizardTouched.emailClaim && wizardErrors.emailClaim }]" placeholder="email" @blur="touchField('emailClaim')" />
+                  <div v-if="wizardTouched.emailClaim && wizardErrors.emailClaim" class="field-error">{{ wizardErrors.emailClaim }}</div>
+                  <div class="field-hint">Map <strong>Primary email</strong> → this App attribute name (required)</div>
+                </div>
+                <div class="form-group-inline">
+                  <label class="form-label">First Name Claim</label>
+                  <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="first_name" />
+                  <div class="field-hint">Map <strong>First name</strong> → this App attribute name (optional)</div>
+                </div>
+                <div class="form-group-inline">
+                  <label class="form-label">Last Name Claim</label>
+                  <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="last_name" />
+                  <div class="field-hint">Map <strong>Last name</strong> → this App attribute name (optional)</div>
+                </div>
+                <div class="wizard-instruction mt-2">Then open the <strong>Group membership</strong> section (separate from Attributes), select the Google Groups to include, and set the <strong>App attribute</strong> name to:</div>
+                <div class="form-group-inline">
+                  <label class="form-label">App attribute</label>
                   <div class="wizard-copyable-box">
                     <code>groups</code>
                   </div>
                 </div>
-                <div class="wizard-instruction">Map it to <strong>Google Groups</strong>.</div>
-                <div class="form-group-inline mt-2">
-                  <label class="form-label">Email Claim</label>
-                  <input v-model="wizardEmailClaim" :class="['form-input', 'mono', { 'input-error': wizardTouched.emailClaim && wizardErrors.emailClaim }]" placeholder="email" @blur="touchField('emailClaim')" />
-                  <div v-if="wizardTouched.emailClaim && wizardErrors.emailClaim" class="field-error">{{ wizardErrors.emailClaim }}</div>
-                  <div class="field-hint">The claim/attribute name containing the user's email address</div>
+                <div class="wizard-note">
+                  <strong>Note:</strong> Each Google group you send only grants access if a group with the <em>same name</em> exists in Rush. Create the matching group under <strong>Settings &rarr; Groups</strong> first, otherwise members sign in with no permissions.
                 </div>
-                <div class="form-group-inline">
-                  <label class="form-label">First Name Claim</label>
-                  <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="FirstName" />
-                  <div class="field-hint">The claim for the user's first name (OIDC: given_name, SAML: FirstName)</div>
-                </div>
-                <div class="form-group-inline">
-                  <label class="form-label">Last Name Claim</label>
-                  <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="LastName" />
-                  <div class="field-hint">The claim for the user's last name (OIDC: family_name, SAML: LastName)</div>
-                </div>
+                <div class="wizard-instruction mt-2">Finally, open the app's <strong>User access</strong> section. A new app defaults to <strong>OFF for everyone</strong> &mdash; turn it <strong>ON for everyone</strong> (or for the chosen org units/groups) so users can sign in.</div>
               </div>
 
               <div v-if="guidedStepNumber === 5" class="wizard-step-content">
@@ -2661,12 +2665,12 @@ function formatDate(ts: string): string {
                 <div class="form-group-inline">
                   <label class="form-label">First Name Claim</label>
                   <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="FirstName" />
-                  <div class="field-hint">The claim for the user's first name (OIDC: given_name, SAML: FirstName)</div>
+                  <div class="field-hint">The claim for the user's first name (OIDC: first_name, SAML: FirstName)</div>
                 </div>
                 <div class="form-group-inline">
                   <label class="form-label">Last Name Claim</label>
                   <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="LastName" />
-                  <div class="field-hint">The claim for the user's last name (OIDC: family_name, SAML: LastName)</div>
+                  <div class="field-hint">The claim for the user's last name (OIDC: last_name, SAML: LastName)</div>
                 </div>
               </div>
 
@@ -2738,12 +2742,12 @@ function formatDate(ts: string): string {
                 <div class="form-group-inline">
                   <label class="form-label">First Name Claim</label>
                   <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="FirstName" />
-                  <div class="field-hint">The claim for the user's first name (OIDC: given_name, SAML: FirstName)</div>
+                  <div class="field-hint">The claim for the user's first name (OIDC: first_name, SAML: FirstName)</div>
                 </div>
                 <div class="form-group-inline">
                   <label class="form-label">Last Name Claim</label>
                   <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="LastName" />
-                  <div class="field-hint">The claim for the user's last name (OIDC: family_name, SAML: LastName)</div>
+                  <div class="field-hint">The claim for the user's last name (OIDC: last_name, SAML: LastName)</div>
                 </div>
               </div>
 
@@ -2823,13 +2827,13 @@ function formatDate(ts: string): string {
                 </div>
                 <div class="form-group-inline">
                   <label class="form-label">First Name Claim</label>
-                  <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="given_name" />
-                  <div class="field-hint">The claim for the user's first name (OIDC: given_name, SAML: FirstName)</div>
+                  <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="first_name" />
+                  <div class="field-hint">The claim for the user's first name (OIDC: first_name, SAML: FirstName)</div>
                 </div>
                 <div class="form-group-inline">
                   <label class="form-label">Last Name Claim</label>
-                  <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="family_name" />
-                  <div class="field-hint">The claim for the user's last name (OIDC: family_name, SAML: LastName)</div>
+                  <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="last_name" />
+                  <div class="field-hint">The claim for the user's last name (OIDC: last_name, SAML: LastName)</div>
                 </div>
               </div>
 
@@ -2891,12 +2895,12 @@ function formatDate(ts: string): string {
                 <div class="form-group-inline">
                   <label class="form-label">First Name Claim</label>
                   <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="FirstName" />
-                  <div class="field-hint">The claim for the user's first name (OIDC: given_name, SAML: FirstName)</div>
+                  <div class="field-hint">The claim for the user's first name (OIDC: first_name, SAML: FirstName)</div>
                 </div>
                 <div class="form-group-inline">
                   <label class="form-label">Last Name Claim</label>
                   <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="LastName" />
-                  <div class="field-hint">The claim for the user's last name (OIDC: family_name, SAML: LastName)</div>
+                  <div class="field-hint">The claim for the user's last name (OIDC: last_name, SAML: LastName)</div>
                 </div>
               </div>
 

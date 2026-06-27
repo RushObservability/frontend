@@ -22,4 +22,7 @@ ENV QUERY_API_HOST=localhost:8080
 # outside the cluster, surfaced to the UI wherever it shows/reaches the API by its
 # public address (e.g. the CloudWatch ingest endpoint). Empty → UI uses its origin.
 ENV API_PUBLIC_URL=""
+# Default color theme for first-time visitors with no saved preference: light | dark.
+# Defaults to light; set DEFAULT_THEME=dark to make the app open in dark mode.
+ENV DEFAULT_THEME="light"
 EXPOSE 80

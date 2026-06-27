@@ -221,10 +221,26 @@ select.filter-input { cursor: pointer; padding-right: 6px; }
 .audit-head,
 .audit-row {
   display: grid;
-  grid-template-columns: 168px 1.2fr 1.4fr 1.4fr 90px 1fr 120px;
+  grid-template-columns: 22px 168px 1.2fr 1.4fr 1.4fr 90px 1fr 120px;
   gap: var(--sp-3);
   align-items: center;
   padding: var(--sp-2) var(--sp-4);
+}
+
+/* Expand affordance */
+.col-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.audit-chevron {
+  color: var(--text-muted);
+  transition: transform 0.18s ease, color 0.15s;
+}
+.audit-row:hover .audit-chevron { color: var(--text-secondary); }
+.audit-row.expanded .audit-chevron {
+  transform: rotate(90deg);
+  color: var(--text-secondary);
 }
 
 .audit-head {
@@ -342,66 +358,72 @@ select.filter-input { cursor: pointer; padding-right: 6px; }
   background: color-mix(in srgb, var(--error) 12%, transparent);
 }
 
-/* ── Detail panel ── */
+/* ── Detail panel: SIEM field/value table (Splunk "Fields") ── */
+/* Flat, dense, edge-to-edge. Recessed into bg-void so it reads as part of the
+   row without a loud accent. No cards, no chips. */
 .audit-detail {
-  padding: var(--sp-4);
+  padding: 0;
   background: var(--bg-void);
-  border-bottom: 1px solid var(--border-subtle);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
+  border-bottom: 1px solid var(--border-default);
 }
 
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--sp-3);
+.field-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
 
-.detail-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+.field-row { border-bottom: 1px solid var(--border-subtle); }
+.field-row:last-child { border-bottom: none; }
+.field-row:hover { background: var(--bg-raised); }
+
+.field-key {
+  width: 180px;
+  padding: 5px var(--sp-3) 5px var(--sp-4);
+  vertical-align: top;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  border-right: 1px solid var(--border-subtle);
+  user-select: none;
 }
 
-.detail-item-wide {
-  grid-column: 1 / -1;
+.field-val {
+  padding: 5px var(--sp-4);
+  vertical-align: top;
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
-.detail-label {
+.field-hash { color: var(--text-secondary); word-break: break-all; }
+
+/* Raw JSON payloads — labelled, recessed code blocks. */
+.raw-block { border-top: 1px solid var(--border-default); }
+
+.raw-head {
+  padding: 6px var(--sp-4);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.detail-value {
-  font-size: 12px;
-  color: var(--text-primary);
-  word-break: break-word;
-}
-
-.detail-json-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-}
-
-.detail-json {
+.raw-json {
   margin: 0;
-  padding: var(--sp-3);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-sm);
+  padding: var(--sp-3) var(--sp-4);
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 320px;
+  max-height: 360px;
   overflow: auto;
 }
 

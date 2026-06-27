@@ -4,8 +4,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
 import type { RushEvent, Filter, CountBucket, QueryFilter, GroupResult, SavedQuery, TimeseriesBucket, TraceResponse, SpanNode, LogRecord, BubbleUpResponse } from '../types'
-import GroupBySelector from '../components/GroupBySelector.vue'
-import BreakdownPanel from '../components/BreakdownPanel.vue'
 import SavedQueries from '../components/SavedQueries.vue'
 import QueryHistory from '../components/QueryHistory.vue'
 import { useQueryHistory } from '../composables/useQueryHistory'
@@ -1229,17 +1227,6 @@ onUnmounted(() => {
   stopLive()
 })
 
-function addFilterFromBreakdown(field: string, value: string) {
-  if (showQueryBuilder.value) {
-    builderFilters.value = [
-      ...builderFilters.value,
-      { id: crypto.randomUUID(), field, op: '=', value },
-    ]
-  } else {
-    searchInput.value += ` ${field}=${value}`
-  }
-  search()
-}
 
 function loadSavedQuery(query: SavedQuery) {
   // Restore filters into the search bar (text-mode filter syntax: field=value).
@@ -4302,9 +4289,6 @@ onMounted(async () => {
         </div>
         <div class="toolbar-right">
           <TimePicker v-model="selectedPreset" v-model:custom-range="customRange" />
-          <button class="share-btn" @click="shareLink" :title="shareCopied ? 'Copied!' : 'Copy shareable link'">
-            {{ shareCopied ? '&#10003; Copied' : '&#128279; Share' }}
-          </button>
           <button class="live-btn" :class="{ active: liveMode }" @click="toggleLive()">
             <span class="live-dot"></span> Live
           </button>
@@ -4314,13 +4298,15 @@ onMounted(async () => {
             </svg>
             Export
           </button>
-          <GroupBySelector v-model="groupByField" />
           <SavedQueries
             :current-filters="savedQueryFilters"
             :current-group-by="groupByField"
             :current-time-preset="selectedPreset"
             @load="loadSavedQuery"
           />
+          <button class="share-btn" @click="shareLink" :title="shareCopied ? 'Copied!' : 'Copy shareable link'">
+            {{ shareCopied ? '&#10003; Copied' : '&#128279; Share' }}
+          </button>
           <QueryHistory
             :entries="exploreHistory ?? []"
             @load="loadHistoryEntry"
@@ -4819,15 +4805,6 @@ onMounted(async () => {
             </div>
           </div>
         </div>
-
-        <!-- ═══ Breakdown ═══ -->
-        <BreakdownPanel
-          v-if="groupByField"
-          :groups="groupResults"
-          :field="groupByField"
-          :loading="groupLoading"
-          @add-filter="addFilterFromBreakdown"
-        />
 
         <!-- ═══ Loading State (all modes) ═══ -->
         <div v-if="searching" class="empty-state card">

@@ -10,12 +10,13 @@ import path from 'path'
 // server against a different API.
 function runtimeConfigDev(): Plugin {
   const apiBaseUrl = process.env.API_PUBLIC_URL || 'http://localhost:8080'
+  const defaultTheme = process.env.DEFAULT_THEME || 'light'
   return {
     name: 'rush-runtime-config-dev',
     configureServer(server) {
       server.middlewares.use('/runtime-config.js', (_req, res) => {
         res.setHeader('Content-Type', 'application/javascript')
-        res.end(`window.__RUSH_CONFIG__=${JSON.stringify({ apiBaseUrl })};`)
+        res.end(`window.__RUSH_CONFIG__=${JSON.stringify({ apiBaseUrl, defaultTheme })};`)
       })
     },
   }
@@ -28,6 +29,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Allow tunneling through ngrok (and similar) for HTTPS-only IdP testing.
+    allowedHosts: ['.ngrok-free.app', '.ngrok.app', '.ngrok.io'],
     fs: {
       allow: [
         // Allow serving files from the SDK directory
@@ -40,6 +43,13 @@ export default defineConfig({
       '/api/v1/sessions': { target: 'http://localhost:8081', changeOrigin: true },
       '/api/v1/investigation-templates': { target: 'http://localhost:8081', changeOrigin: true },
       '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      // SSO endpoints (login initiation, ACS callback, logout) live on the backend.
+      // Without this, /auth/sso/login hits the SPA fallback and the auth guard
+      // bounces it back to /login?redirect=/auth/sso/login (a self-redirect loop).
+      '/auth': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },

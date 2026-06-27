@@ -1699,6 +1699,18 @@
   font-family: var(--font-mono);
   font-size: 12px;
 }
+.wizard-note {
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--amber-dim);
+  border-left: 2px solid var(--amber);
+  border-radius: var(--r-sm);
+}
+.wizard-note strong { color: var(--amber); }
+.wizard-note em { color: var(--text-primary); font-style: normal; font-weight: 600; }
 
 /* Copyable URL/value box */
 .wizard-copyable-box {

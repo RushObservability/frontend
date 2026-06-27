@@ -157,11 +157,6 @@ function prettyJson(raw: string): string {
   }
 }
 
-function shortHash(h: string): string {
-  if (!h) return '—'
-  return h.length > 16 ? `${h.slice(0, 8)}…${h.slice(-8)}` : h
-}
-
 // Tenants for the filter dropdown.
 const tenants = ref<{ id: string; name: string }[]>([])
 async function loadTenants() {
@@ -288,6 +283,7 @@ onMounted(() => {
     <!-- Results table -->
     <div v-else class="audit-table card">
       <div class="audit-head">
+        <span class="col-expand"></span>
         <span class="col-time">Time</span>
         <span class="col-actor">Actor</span>
         <span class="col-action">Action</span>
@@ -299,6 +295,9 @@ onMounted(() => {
 
       <template v-for="ev in events" :key="ev.id">
         <div class="audit-row" :class="{ expanded: isExpanded(ev.id) }" @click="toggleRow(ev.id)">
+          <span class="col-expand">
+            <svg class="audit-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </span>
           <span class="col-time mono text-muted">{{ formatTime(ev.timestamp) }}</span>
           <span class="col-actor">
             <span class="actor-name">{{ ev.actor_name || ev.actor_id || '—' }}</span>
@@ -318,47 +317,38 @@ onMounted(() => {
           <span class="col-ip mono text-muted">{{ ev.ip_address || '—' }}</span>
         </div>
 
-        <!-- Detail panel -->
-        <div v-if="isExpanded(ev.id)" class="audit-detail fade-in">
-          <div class="detail-grid">
-            <div class="detail-item">
-              <span class="detail-label">Seq</span>
-              <span class="detail-value mono">{{ ev.seq }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">Event ID</span>
-              <span class="detail-value mono">{{ ev.id }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">Request ID</span>
-              <span class="detail-value mono">{{ ev.request_id || '—' }}</span>
-            </div>
-            <div class="detail-item detail-item-wide">
-              <span class="detail-label">Description</span>
-              <span class="detail-value">{{ ev.description || '—' }}</span>
-            </div>
-            <div class="detail-item detail-item-wide">
-              <span class="detail-label">User agent</span>
-              <span class="detail-value mono">{{ ev.user_agent || '—' }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">Hash</span>
-              <span class="detail-value mono" :title="ev.hash">{{ shortHash(ev.hash) }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-label">Prev hash</span>
-              <span class="detail-value mono" :title="ev.prev_hash">{{ shortHash(ev.prev_hash) }}</span>
-            </div>
+        <!-- Detail panel — SIEM-style flat field/value table (Splunk "Fields") -->
+        <div v-if="isExpanded(ev.id)" class="audit-detail">
+          <table class="field-table">
+            <tbody>
+              <tr class="field-row"><td class="field-key">seq</td><td class="field-val mono">{{ ev.seq }}</td></tr>
+              <tr class="field-row"><td class="field-key">event_id</td><td class="field-val mono">{{ ev.id }}</td></tr>
+              <tr class="field-row"><td class="field-key">timestamp</td><td class="field-val mono">{{ formatTime(ev.timestamp) }}</td></tr>
+              <tr class="field-row"><td class="field-key">action</td><td class="field-val mono">{{ ev.action }}</td></tr>
+              <tr class="field-row"><td class="field-key">outcome</td><td class="field-val mono">{{ ev.outcome }}</td></tr>
+              <tr class="field-row"><td class="field-key">actor_name</td><td class="field-val">{{ ev.actor_name || '—' }}</td></tr>
+              <tr class="field-row"><td class="field-key">actor_id</td><td class="field-val mono">{{ ev.actor_id || '—' }}</td></tr>
+              <tr class="field-row"><td class="field-key">actor_type</td><td class="field-val mono">{{ ev.actor_type }}</td></tr>
+              <tr class="field-row"><td class="field-key">resource_type</td><td class="field-val mono">{{ ev.resource_type || '—' }}</td></tr>
+              <tr class="field-row"><td class="field-key">resource_id</td><td class="field-val mono">{{ ev.resource_id || '—' }}</td></tr>
+              <tr class="field-row"><td class="field-key">tenant_id</td><td class="field-val mono">{{ ev.tenant_id || '—' }}</td></tr>
+              <tr class="field-row"><td class="field-key">ip_address</td><td class="field-val mono">{{ ev.ip_address || '—' }}</td></tr>
+              <tr class="field-row"><td class="field-key">request_id</td><td class="field-val mono">{{ ev.request_id || '—' }}</td></tr>
+              <tr class="field-row"><td class="field-key">user_agent</td><td class="field-val mono">{{ ev.user_agent || '—' }}</td></tr>
+              <tr class="field-row"><td class="field-key">description</td><td class="field-val">{{ ev.description || '—' }}</td></tr>
+              <tr class="field-row"><td class="field-key">hash</td><td class="field-val mono field-hash">{{ ev.hash || '—' }}</td></tr>
+              <tr class="field-row"><td class="field-key">prev_hash</td><td class="field-val mono field-hash">{{ ev.prev_hash || '—' }}</td></tr>
+            </tbody>
+          </table>
+
+          <div class="raw-block">
+            <div class="raw-head">changes</div>
+            <pre class="raw-json mono">{{ prettyJson(ev.changes) }}</pre>
           </div>
 
-          <div class="detail-json-block">
-            <span class="detail-label">Changes</span>
-            <pre class="detail-json mono">{{ prettyJson(ev.changes) }}</pre>
-          </div>
-
-          <div v-if="ev.metadata && ev.metadata !== '{}'" class="detail-json-block">
-            <span class="detail-label">Metadata</span>
-            <pre class="detail-json mono">{{ prettyJson(ev.metadata) }}</pre>
+          <div v-if="ev.metadata && ev.metadata !== '{}'" class="raw-block">
+            <div class="raw-head">metadata</div>
+            <pre class="raw-json mono">{{ prettyJson(ev.metadata) }}</pre>
           </div>
         </div>
       </template>

@@ -8,6 +8,7 @@ import { useLicense } from './composables/useLicense'
 import { availableAddons } from './integrations/catalog'
 import { isAddonEnabled } from './composables/useIntegrationEnabled'
 import CommandPalette from './components/CommandPalette.vue'
+import { defaultTheme } from './config'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,9 +17,11 @@ const { tenants, activeTenantName, showSwitcher, loadTenants, setTenant, activeT
 const currentNav = computed(() => route.name as string)
 const isLoginPage = computed(() => route.name === 'login')
 
+// A saved preference always wins; otherwise fall back to the deploy default
+// (DEFAULT_THEME env var, defaults to light when unset).
 const _storedTheme = localStorage.getItem('rush-theme')
 const theme = ref<'dark' | 'light'>(
-  _storedTheme === 'dark' || _storedTheme === 'light' ? _storedTheme : 'dark'
+  _storedTheme === 'dark' || _storedTheme === 'light' ? _storedTheme : defaultTheme()
 )
 const appEnv = import.meta.env.MODE
 

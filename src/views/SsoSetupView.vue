@@ -26,8 +26,8 @@ const wizardClientSecret = ref('')
 const wizardOidcScopes = ref('openid profile email groups')
 const wizardGroupsClaim = ref('groups')
 const wizardEmailClaim = ref('email')
-const wizardFirstNameClaim = ref('given_name')
-const wizardLastNameClaim = ref('family_name')
+const wizardFirstNameClaim = ref('first_name')
+const wizardLastNameClaim = ref('last_name')
 const wizardProviderName = ref('')
 
 // ── Validation helpers ──
@@ -75,8 +75,9 @@ const stepValid = computed(() => {
   const e = fieldErrors.value
 
   if (p === 'google') {
-    if (step <= 2) return true
-    if (step === 3) return !e.ssoUrl && !e.cert
+    if (step === 1) return true
+    if (step === 2) return !e.ssoUrl && !e.cert
+    if (step === 3) return true
     if (step === 4) return true
     if (step === 5) return !e.ssoUrl && !e.cert && !e.emailClaim
   }
@@ -174,8 +175,8 @@ async function saveSetup() {
       jit_provisioning: true,
       groups_claim: wizardGroupsClaim.value || 'groups',
       email_claim: wizardEmailClaim.value || 'email',
-      first_name_claim: wizardFirstNameClaim.value || 'given_name',
-      last_name_claim: wizardLastNameClaim.value || 'family_name',
+      first_name_claim: wizardFirstNameClaim.value || 'first_name',
+      last_name_claim: wizardLastNameClaim.value || 'last_name',
       default_group_id: '',
     }
     if (protocol === 'oidc') {
@@ -255,6 +256,21 @@ async function saveSetup() {
           </div>
 
           <div v-if="guidedStep === 2" class="wizard-step-content">
+            <div class="wizard-title">Enter your IdP details</div>
+            <div class="wizard-instruction">In Google admin, download the certificate and copy the SSO URL:</div>
+            <div class="form-group-inline">
+              <label class="form-label">IdP Certificate</label>
+              <textarea v-model="wizardCert" :class="['form-input', 'mono', { 'input-error': touched.cert && fieldErrors.cert }]" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="font-size: 11px; resize: vertical;" @blur="touchField('cert')"></textarea>
+              <div v-if="touched.cert && fieldErrors.cert" class="field-error">{{ fieldErrors.cert }}</div>
+            </div>
+            <div class="form-group-inline">
+              <label class="form-label">SSO URL</label>
+              <input v-model="wizardSsoUrl" :class="['form-input', 'mono', { 'input-error': touched.ssoUrl && fieldErrors.ssoUrl }]" placeholder="https://accounts.google.com/o/saml2/idp?idpid=..." @blur="touchField('ssoUrl')" />
+              <div v-if="touched.ssoUrl && fieldErrors.ssoUrl" class="field-error">{{ fieldErrors.ssoUrl }}</div>
+            </div>
+          </div>
+
+          <div v-if="guidedStep === 3" class="wizard-step-content">
             <div class="wizard-title">Copy these values into Google admin</div>
             <div class="form-group-inline">
               <label class="form-label">ACS URL</label>
@@ -273,42 +289,31 @@ async function saveSetup() {
             <div class="wizard-instruction">Set Name ID format to <strong>Email</strong>.</div>
           </div>
 
-          <div v-if="guidedStep === 3" class="wizard-step-content">
-            <div class="wizard-title">Enter your IdP details</div>
-            <div class="wizard-instruction">In Google admin, download the certificate and copy the SSO URL:</div>
-            <div class="form-group-inline">
-              <label class="form-label">IdP Certificate</label>
-              <textarea v-model="wizardCert" :class="['form-input', 'mono', { 'input-error': touched.cert && fieldErrors.cert }]" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="font-size: 11px; resize: vertical;" @blur="touchField('cert')"></textarea>
-              <div v-if="touched.cert && fieldErrors.cert" class="field-error">{{ fieldErrors.cert }}</div>
-            </div>
-            <div class="form-group-inline">
-              <label class="form-label">SSO URL</label>
-              <input v-model="wizardSsoUrl" :class="['form-input', 'mono', { 'input-error': touched.ssoUrl && fieldErrors.ssoUrl }]" placeholder="https://accounts.google.com/o/saml2/idp?idpid=..." @blur="touchField('ssoUrl')" />
-              <div v-if="touched.ssoUrl && fieldErrors.ssoUrl" class="field-error">{{ fieldErrors.ssoUrl }}</div>
-            </div>
-          </div>
-
           <div v-if="guidedStep === 4" class="wizard-step-content">
             <div class="wizard-title">Configure attributes and claim mapping</div>
-            <div class="wizard-instruction">In Google admin under Attribute Mapping, add:</div>
-            <div class="wizard-copyable-box"><code>groups</code></div>
-            <div class="wizard-instruction">Map it to <strong>Google Groups</strong>.</div>
-            <div class="form-group-inline" style="margin-top: var(--sp-2);">
+            <div class="wizard-instruction">In Google admin under <strong>Attributes</strong>, map your Google Directory fields to these App attribute names:</div>
+            <div class="form-group-inline">
               <label class="form-label">Email Claim</label>
               <input v-model="wizardEmailClaim" :class="['form-input', 'mono', { 'input-error': touched.emailClaim && fieldErrors.emailClaim }]" placeholder="email" @blur="touchField('emailClaim')" />
               <div v-if="touched.emailClaim && fieldErrors.emailClaim" class="field-error">{{ fieldErrors.emailClaim }}</div>
-              <div class="field-hint">The claim/attribute name containing the user's email address</div>
+              <div class="field-hint">Map <strong>Primary email</strong> → this App attribute name (required)</div>
             </div>
             <div class="form-group-inline">
               <label class="form-label">First Name Claim</label>
-              <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="FirstName" />
-              <div class="field-hint">The claim for the user's first name (OIDC: given_name, SAML: FirstName)</div>
+              <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="first_name" />
+              <div class="field-hint">Map <strong>First name</strong> → this App attribute name (optional)</div>
             </div>
             <div class="form-group-inline">
               <label class="form-label">Last Name Claim</label>
-              <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="LastName" />
-              <div class="field-hint">The claim for the user's last name (OIDC: family_name, SAML: LastName)</div>
+              <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="last_name" />
+              <div class="field-hint">Map <strong>Last name</strong> → this App attribute name (optional)</div>
             </div>
+            <div class="wizard-instruction" style="margin-top: var(--sp-3);">Then open the <strong>Group membership</strong> section (separate from Attributes), select the Google Groups to include, and set the <strong>App attribute</strong> name to:</div>
+            <div class="wizard-copyable-box"><code>groups</code></div>
+            <div class="wizard-note">
+              <strong>Note:</strong> Each Google group you send only grants access if a group with the <em>same name</em> exists in Rush. Create the matching group under <strong>Settings &rarr; Groups</strong> first, otherwise members sign in with no permissions.
+            </div>
+            <div class="wizard-instruction" style="margin-top: var(--sp-3);">Finally, open the app's <strong>User access</strong> section. A new app defaults to <strong>OFF for everyone</strong> &mdash; turn it <strong>ON for everyone</strong> (or for the chosen org units/groups) so users can sign in.</div>
           </div>
 
           <div v-if="guidedStep === 5" class="wizard-step-content">
@@ -364,12 +369,12 @@ async function saveSetup() {
             <div class="form-group-inline">
               <label class="form-label">First Name Claim</label>
               <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="FirstName" />
-              <div class="field-hint">The claim for the user's first name (OIDC: given_name, SAML: FirstName)</div>
+              <div class="field-hint">The claim for the user's first name (OIDC: first_name, SAML: FirstName)</div>
             </div>
             <div class="form-group-inline">
               <label class="form-label">Last Name Claim</label>
               <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="LastName" />
-              <div class="field-hint">The claim for the user's last name (OIDC: family_name, SAML: LastName)</div>
+              <div class="field-hint">The claim for the user's last name (OIDC: last_name, SAML: LastName)</div>
             </div>
           </div>
 
@@ -439,12 +444,12 @@ async function saveSetup() {
             <div class="form-group-inline">
               <label class="form-label">First Name Claim</label>
               <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="FirstName" />
-              <div class="field-hint">The claim for the user's first name (OIDC: given_name, SAML: FirstName)</div>
+              <div class="field-hint">The claim for the user's first name (OIDC: first_name, SAML: FirstName)</div>
             </div>
             <div class="form-group-inline">
               <label class="form-label">Last Name Claim</label>
               <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="LastName" />
-              <div class="field-hint">The claim for the user's last name (OIDC: family_name, SAML: LastName)</div>
+              <div class="field-hint">The claim for the user's last name (OIDC: last_name, SAML: LastName)</div>
             </div>
           </div>
 
@@ -522,13 +527,13 @@ async function saveSetup() {
             </div>
             <div class="form-group-inline">
               <label class="form-label">First Name Claim</label>
-              <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="given_name" />
-              <div class="field-hint">The claim for the user's first name (OIDC: given_name, SAML: FirstName)</div>
+              <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="first_name" />
+              <div class="field-hint">The claim for the user's first name (OIDC: first_name, SAML: FirstName)</div>
             </div>
             <div class="form-group-inline">
               <label class="form-label">Last Name Claim</label>
-              <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="family_name" />
-              <div class="field-hint">The claim for the user's last name (OIDC: family_name, SAML: LastName)</div>
+              <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="last_name" />
+              <div class="field-hint">The claim for the user's last name (OIDC: last_name, SAML: LastName)</div>
             </div>
           </div>
 
@@ -588,12 +593,12 @@ async function saveSetup() {
             <div class="form-group-inline">
               <label class="form-label">First Name Claim</label>
               <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="FirstName" />
-              <div class="field-hint">The claim for the user's first name (OIDC: given_name, SAML: FirstName)</div>
+              <div class="field-hint">The claim for the user's first name (OIDC: first_name, SAML: FirstName)</div>
             </div>
             <div class="form-group-inline">
               <label class="form-label">Last Name Claim</label>
               <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="LastName" />
-              <div class="field-hint">The claim for the user's last name (OIDC: family_name, SAML: LastName)</div>
+              <div class="field-hint">The claim for the user's last name (OIDC: last_name, SAML: LastName)</div>
             </div>
           </div>
 
@@ -779,6 +784,18 @@ async function saveSetup() {
   color: var(--text-secondary);
   line-height: 1.6;
 }
+.wizard-note {
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--amber-dim);
+  border-left: 2px solid var(--amber);
+  border-radius: var(--r-sm);
+}
+.wizard-note strong { color: var(--amber); }
+.wizard-note em { color: var(--text-primary); font-style: normal; font-weight: 600; }
 .wizard-instruction strong {
   color: var(--text-primary);
 }
