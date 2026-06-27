@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import InvestigationPanel from '../components/InvestigationPanel.vue'
 import PanelCard from '../components/PanelCard.vue'
-import type { AnomalyRule, AnomalyEvent, CorrelationResponse, LogRecord, RushEvent } from '../types'
+import type { AnomalyRule, AnomalyEvent, CorrelationResponse, LogRecord, RushEvent, TimeseriesBucket } from '../types'
 
 const props = defineProps<{ ruleId: string }>()
 const route = useRoute()
@@ -110,7 +110,7 @@ async function loadRule() {
 }
 
 async function fetchChart() {
-  if (!rule.value || rule.value.source === 'apm') return
+  if (!rule.value) return
 
   const focusedEvent = focusedEventId.value
     ? (events.value.find(e => e.id === focusedEventId.value) || individualEvent.value)
@@ -129,6 +129,10 @@ async function fetchChart() {
     end = Math.floor(Date.now() / 1000)
     start = end - range.seconds
   }
+
+  // APM monitors aren't in Prometheus — chart their service metric from the
+  // span-derived timeseries (same source the anomaly list uses).
+  if (rule.value.source === 'apm') { await fetchApmChart(start, end, range.seconds); return }
 
   const splitLabels = rule.value.split_labels?.length ? rule.value.split_labels : undefined
 
@@ -179,6 +183,51 @@ async function fetchChart() {
       })
     }
     chartData.value = series
+  } catch {
+    chartData.value = []
+  }
+}
+
+// APM monitor chart: pull the service's span-derived timeseries for the window
+// and project the bucket field named by the monitor's apm_metric, then run the
+// same EWMA band/anomaly overlay as the Prometheus path.
+async function fetchApmChart(start: number, end: number, windowSeconds: number) {
+  const svc = rule.value?.service_name
+  const metric = rule.value?.apm_metric || ''
+  if (!svc) { chartData.value = []; return }
+  const interval = windowSeconds <= 3600 ? '1m' : windowSeconds <= 21600 ? '5m' : '15m'
+  try {
+    const resp = await api.queryTimeseries({
+      time_range: { from: new Date(start * 1000).toISOString(), to: new Date(end * 1000).toISOString() },
+      filters: [{ field: 'service_name', op: '=', value: svc }],
+      interval,
+    })
+    const buckets = (resp.buckets || []) as TimeseriesBucket[]
+    if (!buckets.length) { chartData.value = []; return }
+    // Drop the last bucket — it may be a partial interval with incomplete data.
+    const trimmed = buckets.slice(0, -1)
+    const timestamps = trimmed.map(b => new Date(b.bucket).getTime())
+    let values: number[]
+    switch (metric) {
+      case 'error_rate': values = trimmed.map(b => b.error_count); break
+      case 'p50': values = trimmed.map(b => b.p50_ms); break
+      case 'p95': values = trimmed.map(b => b.p95_ms); break
+      case 'p99': values = trimmed.map(b => b.p99_ms); break
+      default: values = trimmed.map(b => b.count)
+    }
+    if (values.length < 3) { chartData.value = []; return }
+    const bands = computeBands(values, rule.value!.alpha, rule.value!.sensitivity)
+    const allVals = [...values, ...bands.upper]
+    const maxVal = allVals.length ? Math.max(...allVals) * 1.1 : 1
+    chartData.value = [{
+      name: `${svc}:${metric}`,
+      query: `apm:${svc}:${metric}`,
+      timestamps,
+      values,
+      bands,
+      maxVal,
+      anomalyCount: countAnomalyStreaks(bands.anomalies),
+    }]
   } catch {
     chartData.value = []
   }

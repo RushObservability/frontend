@@ -509,19 +509,19 @@
   padding: 0 12px;
   font-size: 12px;
   font-weight: 500;
-  color: #1a1a2e;
-  background: linear-gradient(135deg, #3b82f6 0%, #e0c068 100%);
-  border: none;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
   border-radius: var(--r-md);
   cursor: pointer;
-  transition: opacity 0.15s, transform 0.1s;
+  transition: color 0.15s, border-color 0.15s, transform 0.1s;
   white-space: nowrap;
 }
 
-.btn-ai:hover { opacity: 0.9; }
+.btn-ai:hover { color: var(--amber); border-color: var(--amber); }
 .btn-ai:active { transform: scale(0.97); }
 .btn-ai:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-ai svg { stroke: #1a1a2e; }
+.btn-ai svg { stroke: currentColor; }
 
 /* ═══ AI Drawer ═══ */
 .ai-drawer-backdrop {

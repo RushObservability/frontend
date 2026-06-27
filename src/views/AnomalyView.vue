@@ -75,6 +75,19 @@ const activeTab = ref<Tab>(initTab)
 const serverEvents = ref<AnomalyEventWithRule[]>([])
 const serverEventsLoaded = ref(false)
 
+// History pagination — a full-height paged table instead of a 300px inner scroll.
+const HISTORY_PER_PAGE = 50
+const historyPage = ref(1)
+const historyPageCount = computed(() => Math.max(1, Math.ceil(serverEvents.value.length / HISTORY_PER_PAGE)))
+const historyRangeStart = computed(() => serverEvents.value.length ? (historyPage.value - 1) * HISTORY_PER_PAGE + 1 : 0)
+const historyRangeEnd = computed(() => Math.min(historyPage.value * HISTORY_PER_PAGE, serverEvents.value.length))
+const pagedEvents = computed(() =>
+  serverEvents.value.slice((historyPage.value - 1) * HISTORY_PER_PAGE, historyPage.value * HISTORY_PER_PAGE)
+)
+function goHistoryPage(p: number) {
+  historyPage.value = Math.min(Math.max(1, p), historyPageCount.value)
+}
+
 function setTab(tab: Tab) {
   activeTab.value = tab
   router.replace({ query: { ...route.query, tab } })
@@ -100,6 +113,7 @@ async function loadServerEvents() {
     const resp = await api.listAllAnomalyEvents()
     serverEvents.value = resp.events
     serverEventsLoaded.value = true
+    historyPage.value = 1
   } catch {
     serverEvents.value = []
   }
@@ -973,7 +987,7 @@ onUnmounted(() => {
         </div>
         <div class="events-body">
           <router-link
-            v-for="ev in serverEvents" :key="ev.id"
+            v-for="ev in pagedEvents" :key="ev.id"
             :to="{ name: 'anomaly-detail', params: { ruleId: ev.rule_id }, query: { event: ev.id } }"
             class="events-row clickable"
           >
@@ -989,6 +1003,14 @@ onUnmounted(() => {
               <router-link :to="anomalyBubbleUpUrl(ev)" class="btn-bubbleup-sm">⬡ BubbleUp</router-link>
             </span>
           </router-link>
+        </div>
+        <div class="events-pager" v-if="serverEvents.length">
+          <span class="events-pager-info mono">{{ historyRangeStart }}–{{ historyRangeEnd }} of {{ serverEvents.length }}</span>
+          <div class="events-pager-controls" v-if="historyPageCount > 1">
+            <button class="pager-btn" :disabled="historyPage === 1" @click="goHistoryPage(historyPage - 1)">‹ Prev</button>
+            <span class="pager-page mono">{{ historyPage }} / {{ historyPageCount }}</span>
+            <button class="pager-btn" :disabled="historyPage === historyPageCount" @click="goHistoryPage(historyPage + 1)">Next ›</button>
+          </div>
         </div>
       </div>
       <div class="empty-panel card" v-else>

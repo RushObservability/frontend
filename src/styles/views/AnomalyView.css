@@ -841,9 +841,33 @@
 }
 
 .events-body {
-  max-height: 300px;
-  overflow-y: auto;
+  /* full-height, paginated — no inner scroll region */
 }
+
+.events-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-overlay);
+}
+.events-pager-info { font-size: 11px; color: var(--text-muted); }
+.events-pager-controls { display: flex; align-items: center; gap: var(--sp-2); }
+.pager-page { font-size: 11px; color: var(--text-secondary); min-width: 52px; text-align: center; }
+.pager-btn {
+  padding: var(--sp-1) var(--sp-3);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.pager-btn:hover:not(:disabled) { border-color: var(--amber); color: var(--amber); }
+.pager-btn:disabled { opacity: 0.4; cursor: default; }
 
 .events-row {
   display: flex;
