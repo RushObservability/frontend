@@ -38,10 +38,9 @@ export default defineConfig({
       ],
     },
     proxy: {
-      // SRE agent service (more specific routes must come before /api)
-      '/api/v1/investigate': { target: 'http://localhost:8081', changeOrigin: true },
-      '/api/v1/sessions': { target: 'http://localhost:8081', changeOrigin: true },
-      '/api/v1/investigation-templates': { target: 'http://localhost:8081', changeOrigin: true },
+      // SRE-agent routes (/investigate, /sessions, /investigation-templates) are
+      // no longer split out here — query-api fronts the agent and forwards them,
+      // so they flow through the general /api proxy below.
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
