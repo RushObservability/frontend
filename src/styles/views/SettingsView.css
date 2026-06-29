@@ -1270,6 +1270,26 @@
   background: #c93b33;
 }
 
+/* ── IdP group mapping modal (form variant of delete-modal) ── */
+.mapping-modal {
+  width: 440px;
+  align-items: stretch;
+  text-align: left;
+  gap: var(--sp-4);
+}
+.mapping-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.mapping-modal .form-group-inline {
+  width: 100%;
+}
+.mapping-modal .delete-modal-actions {
+  margin-top: var(--sp-1);
+}
+
 /* ── Modal transitions ── */
 .modal-enter-active { transition: opacity 160ms ease-out; }
 .modal-enter-active .delete-modal { transition: transform 160ms ease-out, opacity 160ms ease-out; }
@@ -1383,6 +1403,10 @@
 }
 
 /* Group mappings list */
+.auth-mappings-footer {
+  display: flex;
+  margin-top: var(--sp-3);
+}
 .auth-mappings-hint {
   font-size: 12px;
   line-height: 1.5;
@@ -1442,9 +1466,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.auth-mapping-delete {
+.auth-mapping-icon-btn {
   flex-shrink: 0;
-  margin-left: var(--sp-1);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1457,6 +1480,13 @@
   border-radius: var(--r-sm);
   cursor: pointer;
   transition: color 0.15s, background 0.15s;
+}
+.auth-mapping-icon-btn:first-of-type {
+  margin-left: var(--sp-1);
+}
+.auth-mapping-icon-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 .auth-mapping-delete:hover {
   color: var(--danger, #ef4444);
@@ -1471,20 +1501,9 @@
   background: var(--bg-raised);
   border: 1px dashed var(--border-default);
   border-radius: var(--r-md);
-  margin-bottom: var(--sp-3);
 }
 
-/* Add-mapping row */
-.auth-mapping-add {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-.auth-mapping-add .form-input {
-  flex: 1 1 0;
-  min-width: 0;
-  font-size: 12px;
-}
+/* Add-mapping button */
 .auth-mapping-add-btn {
   flex-shrink: 0;
   white-space: nowrap;

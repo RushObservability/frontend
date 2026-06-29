@@ -548,8 +548,10 @@ const ssoClientSecret = ref('')
 const ssoMappings = ref<IdpGroupMapping[]>([])
 const ssoSaved = ref(false)
 const ssoLoaded = ref(false)
-const newMappingIdpGroup = ref('')
-const newMappingRushGroupId = ref('')
+const showMappingForm = ref(false)
+const editingMappingId = ref<string | null>(null)
+const mappingIdpGroup = ref('')
+const mappingRushGroupId = ref('')
 
 async function loadSsoConfig() {
   try {
@@ -581,19 +583,45 @@ async function saveSsoConfig() {
   }
 }
 
-async function addSsoMapping() {
-  if (!newMappingIdpGroup.value || !newMappingRushGroupId.value) return
+function openMappingForm(m?: IdpGroupMapping) {
+  if (m) {
+    editingMappingId.value = m.id
+    mappingIdpGroup.value = m.idp_group
+    mappingRushGroupId.value = m.rush_group_id
+  } else {
+    editingMappingId.value = null
+    mappingIdpGroup.value = ''
+    mappingRushGroupId.value = ''
+  }
+  showMappingForm.value = true
+}
+
+function closeMappingForm() {
+  showMappingForm.value = false
+  editingMappingId.value = null
+  mappingIdpGroup.value = ''
+  mappingRushGroupId.value = ''
+}
+
+async function saveMappingForm() {
+  if (!mappingIdpGroup.value || !mappingRushGroupId.value) return
   try {
-    await api.createIdpGroupMapping({
-      idp_group: newMappingIdpGroup.value,
-      rush_group_id: newMappingRushGroupId.value,
-      provider_id: ssoProvider.value.id || 'default',
-    })
-    newMappingIdpGroup.value = ''
-    newMappingRushGroupId.value = ''
+    if (editingMappingId.value) {
+      await api.updateIdpGroupMapping(editingMappingId.value, {
+        idp_group: mappingIdpGroup.value,
+        rush_group_id: mappingRushGroupId.value,
+      })
+    } else {
+      await api.createIdpGroupMapping({
+        idp_group: mappingIdpGroup.value,
+        rush_group_id: mappingRushGroupId.value,
+        provider_id: ssoProvider.value.id || 'default',
+      })
+    }
+    closeMappingForm()
     await loadSsoConfig()
   } catch (e: any) {
-    alert('Failed to add mapping: ' + (e.message || e))
+    alert('Failed to save mapping: ' + (e.message || e))
   }
 }
 
@@ -2432,26 +2460,70 @@ function formatDate(ts: string): string {
                 <span class="auth-mapping-idp mono">{{ m.idp_group }}</span>
                 <svg class="auth-mapping-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="17" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>
                 <span class="auth-mapping-rush"><span class="auth-mapping-tag">{{ groupNameById(m.rush_group_id) }}</span></span>
-                <button class="auth-mapping-delete" title="Remove mapping" @click="removeSsoMapping(m.id)" aria-label="Remove mapping">
+                <button class="auth-mapping-icon-btn" title="Edit mapping" @click="openMappingForm(m)" aria-label="Edit mapping">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <button class="auth-mapping-icon-btn auth-mapping-delete" title="Remove mapping" @click="removeSsoMapping(m.id)" aria-label="Remove mapping">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                 </button>
               </div>
             </div>
             <div v-else class="auth-mappings-empty">No group mappings configured yet.</div>
 
-            <div class="auth-mapping-add">
-              <input v-model="newMappingIdpGroup" class="form-input mono" placeholder="IdP group name" @keyup.enter="addSsoMapping" />
-              <svg class="auth-mapping-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="17" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>
-              <select v-model="newMappingRushGroupId" class="form-input">
-                <option value="" disabled>Select Rush group</option>
-                <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
-              </select>
-              <button class="btn btn-primary auth-mapping-add-btn" :disabled="!newMappingIdpGroup || !newMappingRushGroupId" @click="addSsoMapping">Add</button>
+            <div class="auth-mappings-footer">
+              <button class="btn btn-primary auth-mapping-add-btn" @click="openMappingForm()">+ Add Mapping</button>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- IdP Group Mapping Modal (centered pop-up) -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="showMappingForm" class="delete-modal-overlay" @click.self="closeMappingForm">
+          <div class="delete-modal mapping-modal" role="dialog" aria-label="IdP group mapping">
+            <div class="mapping-modal-header">
+              <span class="delete-modal-title">{{ editingMappingId ? 'Edit Group Mapping' : 'Add Group Mapping' }}</span>
+              <button class="group-drawer-close" @click="closeMappingForm" aria-label="Close">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M18 6 6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            <p class="text-secondary fs-11" style="line-height: 1.5; margin: 0; width: 100%;">
+              Map a group from your identity provider to a Rush permission group. Users in this IdP group are assigned the Rush group on sign-in.
+            </p>
+            <div class="form-group-inline">
+              <label class="form-label">IdP Group Name</label>
+              <input
+                v-model="mappingIdpGroup"
+                class="form-input mono"
+                placeholder="e.g. engineering"
+                @keyup.enter="saveMappingForm"
+              />
+            </div>
+            <div class="form-group-inline">
+              <label class="form-label">Rush Group</label>
+              <select v-model="mappingRushGroupId" class="form-input">
+                <option value="" disabled>Select Rush group</option>
+                <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+              </select>
+            </div>
+            <div class="delete-modal-actions">
+              <button class="btn btn-secondary" @click="closeMappingForm">Cancel</button>
+              <button
+                class="btn btn-primary"
+                @click="saveMappingForm"
+                :disabled="!mappingIdpGroup || !mappingRushGroupId"
+              >
+                {{ editingMappingId ? 'Save' : 'Add Mapping' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- SSO Wizard Modal -->
     <Teleport to="body">

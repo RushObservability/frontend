@@ -1148,6 +1148,16 @@ export function useApi() {
     })
   }
 
+  async function updateIdpGroupMapping(id: string, data: {
+    idp_group: string
+    rush_group_id: string
+  }): Promise<{ ok: boolean }> {
+    return await request(`/sso/mappings/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
   async function deleteIdpGroupMapping(id: string): Promise<void> {
     await request(`/sso/mappings/${encodeURIComponent(id)}`, { method: 'DELETE' })
   }
@@ -1518,7 +1528,7 @@ export function useApi() {
     getK8sSummary, getK8sNamespaces, getK8sResources, getK8sResource,
     listCustomSkills, getCustomSkill, createCustomSkill, updateCustomSkill, deleteCustomSkill,
     listDetectionRules, getDetectionRule, createDetectionRule, updateDetectionRule, deleteDetectionRule, testDetectionRule, listDetectionEvents,
-    getSsoStatus, listSsoProviders, saveSsoProvider, deleteSsoProvider, listIdpGroupMappings, createIdpGroupMapping, deleteIdpGroupMapping, createSetupToken, validateSetupToken, completeSetupToken,
+    getSsoStatus, listSsoProviders, saveSsoProvider, deleteSsoProvider, listIdpGroupMappings, createIdpGroupMapping, updateIdpGroupMapping, deleteIdpGroupMapping, createSetupToken, validateSetupToken, completeSetupToken,
     listGroups, createGroup, updateGroup, deleteGroup, setGroupTenants, getUserGroups, setUserGroups,
     listTenants, createTenant, deleteTenant, toggleTenant, setTenantAuthRequired, getTenantRetention, setTenantRetention, deleteTenantRetention, getTenantSignals, setTenantSignals, getGlobalRetention, setGlobalRetention,
     listUsers, createUser, deleteUser, changeUserPassword, toggleUser,
