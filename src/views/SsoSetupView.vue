@@ -84,7 +84,7 @@ const stepValid = computed(() => {
   if (p === 'okta') {
     if (step <= 2) return true // create app + configure SAML (one Okta page)
     if (step === 3) return !e.ssoUrl && !e.cert // enter IdP details
-    if (step === 4) return !e.ssoUrl && !e.cert && !e.emailClaim // review
+    if (step === 4) return !e.ssoUrl && !e.cert // review (email/name come from NameID)
   }
   if (p === 'azure') {
     if (step <= 2) return true
@@ -385,9 +385,6 @@ async function saveSetup() {
               <div class="wizard-review-row"><span class="wizard-review-label">SSO URL</span><span :class="fieldErrors.ssoUrl ? 'review-invalid' : 'review-valid'">{{ fieldErrors.ssoUrl ? '!' : '' }}</span><code class="mono" style="word-break: break-all;">{{ wizardSsoUrl || '(not set)' }}</code></div>
               <div class="wizard-review-row"><span class="wizard-review-label">Entity ID</span><code class="mono">{{ hostname }}</code></div>
               <div class="wizard-review-row"><span class="wizard-review-label">Certificate</span><span :class="fieldErrors.cert ? 'review-invalid' : 'review-valid'">{{ fieldErrors.cert ? '!' : '' }}</span><span>{{ wizardCert ? 'Provided' : 'Not set' }}</span></div>
-              <div class="wizard-review-row"><span class="wizard-review-label">Email Claim</span><code class="mono">{{ wizardEmailClaim }}</code></div>
-              <div class="wizard-review-row"><span class="wizard-review-label">First Name</span><code class="mono">{{ wizardFirstNameClaim }}</code></div>
-              <div class="wizard-review-row"><span class="wizard-review-label">Last Name</span><code class="mono">{{ wizardLastNameClaim }}</code></div>
             </div>
           </div>
         </template>

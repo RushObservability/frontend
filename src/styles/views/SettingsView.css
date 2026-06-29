@@ -1383,16 +1383,115 @@
 }
 
 /* Group mappings list */
+.auth-mappings-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 60ch;
+  margin: 0 0 var(--sp-3);
+}
 .auth-mappings-list {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
 }
 .auth-mapping-row {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   font-size: 12px;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  transition: border-color 0.15s;
+}
+.auth-mapping-row:hover {
+  border-color: var(--border-default);
+}
+.auth-mapping-idp {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.auth-mapping-arrow {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.auth-mapping-rush {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.auth-mapping-tag {
+  max-width: 100%;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--amber);
+  background: var(--amber-dim);
+  border: 1px solid var(--amber-muted);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.auth-mapping-delete {
+  flex-shrink: 0;
+  margin-left: var(--sp-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.auth-mapping-delete:hover {
+  color: var(--danger, #ef4444);
+  background: rgba(239, 68, 68, 0.12);
+}
+.auth-mappings-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: var(--sp-3);
+  text-align: center;
+  background: var(--bg-raised);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--r-md);
+  margin-bottom: var(--sp-3);
+}
+
+/* Add-mapping row */
+.auth-mapping-add {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.auth-mapping-add .form-input {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 12px;
+}
+.auth-mapping-add-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.auth-mapping-add-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Magic setup link box */

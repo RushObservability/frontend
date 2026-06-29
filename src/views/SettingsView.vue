@@ -696,7 +696,7 @@ const wizardStepValid = computed(() => {
   if (p === 'okta') {
     if (step <= 2) return true // create app + configure SAML (one Okta page)
     if (step === 3) return !e.ssoUrl && !e.cert // enter IdP details
-    if (step === 4) return !e.ssoUrl && !e.cert && !e.emailClaim // review
+    if (step === 4) return !e.ssoUrl && !e.cert // review (email/name come from NameID)
     return true
   }
   if (p === 'azure') {
@@ -2425,31 +2425,28 @@ function formatDate(ts: string): string {
           <!-- Group Mappings -->
           <div class="auth-section-block">
             <div class="auth-section-label">IdP Group Mappings</div>
+            <p class="auth-mappings-hint">Map groups from your identity provider to Rush permission groups. Users are assigned the matching group on sign-in.</p>
+
             <div v-if="ssoMappings.length > 0" class="auth-mappings-list">
               <div v-for="m in ssoMappings" :key="m.id" class="auth-mapping-row">
-                <span class="mono" style="flex: 1;">{{ m.idp_group }}</span>
-                <span class="text-muted" style="margin: 0 var(--sp-1);">-></span>
-                <span style="flex: 1;">{{ groupNameById(m.rush_group_id) }}</span>
-                <button class="action-btn action-btn-danger" @click="removeSsoMapping(m.id)" style="font-size: 11px;">Delete</button>
+                <span class="auth-mapping-idp mono">{{ m.idp_group }}</span>
+                <svg class="auth-mapping-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="17" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>
+                <span class="auth-mapping-rush"><span class="auth-mapping-tag">{{ groupNameById(m.rush_group_id) }}</span></span>
+                <button class="auth-mapping-delete" title="Remove mapping" @click="removeSsoMapping(m.id)" aria-label="Remove mapping">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
               </div>
             </div>
-            <div v-else class="text-muted" style="font-size: 12px; margin-bottom: var(--sp-2);">No group mappings configured</div>
-            <div style="display: flex; gap: var(--sp-2); align-items: center; margin-top: var(--sp-2);">
-              <input v-model="newMappingIdpGroup" class="form-input mono" placeholder="IdP group name" style="flex: 1; font-size: 12px;" />
-              <select v-model="newMappingRushGroupId" class="form-input" style="flex: 1; font-size: 12px;">
+            <div v-else class="auth-mappings-empty">No group mappings configured yet.</div>
+
+            <div class="auth-mapping-add">
+              <input v-model="newMappingIdpGroup" class="form-input mono" placeholder="IdP group name" @keyup.enter="addSsoMapping" />
+              <svg class="auth-mapping-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="17" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>
+              <select v-model="newMappingRushGroupId" class="form-input">
                 <option value="" disabled>Select Rush group</option>
                 <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
               </select>
-              <button class="btn btn-primary" @click="addSsoMapping" style="font-size: 11px; white-space: nowrap;">+ Add</button>
-            </div>
-          </div>
-
-          <!-- SP Metadata URL (SAML) -->
-          <div v-if="ssoProvider.protocol === 'saml'" class="auth-section-block">
-            <div class="auth-section-label">SP Metadata</div>
-            <div style="font-size: 12px; color: var(--text-secondary);">
-              Paste this URL into your IdP:
-              <a href="/auth/sso/metadata" target="_blank" class="mono" style="color: var(--amber);">/auth/sso/metadata</a>
+              <button class="btn btn-primary auth-mapping-add-btn" :disabled="!newMappingIdpGroup || !newMappingRushGroupId" @click="addSsoMapping">Add</button>
             </div>
           </div>
         </div>
@@ -2650,29 +2647,8 @@ function formatDate(ts: string): string {
                   </div>
                 </div>
                 <div class="wizard-instruction mt-2">Set <strong>Name ID format</strong> to <strong>EmailAddress</strong>, then click <strong>Next</strong> to finish creating the app.</div>
-                <div class="wizard-note"><strong>Attribute statements are configured after the app is created</strong> (not on the Configure SAML page). Open the app &rarr; <strong>Sign On</strong> tab &rarr; <strong>Attribute statements</strong> card &rarr; click <strong>Show legacy configuration</strong>.</div>
-                <div class="wizard-instruction">Under <strong>Profile attribute statements</strong>, add each row (Name &rarr; Value), matching the claim fields below:</div>
-                <div class="wizard-copyable-box" style="margin-bottom: var(--sp-2);">
-                  <code>email &rarr; user.email<br/>first_name &rarr; user.firstName<br/>last_name &rarr; user.lastName</code>
-                </div>
-                <div class="wizard-instruction">Under <strong>Group attribute statements</strong>, add — Name <code>groups</code>, Name format <strong>Unspecified</strong>, Filter <strong>Matches regex</strong>, value <code>.*</code></div>
-                <div class="wizard-instruction">Don't use the newer <strong>Add expression</strong> box for these — it validates against the app user profile (which only has <code>userName</code> by default), so <code>user.email</code> / <code>appuser.email</code> are rejected there. The legacy table reads the Okta user profile and works.</div>
-                <div class="form-group-inline mt-2">
-                  <label class="form-label">Email Claim</label>
-                  <input v-model="wizardEmailClaim" :class="['form-input', 'mono', { 'input-error': wizardTouched.emailClaim && wizardErrors.emailClaim }]" placeholder="email" @blur="touchField('emailClaim')" />
-                  <div v-if="wizardTouched.emailClaim && wizardErrors.emailClaim" class="field-error">{{ wizardErrors.emailClaim }}</div>
-                  <div class="field-hint">The claim/attribute name containing the user's email address</div>
-                </div>
-                <div class="form-group-inline">
-                  <label class="form-label">First Name Claim</label>
-                  <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="FirstName" />
-                  <div class="field-hint">The claim for the user's first name (OIDC: first_name, SAML: FirstName)</div>
-                </div>
-                <div class="form-group-inline">
-                  <label class="form-label">Last Name Claim</label>
-                  <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="LastName" />
-                  <div class="field-hint">The claim for the user's last name (OIDC: last_name, SAML: LastName)</div>
-                </div>
+                <div class="wizard-note"><strong>Email and name need no SAML setup</strong> — Rush identifies the user from the SAML <strong>NameID</strong> (their email), so login works without any attribute statements.</div>
+                <div class="wizard-instruction"><strong>Only if you use group-based roles:</strong> after the app is created, open it &rarr; <strong>Sign On</strong> tab &rarr; <strong>Attribute statements</strong> card &rarr; <strong>Show legacy configuration</strong> &rarr; under <strong>Group attribute statements</strong> add — Name <code>groups</code>, Name format <strong>Unspecified</strong>, Filter <strong>Matches regex</strong>, value <code>.*</code></div>
               </div>
 
               <div v-if="guidedStepNumber === 3" class="wizard-step-content">
@@ -2699,9 +2675,6 @@ function formatDate(ts: string): string {
                   <div class="wizard-review-row"><span class="wizard-review-label">SSO URL</span><span :class="wizardErrors.ssoUrl ? 'review-invalid' : 'review-valid'">{{ wizardErrors.ssoUrl ? '!' : '' }}</span><code class="mono break-all">{{ wizardSsoUrl || '(not set)' }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Entity ID</span><code class="mono">{{ hostname }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Certificate</span><span :class="wizardErrors.cert ? 'review-invalid' : 'review-valid'">{{ wizardErrors.cert ? '!' : '' }}</span><span>{{ wizardCert ? 'Provided' : 'Not set' }}</span></div>
-                  <div class="wizard-review-row"><span class="wizard-review-label">Email Claim</span><code class="mono">{{ wizardEmailClaim }}</code></div>
-                  <div class="wizard-review-row"><span class="wizard-review-label">First Name</span><code class="mono">{{ wizardFirstNameClaim }}</code></div>
-                  <div class="wizard-review-row"><span class="wizard-review-label">Last Name</span><code class="mono">{{ wizardLastNameClaim }}</code></div>
                 </div>
               </div>
             </template>
