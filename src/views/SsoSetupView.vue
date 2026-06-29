@@ -82,10 +82,9 @@ const stepValid = computed(() => {
     if (step === 5) return !e.ssoUrl && !e.cert && !e.emailClaim
   }
   if (p === 'okta') {
-    if (step <= 2) return true
-    if (step === 3) return true
-    if (step === 4) return !e.ssoUrl && !e.cert
-    if (step === 5) return !e.ssoUrl && !e.cert && !e.emailClaim
+    if (step <= 2) return true // create app + configure SAML (one Okta page)
+    if (step === 3) return !e.ssoUrl && !e.cert // enter IdP details
+    if (step === 4) return !e.ssoUrl && !e.cert && !e.emailClaim // review
   }
   if (p === 'azure') {
     if (step <= 2) return true
@@ -115,7 +114,7 @@ function copyText(text: string) {
 const totalSteps = computed(() => {
   const p = provider.value
   if (p === 'google') return 5
-  if (p === 'okta') return 5
+  if (p === 'okta') return 4
   if (p === 'azure') return 5
   if (p === 'custom-oidc') return 3
   if (p === 'custom-saml') return 3
@@ -336,10 +335,13 @@ async function saveSetup() {
           <div v-if="guidedStep === 1" class="wizard-step-content">
             <div class="wizard-title">Create the SAML app in Okta</div>
             <div class="wizard-instruction">In Okta Admin, go to <strong>Applications</strong> &rarr; <strong>Create App Integration</strong> &rarr; <strong>SAML 2.0</strong>.</div>
+            <div class="wizard-instruction">On the <strong>General Settings</strong> step, enter the app name:</div>
+            <div class="wizard-copyable-box"><code>Rush Observability</code></div>
           </div>
 
           <div v-if="guidedStep === 2" class="wizard-step-content">
-            <div class="wizard-title">Enter these values in Okta</div>
+            <div class="wizard-title">Configure SAML in Okta</div>
+            <div class="wizard-instruction">On Okta's <strong>Configure SAML</strong> step, set:</div>
             <div class="form-group-inline">
               <label class="form-label">Single sign-on URL</label>
               <div class="wizard-copyable-box">
@@ -354,46 +356,29 @@ async function saveSetup() {
                 <button class="btn-copy btn-copy-sm" @click="copyText(hostname)">Copy</button>
               </div>
             </div>
+            <div class="wizard-instruction" style="margin-top: var(--sp-3);">Set <strong>Name ID format</strong> to <strong>EmailAddress</strong>, then click <strong>Next</strong> to finish creating the app.</div>
+            <div class="wizard-note"><strong>Email and name need no SAML setup</strong> — Rush identifies the user from the SAML <strong>NameID</strong> (their email), so login works without any attribute statements.</div>
+            <div class="wizard-instruction"><strong>Only if you use group-based roles:</strong> after the app is created, open it &rarr; <strong>Sign On</strong> tab &rarr; <strong>Attribute statements</strong> card &rarr; <strong>Show legacy configuration</strong> &rarr; under <strong>Group attribute statements</strong> add — Name <code>groups</code>, Name format <strong>Unspecified</strong>, Filter <strong>Matches regex</strong>, value <code>.*</code></div>
           </div>
 
           <div v-if="guidedStep === 3" class="wizard-step-content">
-            <div class="wizard-title">Add attribute statements and claim mapping</div>
-            <div class="wizard-instruction">Under Attribute Statements, add:</div>
-            <div class="wizard-copyable-box"><code>Name: <strong>groups</strong> &nbsp; Value: <strong>user.groups</strong></code></div>
-            <div class="form-group-inline" style="margin-top: var(--sp-2);">
-              <label class="form-label">Email Claim</label>
-              <input v-model="wizardEmailClaim" :class="['form-input', 'mono', { 'input-error': touched.emailClaim && fieldErrors.emailClaim }]" placeholder="email" @blur="touchField('emailClaim')" />
-              <div v-if="touched.emailClaim && fieldErrors.emailClaim" class="field-error">{{ fieldErrors.emailClaim }}</div>
-              <div class="field-hint">The claim/attribute name containing the user's email address</div>
-            </div>
-            <div class="form-group-inline">
-              <label class="form-label">First Name Claim</label>
-              <input v-model="wizardFirstNameClaim" class="form-input mono" placeholder="FirstName" />
-              <div class="field-hint">The claim for the user's first name (OIDC: first_name, SAML: FirstName)</div>
-            </div>
-            <div class="form-group-inline">
-              <label class="form-label">Last Name Claim</label>
-              <input v-model="wizardLastNameClaim" class="form-input mono" placeholder="LastName" />
-              <div class="field-hint">The claim for the user's last name (OIDC: last_name, SAML: LastName)</div>
-            </div>
-          </div>
-
-          <div v-if="guidedStep === 4" class="wizard-step-content">
             <div class="wizard-title">Enter your IdP details</div>
-            <div class="wizard-instruction">Download the X.509 certificate and copy the IdP SSO URL:</div>
+            <div class="wizard-instruction">In Okta, on the app's <strong>Sign On</strong> tab, expand the SAML <strong>Metadata details</strong> (or <strong>View SAML setup instructions</strong>) and copy these:</div>
             <div class="form-group-inline">
               <label class="form-label">IdP Certificate</label>
               <textarea v-model="wizardCert" :class="['form-input', 'mono', { 'input-error': touched.cert && fieldErrors.cert }]" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="font-size: 11px; resize: vertical;" @blur="touchField('cert')"></textarea>
+              <div class="field-hint">Okta's <strong>Signing Certificate</strong> — click <strong>Copy</strong> (or Download the .cert and paste its contents here).</div>
               <div v-if="touched.cert && fieldErrors.cert" class="field-error">{{ fieldErrors.cert }}</div>
             </div>
             <div class="form-group-inline">
               <label class="form-label">SSO URL</label>
               <input v-model="wizardSsoUrl" :class="['form-input', 'mono', { 'input-error': touched.ssoUrl && fieldErrors.ssoUrl }]" placeholder="https://your-org.okta.com/app/.../sso/saml" @blur="touchField('ssoUrl')" />
+              <div class="field-hint">Okta's <strong>Sign on URL</strong> (not the Metadata URL or Issuer).</div>
               <div v-if="touched.ssoUrl && fieldErrors.ssoUrl" class="field-error">{{ fieldErrors.ssoUrl }}</div>
             </div>
           </div>
 
-          <div v-if="guidedStep === 5" class="wizard-step-content">
+          <div v-if="guidedStep === 4" class="wizard-step-content">
             <div class="wizard-title">Review and save</div>
             <div class="wizard-review-summary">
               <div class="wizard-review-row"><span class="wizard-review-label">Provider</span><span>Okta (SAML)</span></div>

@@ -694,11 +694,9 @@ const wizardStepValid = computed(() => {
     return true
   }
   if (p === 'okta') {
-    if (step === 1) return true
-    if (step === 2) return true
-    if (step === 3) return true // instructional
-    if (step === 4) return !e.ssoUrl && !e.cert
-    if (step === 5) return !e.ssoUrl && !e.cert && !e.emailClaim
+    if (step <= 2) return true // create app + configure SAML (one Okta page)
+    if (step === 3) return !e.ssoUrl && !e.cert // enter IdP details
+    if (step === 4) return !e.ssoUrl && !e.cert && !e.emailClaim // review
     return true
   }
   if (p === 'azure') {
@@ -745,7 +743,7 @@ const providerCards = [
 const wizardTotalSteps = computed(() => {
   const p = wizardProvider.value
   if (p === 'google') return 5
-  if (p === 'okta') return 5
+  if (p === 'okta') return 4
   if (p === 'azure') return 5
   if (p === 'custom-oidc') return 3
   if (p === 'custom-saml') return 3
@@ -2630,10 +2628,13 @@ function formatDate(ts: string): string {
               <div v-if="guidedStepNumber === 1" class="wizard-step-content">
                 <div class="wizard-title">Create the SAML app in Okta</div>
                 <div class="wizard-instruction">In Okta Admin, go to <strong>Applications</strong> &rarr; <strong>Create App Integration</strong> &rarr; <strong>SAML 2.0</strong>.</div>
+                <div class="wizard-instruction">On the <strong>General Settings</strong> step, enter the app name:</div>
+                <div class="wizard-copyable-box"><code>Rush Observability</code></div>
               </div>
 
               <div v-if="guidedStepNumber === 2" class="wizard-step-content">
-                <div class="wizard-title">Enter these values in Okta</div>
+                <div class="wizard-title">Configure SAML in Okta</div>
+                <div class="wizard-instruction">On Okta's <strong>Configure SAML</strong> step, set:</div>
                 <div class="form-group-inline">
                   <label class="form-label">Single sign-on URL</label>
                   <div class="wizard-copyable-box">
@@ -2648,14 +2649,14 @@ function formatDate(ts: string): string {
                     <button class="btn-copy btn-copy-sm" @click="copyText(hostname)">Copy</button>
                   </div>
                 </div>
-              </div>
-
-              <div v-if="guidedStepNumber === 3" class="wizard-step-content">
-                <div class="wizard-title">Add attribute statements and claim mapping</div>
-                <div class="wizard-instruction">Under Attribute Statements, add:</div>
+                <div class="wizard-instruction mt-2">Set <strong>Name ID format</strong> to <strong>EmailAddress</strong>, then click <strong>Next</strong> to finish creating the app.</div>
+                <div class="wizard-note"><strong>Attribute statements are configured after the app is created</strong> (not on the Configure SAML page). Open the app &rarr; <strong>Sign On</strong> tab &rarr; <strong>Attribute statements</strong> card &rarr; click <strong>Show legacy configuration</strong>.</div>
+                <div class="wizard-instruction">Under <strong>Profile attribute statements</strong>, add each row (Name &rarr; Value), matching the claim fields below:</div>
                 <div class="wizard-copyable-box" style="margin-bottom: var(--sp-2);">
-                  <code>Name: <strong>groups</strong> &nbsp; Value: <strong>user.groups</strong></code>
+                  <code>email &rarr; user.email<br/>first_name &rarr; user.firstName<br/>last_name &rarr; user.lastName</code>
                 </div>
+                <div class="wizard-instruction">Under <strong>Group attribute statements</strong>, add — Name <code>groups</code>, Name format <strong>Unspecified</strong>, Filter <strong>Matches regex</strong>, value <code>.*</code></div>
+                <div class="wizard-instruction">Don't use the newer <strong>Add expression</strong> box for these — it validates against the app user profile (which only has <code>userName</code> by default), so <code>user.email</code> / <code>appuser.email</code> are rejected there. The legacy table reads the Okta user profile and works.</div>
                 <div class="form-group-inline mt-2">
                   <label class="form-label">Email Claim</label>
                   <input v-model="wizardEmailClaim" :class="['form-input', 'mono', { 'input-error': wizardTouched.emailClaim && wizardErrors.emailClaim }]" placeholder="email" @blur="touchField('emailClaim')" />
@@ -2674,22 +2675,24 @@ function formatDate(ts: string): string {
                 </div>
               </div>
 
-              <div v-if="guidedStepNumber === 4" class="wizard-step-content">
+              <div v-if="guidedStepNumber === 3" class="wizard-step-content">
                 <div class="wizard-title">Enter your IdP details</div>
-                <div class="wizard-instruction">Download the X.509 certificate and copy the IdP SSO URL from Okta:</div>
+                <div class="wizard-instruction">In Okta, on the app's <strong>Sign On</strong> tab, expand the SAML <strong>Metadata details</strong> (or <strong>View SAML setup instructions</strong>) and copy these:</div>
                 <div class="form-group-inline">
                   <label class="form-label">IdP Certificate</label>
                   <textarea v-model="wizardCert" class="cert-area" :class="['form-input', 'mono', { 'input-error': wizardTouched.cert && wizardErrors.cert }]" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" @blur="touchField('cert')"></textarea>
+                  <div class="field-hint">Okta's <strong>Signing Certificate</strong> — click <strong>Copy</strong> (or Download the .cert and paste its contents here).</div>
                   <div v-if="wizardTouched.cert && wizardErrors.cert" class="field-error">{{ wizardErrors.cert }}</div>
                 </div>
                 <div class="form-group-inline">
                   <label class="form-label">SSO URL</label>
                   <input v-model="wizardSsoUrl" :class="['form-input', 'mono', { 'input-error': wizardTouched.ssoUrl && wizardErrors.ssoUrl }]" placeholder="https://your-org.okta.com/app/.../sso/saml" @blur="touchField('ssoUrl')" />
+                  <div class="field-hint">Okta's <strong>Sign on URL</strong> (not the Metadata URL or Issuer).</div>
                   <div v-if="wizardTouched.ssoUrl && wizardErrors.ssoUrl" class="field-error">{{ wizardErrors.ssoUrl }}</div>
                 </div>
               </div>
 
-              <div v-if="guidedStepNumber === 5" class="wizard-step-content">
+              <div v-if="guidedStepNumber === 4" class="wizard-step-content">
                 <div class="wizard-title">Review and save</div>
                 <div class="wizard-review-summary">
                   <div class="wizard-review-row"><span class="wizard-review-label">Provider</span><span>Okta (SAML)</span></div>
