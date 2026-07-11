@@ -142,6 +142,7 @@ const expandedTraceSpans = computed(() => {
 // ═══ View mode: spans vs logs ═══
 const viewMode = ref<'spans' | 'logs'>('spans')
 const tracesOnly = ref(false)
+const apmResultMode = ref<'individual' | 'groups'>('individual')
 const otelLogs = ref<LogRecord[]>([])
 
 // Per-tenant signal config: when APM is disabled for the active tenant we hide
@@ -1393,6 +1394,34 @@ const logStats = computed(() => {
 // ═══ Duration bar ═══
 
 const maxDuration = computed(() => Math.max(...results.value.map(r => r.duration_ns), 1))
+
+const traceGroups = computed(() => {
+  const roots = results.value.filter(row => !row.parent_span_id)
+  const source = roots.length ? roots : results.value
+  const grouped = new Map<string, RushEvent[]>()
+  for (const row of source) {
+    const key = `${row.service_name}\u0000${row.http_method}\u0000${row.http_path || '(unknown route)'}`
+    const bucket = grouped.get(key) || []
+    bucket.push(row); grouped.set(key, bucket)
+  }
+  return [...grouped.entries()].map(([key, rows]) => {
+    const [service, method, path] = key.split('\u0000')
+    const durations = rows.map(r => r.duration_ns).sort((a, b) => a - b)
+    const errors = rows.filter(r => r.status === 'ERROR' || r.http_status_code >= 500)
+    const representative = errors[0] || [...rows].sort((a, b) => b.duration_ns - a.duration_ns)[0]!
+    return {
+      key, service: service!, method: method!, path: path!, count: rows.length,
+      errorRate: rows.length ? errors.length / rows.length * 100 : 0,
+      p95: durations[Math.min(durations.length - 1, Math.floor(durations.length * .95))] || 0,
+      representative,
+    }
+  }).sort((a, b) => b.count - a.count)
+})
+
+function openTraceGroup(group: (typeof traceGroups.value)[number]) {
+  const index = results.value.findIndex(row => row.span_id === group.representative.span_id)
+  if (index >= 0) openDetailModal(index)
+}
 
 function durBarWidth(ns: number): string {
   return `${Math.max((ns / maxDuration.value) * 100, 2)}%`
@@ -4686,8 +4715,16 @@ onMounted(async () => {
       <!-- ═══ Main Content ═══ -->
       <div class="explore-main">
 
+        <div v-if="viewMode === 'spans'" class="apm-result-toolbar">
+          <div class="apm-result-toggle" role="group" aria-label="APM result organization">
+            <button :class="{ active: apmResultMode === 'individual' }" @click="apmResultMode = 'individual'">Individual spans</button>
+            <button :class="{ active: apmResultMode === 'groups' }" @click="apmResultMode = 'groups'">Trace groups <span>{{ traceGroups.length }}</span></button>
+          </div>
+          <span v-if="apmResultMode === 'groups'" class="apm-result-note">Grouped by root service, method, and route</span>
+        </div>
+
         <!-- Latency/error scatter: brush outliers to run BubbleUp -->
-        <div v-if="viewMode === 'spans' && scatterPoints.length" class="scatter-card card fade-in">
+        <div v-if="viewMode === 'spans' && apmResultMode === 'individual' && scatterPoints.length" class="scatter-card card fade-in">
           <div class="scatter-header">
             <div><span class="scatter-title">Latency outliers</span><span class="scatter-subtitle">time × duration · red = error</span></div>
             <span class="scatter-hint mono">Drag a region to compare it with baseline</span>
@@ -4949,8 +4986,21 @@ onMounted(async () => {
           <div class="text-muted" style="font-size: 11px">Try: service_name=gateway http_status_code>=400</div>
         </div>
 
+        <!-- ═══ Trace Groups (root request shapes) ═══ -->
+        <div v-else-if="viewMode === 'spans' && apmResultMode === 'groups'" class="trace-groups card fade-in">
+          <div class="tg-head"><span>Request shape</span><span>Volume</span><span>Error rate</span><span>p95</span><span>Representative</span></div>
+          <button v-for="group in traceGroups" :key="group.key" class="tg-row" @click="openTraceGroup(group)">
+            <span class="tg-operation"><b>{{ group.service }}</b><span><i :class="group.method">{{ group.method || 'SPAN' }}</i><code>{{ group.path }}</code></span></span>
+            <span class="tg-volume mono">{{ group.count.toLocaleString() }}</span>
+            <span class="tg-error mono" :class="{ hot: group.errorRate > 0 }">{{ group.errorRate.toFixed(1) }}%</span>
+            <span class="tg-p95 mono" :class="durationClass(group.p95)">{{ formatDuration(group.p95) }}</span>
+            <span class="tg-representative mono">{{ group.representative.trace_id.slice(0, 8) }} &rarr;</span>
+          </button>
+          <div v-if="!traceGroups.length" class="tg-empty">No multi-span traces found in this result set.</div>
+        </div>
+
         <!-- ═══ Event Table (Spans mode) ═══ -->
-        <div v-else-if="viewMode === 'spans'" class="event-table card">
+        <div v-else-if="viewMode === 'spans' && apmResultMode === 'individual'" class="event-table card">
           <!-- Table header -->
           <div class="et-head">
             <div class="et-col et-col-time">Time</div>
