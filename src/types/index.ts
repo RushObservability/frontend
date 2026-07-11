@@ -1197,6 +1197,10 @@ export interface BubbleUpRequest {
   signal: string
   filters: Filter[]
   top_k?: number
+  selection_min_duration_ns?: number
+  selection_max_duration_ns?: number
+  selection_errors_only?: boolean
+  exclude_selection_from_baseline?: boolean
 }
 
 // ── Monitor types ──

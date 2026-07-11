@@ -168,12 +168,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
   abortController.value = controller
 
   try {
-    const resp = await fetch('/api/v1/investigate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
+    const resp = await api.openInvestigationStream(body, controller.signal)
 
     if (!resp.ok) {
       const text = await resp.text()

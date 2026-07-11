@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onBeforeUnmount } from 'vue'
 import { useApi } from '../composables/useApi'
 import type { RushEvent, Filter } from '../types'
 
@@ -9,6 +9,9 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   serviceName?: string
   minutes?: number
+  resultLimit?: number
+  hasMore?: boolean
+  loadingMore?: boolean
   // When set, pins the view to spans or logs and hides the internal toggle —
   // used when Spans and Logs are surfaced as separate top-level tabs.
   forceMode?: 'spans' | 'logs'
@@ -16,11 +19,15 @@ const props = withDefaults(defineProps<{
   showService: true,
   loading: false,
   minutes: 60,
+  resultLimit: 100,
+  hasMore: false,
+  loadingMore: false,
 })
 
 const emit = defineEmits<{
   (e: 'click-span', span: RushEvent): void
   (e: 'click-trace', traceId: string): void
+  (e: 'load-more'): void
 }>()
 
 const api = useApi()
@@ -230,18 +237,12 @@ async function runSearch() {
   ]
 
   try {
-    const res = await fetch('/api/v1/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        time_range: { from, to },
-        filters,
-        limit: 100,
-        search: searchText.value || undefined,
-      }),
+    const data = await api.queryEvents({
+      time_range: { from, to },
+      filters,
+      limit: props.resultLimit,
+      search: searchText.value || undefined,
     })
-    if (!res.ok) throw new Error(`${res.status}`)
-    const data = await res.json() as { rows: RushEvent[]; total: number }
     searchResults.value = data.rows
   } catch {
     searchResults.value = []
@@ -265,13 +266,27 @@ watch(() => props.minutes, () => {
 
 // ═══ Log extraction from span events ═══
 interface LogEntry {
+  id: string
   timestamp: number
   level: string
   message: string
+  eventName: string
+  attributes: Record<string, unknown>
   spanId: string
   traceId: string
   serviceName: string
+  serviceVersion: string
+  environment: string
+  hostName: string
+  httpMethod: string
+  httpPath: string
+  httpStatusCode: number
+  durationNs: number
 }
+
+const selectedLogId = ref<string | null>(null)
+const loadMoreRef = ref<HTMLElement | null>(null)
+let loadMoreObserver: IntersectionObserver | null = null
 
 const logs = computed<LogEntry[]>(() => {
   const entries: LogEntry[] = []
@@ -283,12 +298,22 @@ const logs = computed<LogEntry[]>(() => {
       const message = (attrs['log.message'] as string) || (attrs['exception.message'] as string) || row.event_names[i] || ''
       const level = ((attrs['log.level'] as string) || (attrs['log.severity'] as string) || '').toLowerCase()
       entries.push({
+        id: `${row.trace_id}:${row.span_id}:${row.event_timestamps[i] ?? row.timestamp}:${i}`,
         timestamp: row.event_timestamps[i] ?? row.timestamp,
         level: level || 'info',
         message,
+        eventName: row.event_names[i] || 'log',
+        attributes: attrs,
         spanId: row.span_id,
         traceId: row.trace_id,
         serviceName: row.service_name,
+        serviceVersion: row.service_version,
+        environment: row.environment,
+        hostName: row.host_name,
+        httpMethod: row.http_method,
+        httpPath: row.http_path,
+        httpStatusCode: row.http_status_code,
+        durationNs: row.duration_ns,
       })
     }
   }
@@ -345,10 +370,72 @@ function levelClass(level: string): string {
   if (level === 'debug' || level === 'trace') return 'lvl-debug'
   return 'lvl-info'
 }
+
+const logCounts = computed(() => {
+  const out = { error: 0, warn: 0, info: 0, debug: 0 }
+  for (const log of logs.value) {
+    if (log.level === 'error' || log.level === 'fatal') out.error++
+    else if (log.level === 'warn' || log.level === 'warning') out.warn++
+    else if (log.level === 'debug' || log.level === 'trace') out.debug++
+    else out.info++
+  }
+  return out
+})
+
+function logShare(count: number): string {
+  return `${logs.value.length ? (count / logs.value.length) * 100 : 0}%`
+}
+
+function toggleLog(log: LogEntry) {
+  selectedLogId.value = selectedLogId.value === log.id ? null : log.id
+}
+
+function detailAttributes(log: LogEntry): [string, unknown][] {
+  const hidden = new Set(['log.message', 'exception.message', 'log.level', 'log.severity'])
+  return Object.entries(log.attributes)
+    .filter(([key]) => !hidden.has(key))
+    .sort(([a], [b]) => a.localeCompare(b))
+}
+
+function formatAttribute(value: unknown): string {
+  if (value === null) return 'null'
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value) } catch { return String(value) }
+  }
+  return String(value)
+}
+
+function humanRange(): string {
+  const m = props.minutes
+  if (m % 1440 === 0) return `${m / 1440}d`
+  if (m % 60 === 0) return `${m / 60}h`
+  return `${m}m`
+}
+
+function setupLoadMoreObserver() {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+  if (!loadMoreRef.value || !props.hasMore || props.loadingMore || searchActive.value || mode.value !== 'logs') return
+  if (typeof IntersectionObserver === 'undefined') return
+  loadMoreObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting) && props.hasMore && !props.loadingMore) emit('load-more')
+  }, { rootMargin: '500px 0px' })
+  loadMoreObserver.observe(loadMoreRef.value)
+}
+
+// Re-arm after every appended page. If a sparse page still leaves the sentinel
+// near the viewport, the next page loads automatically until scrolling space
+// is filled or the selected time window is exhausted.
+watch(
+  [() => props.hasMore, () => props.loadingMore, () => logs.value.length, searchActive, mode],
+  () => nextTick(setupLoadMoreObserver),
+  { immediate: true },
+)
+onBeforeUnmount(() => loadMoreObserver?.disconnect())
 </script>
 
 <template>
-  <div class="slt-root">
+  <div class="slt-root" :class="{ 'slt-logs-mode': mode === 'logs' }">
     <!-- Header bar -->
     <div class="slt-header">
       <div v-if="!forceMode" class="slt-toggle">
@@ -363,7 +450,19 @@ function levelClass(level: string): string {
           @click="mode = 'logs'"
         >Logs <span class="slt-count">{{ logs.length }}</span></button>
       </div>
-      <div v-else class="slt-count-label">{{ mode === 'spans' ? displaySpans.length : logs.length }} {{ mode }}</div>
+      <div v-else-if="mode === 'logs'" class="slt-log-heading">
+        <span class="slt-log-mark" aria-hidden="true" />
+        <div>
+          <div class="slt-log-title">Log stream</div>
+          <div class="slt-log-subtitle">{{ serviceName }} · last {{ humanRange() }}</div>
+        </div>
+      </div>
+      <div v-else class="slt-count-label">{{ displaySpans.length }} spans</div>
+      <div v-if="forceMode && mode === 'logs'" class="slt-log-counters" aria-label="Log level counts">
+        <span class="slt-log-counter"><strong class="mono">{{ logs.length }}</strong> events</span>
+        <span v-if="logCounts.error" class="slt-log-counter is-error"><strong class="mono">{{ logCounts.error }}</strong> errors</span>
+        <span v-if="logCounts.warn" class="slt-log-counter is-warn"><strong class="mono">{{ logCounts.warn }}</strong> warnings</span>
+      </div>
       <button v-if="searchActive" class="slt-clear-btn" @click="clearSearch">Clear</button>
     </div>
 
@@ -376,7 +475,7 @@ function levelClass(level: string): string {
           ref="searchInputEl"
           v-model="searchInput"
           class="slt-search-input"
-          placeholder="http_method=GET status=ERROR — filters + free text"
+          :placeholder="mode === 'logs' ? 'Search log messages or filter status=ERROR' : 'http_method=GET status=ERROR — filters + free text'"
           @input="onSearchInput"
           @keydown="onSearchKeydown"
           @blur="onSearchBlur"
@@ -453,41 +552,90 @@ function levelClass(level: string): string {
 
     <!-- ═══ Logs table ═══ -->
     <template v-if="mode === 'logs'">
+      <div v-if="logs.length" class="slt-level-distribution" aria-label="Log severity distribution">
+        <span v-if="logCounts.error" class="dist-error" :style="{ width: logShare(logCounts.error) }" :title="`${logCounts.error} errors`" />
+        <span v-if="logCounts.warn" class="dist-warn" :style="{ width: logShare(logCounts.warn) }" :title="`${logCounts.warn} warnings`" />
+        <span v-if="logCounts.info" class="dist-info" :style="{ width: logShare(logCounts.info) }" :title="`${logCounts.info} info`" />
+        <span v-if="logCounts.debug" class="dist-debug" :style="{ width: logShare(logCounts.debug) }" :title="`${logCounts.debug} debug`" />
+      </div>
       <div class="slt-head">
         <div class="slt-col slt-col-time">Time</div>
         <div class="slt-col slt-col-level">Level</div>
         <div v-if="showService" class="slt-col slt-col-svc">Service</div>
         <div class="slt-col slt-col-msg">Message</div>
-        <div class="slt-col slt-col-trace">Trace</div>
+        <div class="slt-col slt-col-trace">Detail</div>
       </div>
 
       <div v-if="isLoading" class="slt-empty">Loading logs...</div>
       <div v-else-if="logs.length === 0" class="slt-empty">{{ searchActive ? 'No logs match your search' : 'No log events found in this time range' }}</div>
       <template v-else>
-        <div
-          v-for="(log, i) in logs"
-          :key="i"
-          class="slt-row"
-          :class="{ 'slt-error': log.level === 'error' || log.level === 'fatal' }"
-          @click="emit('click-trace', log.traceId)"
-        >
-          <div class="slt-col slt-col-time mono">{{ formatTimestamp(log.timestamp) }}</div>
-          <div class="slt-col slt-col-level">
-            <span class="slt-level-badge" :class="levelClass(log.level)">{{ log.level }}</span>
+        <div v-for="log in logs" :key="log.id" class="slt-log-group" :class="{ expanded: selectedLogId === log.id }">
+          <div
+            class="slt-row slt-log-row"
+            :class="{ 'slt-error': log.level === 'error' || log.level === 'fatal' }"
+            role="button"
+            tabindex="0"
+            :aria-expanded="selectedLogId === log.id"
+            @click="toggleLog(log)"
+            @keydown.enter.prevent="toggleLog(log)"
+            @keydown.space.prevent="toggleLog(log)"
+          >
+            <div class="slt-col slt-col-time mono">{{ formatTimestamp(log.timestamp) }}</div>
+            <div class="slt-col slt-col-level">
+              <span class="slt-level-badge" :class="levelClass(log.level)">{{ log.level }}</span>
+            </div>
+            <div v-if="showService" class="slt-col slt-col-svc">
+              <span class="slt-svc-name">{{ log.serviceName }}</span>
+            </div>
+            <div class="slt-col slt-col-msg">{{ log.message }}</div>
+            <div class="slt-col slt-col-trace">
+              <span class="slt-open-log">{{ selectedLogId === log.id ? 'Close' : 'Inspect' }}</span>
+            </div>
           </div>
-          <div v-if="showService" class="slt-col slt-col-svc">
-            <span class="slt-svc-name">{{ log.serviceName }}</span>
-          </div>
-          <div class="slt-col slt-col-msg mono">{{ log.message }}</div>
-          <div class="slt-col slt-col-trace">
-            <router-link
-              :to="`/trace/${log.traceId}`"
-              class="slt-trace-link mono"
-              @click.stop
-              title="View full trace"
-            >{{ log.traceId.slice(0, 8) }}</router-link>
+
+          <div v-if="selectedLogId === log.id" class="slt-log-detail" @click.stop>
+            <div class="slt-log-detail-message">{{ log.message }}</div>
+
+            <div class="slt-log-meta-strip">
+              <div><span>Event</span><strong class="mono">{{ log.eventName }}</strong></div>
+              <div><span>Timestamp</span><strong class="mono">{{ formatTimestamp(log.timestamp) }}</strong></div>
+              <div v-if="log.environment"><span>Environment</span><strong>{{ log.environment }}</strong></div>
+              <div v-if="log.hostName"><span>Host</span><strong class="mono">{{ log.hostName }}</strong></div>
+              <div v-if="log.httpPath"><span>Request</span><strong class="mono">{{ log.httpMethod }} {{ log.httpPath }}</strong></div>
+              <div v-if="log.httpStatusCode"><span>Status</span><strong class="mono" :class="statusClass('', log.httpStatusCode)">{{ log.httpStatusCode }}</strong></div>
+            </div>
+
+            <div v-if="detailAttributes(log).length" class="slt-log-fields">
+              <div class="slt-log-section-title">Structured fields <span>{{ detailAttributes(log).length }}</span></div>
+              <div class="slt-log-field-grid">
+                <div v-for="([key, value]) in detailAttributes(log)" :key="key" class="slt-log-field">
+                  <span class="slt-log-field-key">{{ key }}</span>
+                  <span class="slt-log-field-value mono" :title="formatAttribute(value)">{{ formatAttribute(value) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="slt-log-detail-footer">
+              <div class="slt-log-correlation">
+                <span>trace <strong class="mono">{{ log.traceId.slice(0, 16) }}</strong></span>
+                <span>span <strong class="mono">{{ log.spanId.slice(0, 16) }}</strong></span>
+                <span v-if="log.durationNs">parent duration <strong class="mono">{{ formatDuration(log.durationNs) }}</strong></span>
+              </div>
+              <router-link :to="`/trace/${log.traceId}`" class="slt-view-trace" @click.stop>View correlated trace →</router-link>
+            </div>
           </div>
         </div>
+        <div
+          v-if="!searchActive && (hasMore || loadingMore)"
+          ref="loadMoreRef"
+          class="slt-load-more"
+          aria-live="polite"
+        >
+          <span v-if="loadingMore" class="slt-load-spinner" aria-hidden="true" />
+          <span>{{ loadingMore ? 'Loading older logs…' : 'More logs available' }}</span>
+          <button v-if="hasMore && !loadingMore" @click="emit('load-more')">Load older logs</button>
+        </div>
+        <div v-else-if="!searchActive && logs.length" class="slt-log-end">End of selected time window · {{ logs.length }} logs</div>
       </template>
     </template>
   </div>

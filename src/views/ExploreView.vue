@@ -12,6 +12,7 @@ import TimePicker from '../components/TimePicker.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import PanelCard from '../components/PanelCard.vue'
 import { useTenant } from '../composables/useTenant'
+import { compareFindingStrength, compareFindingSummary, rankCompareFindings } from '../lib/compareFindings'
 
 interface ContextMenuItem {
   label: string
@@ -1477,26 +1478,150 @@ const filledHistogram = computed(() => {
 
 const histogramMax = computed(() => Math.max(...filledHistogram.value.map((b) => b.count), 1))
 
-// ═══ Latency / error scatterplot ═══
+// ═══ Latency over time ═══
 const SCATTER_W = 1000
-const SCATTER_H = 170
+const SCATTER_H = 250
+const SCATTER_PAD = { left: 64, right: 20, top: 18, bottom: 34 }
 const scatterBrush = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
 const scatterDragging = ref(false)
-const scatterSelectionSummary = ref('')
+const scatterExpanded = ref(false)
+const scatterMode = ref<'dots' | 'density'>('density')
+const compareModeActive = ref(false)
 
-const scatterPoints = computed(() => {
-  if (!results.value.length) return []
-  const rows = results.value.slice(0, 500)
-  const times = rows.map(r => Number(r.timestamp) / 1_000_000)
-  const minT = Math.min(...times)
-  const maxT = Math.max(...times)
-  const maxLog = Math.max(...rows.map(r => Math.log10(Math.max(1, r.duration_ns))), 1)
-  return rows.map((row, i) => ({
+type ScatterPoint = { row: RushEvent; x: number; y: number; error: boolean }
+type ScatterSelection = {
+  label: string
+  rows: RushEvent[]
+  startTime: string
+  endTime: string
+  minDurationNs?: number
+  maxDurationNs?: number
+  errorsOnly?: boolean
+  queryWide?: boolean
+}
+const scatterPendingSelection = ref<ScatterSelection | null>(null)
+const scatterHoverPoint = ref<ScatterPoint | null>(null)
+const scatterHoverDensity = ref<{ x: number; y: number; count: number; errors: number; minNs: number; maxNs: number } | null>(null)
+
+function percentile(values: number[], p: number): number {
+  if (!values.length) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p))] ?? 0
+}
+
+const scatterSourceRows = computed(() => results.value.slice(0, 500))
+const scatterStats = computed(() => {
+  const durations = scatterSourceRows.value.map((row) => Math.max(1, row.duration_ns))
+  return {
+    count: durations.length,
+    errors: scatterSourceRows.value.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500).length,
+    p50: percentile(durations, .5),
+    p95: percentile(durations, .95),
+    p99: percentile(durations, .99),
+    min: durations.length ? Math.min(...durations) : 1,
+    max: Math.max(...durations, 1),
+  }
+})
+
+const scatterScale = computed(() => {
+  const rows = scatterSourceRows.value
+  const times = rows.map((row) => Number(row.timestamp) / 1_000_000)
+  const minT = Math.min(...times, Date.now())
+  const maxT = Math.max(...times, minT + 1)
+  const rawMin = Math.max(1_000, scatterStats.value.min)
+  const rawMax = Math.max(rawMin * 1.01, scatterStats.value.max)
+  const minLog = Math.floor(Math.log10(rawMin))
+  const maxLog = Math.ceil(Math.log10(rawMax))
+  return { minT, maxT, minLog, maxLog: Math.max(minLog + 1, maxLog) }
+})
+
+function scatterX(timestamp: number): number {
+  const t = Number(timestamp) / 1_000_000
+  const s = scatterScale.value
+  return SCATTER_PAD.left + ((t - s.minT) / Math.max(1, s.maxT - s.minT)) * (SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right)
+}
+function scatterY(durationNs: number): number {
+  const s = scatterScale.value
+  const frac = (Math.log10(Math.max(1, durationNs)) - s.minLog) / Math.max(1, s.maxLog - s.minLog)
+  return SCATTER_PAD.top + (1 - frac) * (SCATTER_H - SCATTER_PAD.top - SCATTER_PAD.bottom)
+}
+
+const scatterPoints = computed<ScatterPoint[]>(() =>
+  scatterSourceRows.value.map((row) => ({
     row,
-    x: 24 + ((times[i]! - minT) / Math.max(1, maxT - minT)) * (SCATTER_W - 48),
-    y: 10 + (1 - Math.log10(Math.max(1, row.duration_ns)) / maxLog) * (SCATTER_H - 30),
+    x: scatterX(row.timestamp),
+    y: scatterY(row.duration_ns),
     error: row.status === 'ERROR' || row.http_status_code >= 500,
   }))
+)
+
+const scatterYTicks = computed(() => {
+  const { minLog, maxLog } = scatterScale.value
+  const span = maxLog - minLog
+  const step = span > 6 ? Math.ceil(span / 6) : 1
+  const ticks: { value: number; y: number; label: string }[] = []
+  for (let exp = minLog; exp <= maxLog; exp += step) {
+    const value = Math.pow(10, exp)
+    ticks.push({ value, y: scatterY(value), label: formatDuration(value) })
+  }
+  return ticks
+})
+
+const scatterXTicks = computed(() => {
+  const { minT, maxT } = scatterScale.value
+  return Array.from({ length: 5 }, (_, i) => {
+    const frac = i / 4
+    const value = minT + (maxT - minT) * frac
+    return {
+      x: SCATTER_PAD.left + frac * (SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right),
+      label: new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    }
+  })
+})
+
+const scatterPercentiles = computed(() => [
+  { label: 'P50', value: scatterStats.value.p50, y: scatterY(scatterStats.value.p50), cls: 'p50' },
+  { label: 'P95', value: scatterStats.value.p95, y: scatterY(scatterStats.value.p95), cls: 'p95' },
+  { label: 'P99', value: scatterStats.value.p99, y: scatterY(scatterStats.value.p99), cls: 'p99' },
+])
+
+const scatterSelectedIds = computed(() => new Set(scatterPendingSelection.value?.rows.map((row) => row.span_id) ?? []))
+
+const scatterDensityBins = computed(() => {
+  const bins = new Map<string, { x: number; y: number; count: number; errors: number; minNs: number; maxNs: number }>()
+  const plotW = SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right
+  const plotH = SCATTER_H - SCATTER_PAD.top - SCATTER_PAD.bottom
+  for (const point of scatterPoints.value) {
+    const bx = Math.max(0, Math.min(39, Math.floor(((point.x - SCATTER_PAD.left) / plotW) * 40)))
+    const by = Math.max(0, Math.min(13, Math.floor(((point.y - SCATTER_PAD.top) / plotH) * 14)))
+    const key = `${bx}:${by}`
+    const current = bins.get(key)
+    if (current) {
+      current.count++
+      if (point.error) current.errors++
+      current.minNs = Math.min(current.minNs, point.row.duration_ns)
+      current.maxNs = Math.max(current.maxNs, point.row.duration_ns)
+    } else {
+      bins.set(key, { x: point.x, y: point.y, count: 1, errors: point.error ? 1 : 0, minNs: point.row.duration_ns, maxNs: point.row.duration_ns })
+    }
+  }
+  return [...bins.values()]
+})
+
+const scatterSelectionSummary = computed(() => {
+  const selection = scatterPendingSelection.value
+  if (!selection) return null
+  const services = new Set(selection.rows.map((row) => row.service_name)).size
+  const errors = selection.rows.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500).length
+  return {
+    count: selection.rows.length,
+    services,
+    errors,
+    time: `${new Date(selection.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}–${new Date(selection.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
+    duration: selection.minDurationNs !== undefined
+      ? `${formatDuration(selection.minDurationNs)}${selection.maxDurationNs !== undefined ? `–${formatDuration(selection.maxDurationNs)}` : '+'}`
+      : 'all durations',
+  }
 })
 
 function scatterCoord(e: PointerEvent) {
@@ -1520,14 +1645,103 @@ function finishScatterBrush() {
   const left = Math.min(b.x1, b.x2), right = Math.max(b.x1, b.x2)
   const top = Math.min(b.y1, b.y2), bottom = Math.max(b.y1, b.y2)
   const selected = scatterPoints.value.filter(p => p.x >= left && p.x <= right && p.y >= top && p.y <= bottom)
-  if (!selected.length) { scatterBrush.value = null; scatterSelectionSummary.value = ''; return }
+  if (!selected.length) { clearScatterSelection(); return }
   const times = selected.map(p => Number(p.row.timestamp) / 1_000_000)
   const durations = selected.map(p => p.row.duration_ns)
   const from = new Date(Math.min(...times)).toISOString()
   const to = new Date(Math.max(...times) + 1).toISOString()
-  bubbleUpSelection.value = { startIdx: 0, endIdx: 0, startTime: from, endTime: to }
-  scatterSelectionSummary.value = `${selected.length} spans · ${formatDuration(Math.min(...durations))}–${formatDuration(Math.max(...durations))}`
+  scatterPendingSelection.value = {
+    label: 'Selected spans',
+    rows: selected.map((point) => point.row),
+    startTime: from,
+    endTime: to,
+    minDurationNs: Math.min(...durations),
+    maxDurationNs: Math.max(...durations),
+    queryWide: true,
+  }
+}
+
+function clearScatterSelection() {
+  scatterBrush.value = null
+  scatterPendingSelection.value = null
+  scatterHoverPoint.value = null
+  scatterHoverDensity.value = null
+}
+
+function toggleScatterExpanded() {
+  scatterExpanded.value = !scatterExpanded.value
+  if (!scatterExpanded.value) {
+    scatterHoverPoint.value = null
+    scatterHoverDensity.value = null
+  }
+}
+
+function prepareScatterQuickAnalysis(kind: 'slow' | 'errors' | 'recent') {
+  const rows = scatterSourceRows.value
+  if (!rows.length) return
+  if (kind === 'slow') {
+    const threshold = percentile(rows.map((row) => row.duration_ns), .95)
+    scatterPendingSelection.value = {
+      label: 'Slowest 5%', rows: rows.filter((row) => row.duration_ns >= threshold),
+      startTime: timeRange.value.from, endTime: timeRange.value.to, minDurationNs: threshold, queryWide: true,
+    }
+  } else if (kind === 'errors') {
+    scatterPendingSelection.value = {
+      label: 'All errors in this query', rows: rows.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500),
+      startTime: timeRange.value.from, endTime: timeRange.value.to, errorsOnly: true, queryWide: true,
+    }
+  } else {
+    const fromMs = new Date(timeRange.value.from).getTime()
+    const toMs = new Date(timeRange.value.to).getTime()
+    const midpoint = fromMs + (toMs - fromMs) / 2
+    scatterPendingSelection.value = {
+      label: 'Recent half vs earlier half',
+      rows: rows.filter((row) => Number(row.timestamp) / 1_000_000 >= midpoint),
+      startTime: new Date(midpoint).toISOString(), endTime: timeRange.value.to, queryWide: true,
+    }
+  }
+  scatterBrush.value = null
+}
+
+function analyzeScatterSelection() {
+  const selection = scatterPendingSelection.value
+  if (!selection) return
+  compareModeActive.value = true
+  bubbleUpSelection.value = {
+    startIdx: 0, endIdx: 0, startTime: selection.startTime, endTime: selection.endTime,
+    minDurationNs: selection.minDurationNs, maxDurationNs: selection.maxDurationNs,
+    errorsOnly: selection.errorsOnly, excludeFromBaseline: true, label: selection.label,
+  }
   void runBubbleUp()
+}
+
+function openCompareMode() {
+  compareModeActive.value = true
+  scatterExpanded.value = true
+}
+
+function runQuickCompare(kind: 'slow' | 'errors' | 'recent') {
+  openCompareMode()
+  prepareScatterQuickAnalysis(kind)
+  analyzeScatterSelection()
+}
+
+function openScatterSpan(row: RushEvent) {
+  const index = results.value.findIndex((candidate) => candidate.span_id === row.span_id)
+  if (index >= 0) openDetailModal(index)
+}
+
+function scatterTooltipStyle(x: number, y: number) {
+  return {
+    left: `${(x / SCATTER_W) * 100}%`,
+    top: `${(y / SCATTER_H) * 100}%`,
+  }
+}
+
+function scatterPointLabel(point: ScatterPoint): string {
+  const row = point.row
+  const operation = `${row.service_name} ${row.http_method || ''} ${row.http_path || '(unknown operation)'}`.replace(/\s+/g, ' ').trim()
+  return `${operation}, ${formatDuration(row.duration_ns)}, ${point.error ? 'error' : 'successful span'}`
 }
 
 // ═══ Logs match histogram: fetch + render + click-to-zoom ═══
@@ -1770,7 +1984,17 @@ function onGlobalDragEnd() {
 }
 
 // ═══ BubbleUp Analysis ═══
-const bubbleUpSelection = ref<{ startIdx: number; endIdx: number; startTime: string; endTime: string } | null>(null)
+const bubbleUpSelection = ref<{
+  startIdx: number
+  endIdx: number
+  startTime: string
+  endTime: string
+  minDurationNs?: number
+  maxDurationNs?: number
+  errorsOnly?: boolean
+  excludeFromBaseline?: boolean
+  label?: string
+} | null>(null)
 const bubbleUpResult = ref<BubbleUpResponse | null>(null)
 const bubbleUpLoading = ref(false)
 const bubbleUpError = ref<string | null>(null)
@@ -1811,11 +2035,14 @@ function selectBubbleUpRange(lo: number, hi: number) {
     endIdx: hi,
     startTime: fromDate.toISOString(),
     endTime: toDate.toISOString(),
+    excludeFromBaseline: true,
+    label: 'Selected time window',
   }
 }
 
 async function runBubbleUp() {
   if (!bubbleUpSelection.value) return
+  compareModeActive.value = true
   bubbleUpLoading.value = true
   bubbleUpError.value = null
   bubbleUpResult.value = null
@@ -1831,7 +2058,15 @@ async function runBubbleUp() {
       signal: viewMode.value === 'logs' ? 'logs' : 'spans',
       filters: getActiveFilters(),
       top_k: 10,
+      selection_min_duration_ns: sel.minDurationNs,
+      selection_max_duration_ns: sel.maxDurationNs,
+      selection_errors_only: sel.errorsOnly,
+      exclude_selection_from_baseline: sel.excludeFromBaseline,
     })
+    if (result.selection_count === 0) {
+      bubbleUpError.value = 'No spans matched this cohort. Drag a slightly larger area and analyze again.'
+      return
+    }
     bubbleUpResult.value = result
   } catch (e: any) {
     bubbleUpError.value = e.message || 'BubbleUp analysis failed'
@@ -1846,7 +2081,22 @@ function closeBubbleUp() {
   bubbleUpLoading.value = false
   bubbleUpError.value = null
   scatterBrush.value = null
-  scatterSelectionSummary.value = ''
+  scatterPendingSelection.value = null
+  scatterHoverPoint.value = null
+  scatterHoverDensity.value = null
+}
+
+function closeCompareMode() {
+  compareModeActive.value = false
+  closeBubbleUp()
+}
+
+const compareSelectionLabel = computed(() => bubbleUpSelection.value?.label || 'Selected cohort')
+
+const compareFindings = computed(() => bubbleUpResult.value ? rankCompareFindings(bubbleUpResult.value) : [])
+
+function filterToCompareFinding(dimension: string, value: string) {
+  addFilterFromBubbleUp(dimension, value)
 }
 
 // Map friendly dimension names back to ClickHouse column names for filtering
@@ -1868,18 +2118,6 @@ function addFilterFromBubbleUp(dimension: string, value: string) {
   const field = dimensionToField[dimension] || dimension
   addFilter(field, value)
   closeBubbleUp()
-}
-
-function liftClass(lift: number): string {
-  if (lift >= 5) return 'lift-very-high'
-  if (lift >= 2) return 'lift-high'
-  if (lift >= 1) return 'lift-normal'
-  return 'lift-low'
-}
-
-function liftLabel(lift: number): string {
-  if (lift >= 1) return `\u2191${lift.toFixed(1)}x`
-  return `\u2193${lift.toFixed(1)}x`
 }
 
 function formatBubbleUpTime(iso: string): string {
@@ -3591,7 +3829,7 @@ onMounted(async () => {
     const buFrom = route.query.bu_from as string | undefined
     const buTo   = route.query.bu_to   as string | undefined
     if (buFrom && buTo) {
-      bubbleUpSelection.value = { startIdx: 0, endIdx: 0, startTime: buFrom, endTime: buTo }
+      bubbleUpSelection.value = { startIdx: 0, endIdx: 0, startTime: buFrom, endTime: buTo, excludeFromBaseline: true }
       await runBubbleUp()
     }
   }
@@ -4534,7 +4772,7 @@ onMounted(async () => {
     </div>
 
     <!-- ═══ Main layout: Sidebar + Content ═══ -->
-    <div class="explore-body">
+    <div class="explore-body" :class="{ 'compare-active': compareModeActive && viewMode === 'spans' }">
 
       <!-- ═══ Facets Sidebar ═══ -->
       <aside class="facet-sidebar">
@@ -4720,40 +4958,196 @@ onMounted(async () => {
             <button :class="{ active: apmResultMode === 'individual' }" @click="apmResultMode = 'individual'">Individual spans</button>
             <button :class="{ active: apmResultMode === 'groups' }" @click="apmResultMode = 'groups'">Trace groups <span>{{ traceGroups.length }}</span></button>
           </div>
-          <span v-if="apmResultMode === 'groups'" class="apm-result-note">Grouped by root service, method, and route</span>
+          <div class="apm-result-actions">
+            <span v-if="apmResultMode === 'groups'" class="apm-result-note">Grouped by root service, method, and route</span>
+            <button
+              class="compare-mode-button"
+              :class="{ active: compareModeActive }"
+              :aria-pressed="compareModeActive"
+              @click="compareModeActive ? closeCompareMode() : openCompareMode()"
+            >
+              <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3 4.5h5M10 4.5h5M6 2l2 2.5L6 7M12 11l-2 2.5 2 2.5M3 13.5h5M10 13.5h5"/></svg>
+              Compare cohorts
+              <span v-if="bubbleUpResult" class="compare-mode-count">{{ compareFindings.length }}</span>
+            </button>
+          </div>
         </div>
 
-        <!-- Latency/error scatter: brush outliers to run BubbleUp -->
-        <div v-if="viewMode === 'spans' && apmResultMode === 'individual' && scatterPoints.length" class="scatter-card card fade-in">
-          <div class="scatter-header">
-            <div><span class="scatter-title">Latency outliers</span><span class="scatter-subtitle">time × duration · red = error</span></div>
-            <span class="scatter-hint mono">Drag a region to compare it with baseline</span>
-          </div>
-          <svg
-            class="scatter-svg"
-            :viewBox="`0 0 ${SCATTER_W} ${SCATTER_H}`"
-            preserveAspectRatio="none"
-            @pointerdown="startScatterBrush"
-            @pointermove="moveScatterBrush"
-            @pointerup="finishScatterBrush"
+        <!-- Latency over time: inspect spans, select a cohort, then run BubbleUp. -->
+        <div v-if="viewMode === 'spans' && apmResultMode === 'individual' && scatterStats.count" class="scatter-card card fade-in" :class="{ collapsed: !scatterExpanded }">
+          <button
+            class="scatter-disclosure"
+            type="button"
+            :aria-expanded="scatterExpanded"
+            aria-controls="latency-over-time-chart"
+            @click="toggleScatterExpanded"
           >
-            <line x1="24" :y1="SCATTER_H - 18" :x2="SCATTER_W - 24" :y2="SCATTER_H - 18" class="scatter-axis" />
-            <circle
-              v-for="point in scatterPoints"
-              :key="point.row.span_id"
-              :cx="point.x" :cy="point.y" :r="point.error ? 4 : 3"
-              class="scatter-point" :class="{ error: point.error }"
-            ><title>{{ point.row.service_name }} · {{ formatDuration(point.row.duration_ns) }} · {{ point.row.http_status_code || point.row.status }}</title></circle>
-            <rect
-              v-if="scatterBrush"
-              :x="Math.min(scatterBrush.x1, scatterBrush.x2)"
-              :y="Math.min(scatterBrush.y1, scatterBrush.y2)"
-              :width="Math.abs(scatterBrush.x2 - scatterBrush.x1)"
-              :height="Math.abs(scatterBrush.y2 - scatterBrush.y1)"
-              class="scatter-selection"
-            />
-          </svg>
-          <div class="scatter-footer"><span>earlier</span><span v-if="scatterSelectionSummary" class="scatter-selected">{{ scatterSelectionSummary }} · analyzing</span><span>later</span></div>
+            <span class="scatter-disclosure-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M3 17l4.5-5 3.5 3 4.5-8 5.5 4"/><circle cx="7.5" cy="12" r="1.5"/><circle cx="15.5" cy="7" r="1.5"/></svg>
+            </span>
+            <span class="scatter-heading">
+              <span class="scatter-title">Latency over time</span>
+              <span class="scatter-subtitle">Inspect individual spans and compare slow cohorts.</span>
+            </span>
+            <span class="scatter-summary" aria-label="Loaded latency percentiles">
+              <span><small>P50</small><strong class="mono">{{ formatDuration(scatterStats.p50) }}</strong></span>
+              <span><small>P95</small><strong class="mono">{{ formatDuration(scatterStats.p95) }}</strong></span>
+              <span><small>P99</small><strong class="mono">{{ formatDuration(scatterStats.p99) }}</strong></span>
+              <span v-if="scatterStats.errors" class="scatter-error-count"><small>Errors</small><strong class="mono">{{ scatterStats.errors }}</strong></span>
+            </span>
+            <span class="scatter-disclosure-action">
+              {{ scatterExpanded ? 'Hide chart' : 'Show chart' }}
+              <svg :class="{ expanded: scatterExpanded }" viewBox="0 0 12 8" aria-hidden="true"><path d="M1 1.5L6 6.5 11 1.5"/></svg>
+            </span>
+          </button>
+
+          <div v-if="scatterExpanded" id="latency-over-time-chart" class="scatter-content">
+            <div class="scatter-actions">
+              <div class="scatter-chart-controls">
+                <span class="scatter-instruction">Each dot is a span. Higher dots took longer. Drag to select a cohort.</span>
+                <div class="scatter-mode-toggle" role="group" aria-label="Latency chart display">
+                  <button :class="{ active: scatterMode === 'dots' }" @click="scatterMode = 'dots'">Dots</button>
+                  <button :class="{ active: scatterMode === 'density' }" @click="scatterMode = 'density'">Density</button>
+                </div>
+              </div>
+            <div class="scatter-quick-actions" aria-label="Quick latency analyses">
+              <button @click="prepareScatterQuickAnalysis('slow')">Analyze slowest 5%</button>
+              <button @click="prepareScatterQuickAnalysis('errors')">Analyze all errors</button>
+              <button @click="prepareScatterQuickAnalysis('recent')">Compare before / after</button>
+            </div>
+            </div>
+
+          <div class="scatter-plot-wrap">
+            <svg
+              class="scatter-svg"
+              :viewBox="`0 0 ${SCATTER_W} ${SCATTER_H}`"
+              preserveAspectRatio="none"
+              role="img"
+              aria-label="Span latency over time. Use pointer drag to select a cohort, or tab to individual dots and press Enter to inspect a span."
+              @pointerdown="startScatterBrush"
+              @pointermove="moveScatterBrush"
+              @pointerup="finishScatterBrush"
+              @pointercancel="scatterDragging = false"
+            >
+              <!-- Slow-tail region above P95. -->
+              <rect
+                :x="SCATTER_PAD.left" :y="SCATTER_PAD.top"
+                :width="SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right"
+                :height="Math.max(0, scatterY(scatterStats.p95) - SCATTER_PAD.top)"
+                class="scatter-slow-zone"
+              />
+
+              <!-- Real axes and logarithmic duration ticks. -->
+              <g v-for="tick in scatterYTicks" :key="`y-${tick.value}`">
+                <line :x1="SCATTER_PAD.left" :x2="SCATTER_W - SCATTER_PAD.right" :y1="tick.y" :y2="tick.y" class="scatter-grid" />
+                <text :x="SCATTER_PAD.left - 10" :y="tick.y + 3" text-anchor="end" class="scatter-axis-label">{{ tick.label }}</text>
+              </g>
+              <g v-for="tick in scatterXTicks" :key="`x-${tick.x}`">
+                <line :x1="tick.x" :x2="tick.x" :y1="SCATTER_PAD.top" :y2="SCATTER_H - SCATTER_PAD.bottom" class="scatter-grid scatter-grid-x" />
+                <text :x="tick.x" :y="SCATTER_H - 10" text-anchor="middle" class="scatter-axis-label">{{ tick.label }}</text>
+              </g>
+              <text x="13" :y="SCATTER_H / 2" text-anchor="middle" class="scatter-axis-title" :transform="`rotate(-90 13 ${SCATTER_H / 2})`">Duration · logarithmic</text>
+
+              <!-- P50/P95/P99 establish the service's current latency context. -->
+              <g v-for="line in scatterPercentiles" :key="line.label" :class="`scatter-percentile ${line.cls}`">
+                <line :x1="SCATTER_PAD.left" :x2="SCATTER_W - SCATTER_PAD.right" :y1="line.y" :y2="line.y" />
+              </g>
+              <text :x="SCATTER_PAD.left + 8" :y="SCATTER_PAD.top + 12" class="scatter-slow-label">Slow tail · above P95</text>
+
+              <template v-if="scatterMode === 'dots'">
+                <circle
+                  v-for="point in scatterPoints"
+                  :key="point.row.span_id"
+                  :cx="point.x" :cy="point.y" :r="point.error ? 4.4 : 3.2"
+                  class="scatter-point"
+                  :class="{ error: point.error, selected: scatterSelectedIds.has(point.row.span_id) }"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="scatterPointLabel(point)"
+                  @pointerdown.stop
+                  @mouseenter="scatterHoverPoint = point"
+                  @mouseleave="scatterHoverPoint = null"
+                  @focus="scatterHoverPoint = point"
+                  @blur="scatterHoverPoint = null"
+                  @click.stop="openScatterSpan(point.row)"
+                  @keydown.enter.prevent="openScatterSpan(point.row)"
+                  @keydown.space.prevent="openScatterSpan(point.row)"
+                />
+              </template>
+              <template v-else>
+                <circle
+                  v-for="(bin, i) in scatterDensityBins"
+                  :key="`density-${i}`"
+                  :cx="bin.x" :cy="bin.y" :r="Math.min(15, 3 + Math.sqrt(bin.count) * 2.2)"
+                  class="scatter-density"
+                  :class="{ error: bin.errors / bin.count >= .5 }"
+                  :style="{ opacity: Math.min(.9, .28 + bin.count / 12) }"
+                  @pointerdown.stop
+                  @mouseenter="scatterHoverDensity = bin"
+                  @mouseleave="scatterHoverDensity = null"
+                />
+              </template>
+
+              <rect
+                v-if="scatterBrush"
+                :x="Math.min(scatterBrush.x1, scatterBrush.x2)"
+                :y="Math.min(scatterBrush.y1, scatterBrush.y2)"
+                :width="Math.abs(scatterBrush.x2 - scatterBrush.x1)"
+                :height="Math.abs(scatterBrush.y2 - scatterBrush.y1)"
+                class="scatter-selection"
+              />
+            </svg>
+
+            <div v-if="scatterHoverPoint" class="scatter-tooltip" :style="scatterTooltipStyle(scatterHoverPoint.x, scatterHoverPoint.y)">
+              <strong>{{ scatterHoverPoint.row.service_name }} · {{ scatterHoverPoint.row.http_method || 'SPAN' }} {{ scatterHoverPoint.row.http_path || '(unknown operation)' }}</strong>
+              <span><b>{{ formatDuration(scatterHoverPoint.row.duration_ns) }}</b> duration · {{ scatterHoverPoint.error ? 'error' : `HTTP ${scatterHoverPoint.row.http_status_code || 'ok'}` }}</span>
+              <span>{{ formatTimestamp(scatterHoverPoint.row.timestamp) }}</span>
+              <em>Click to inspect span</em>
+            </div>
+            <div v-else-if="scatterHoverDensity" class="scatter-tooltip" :style="scatterTooltipStyle(scatterHoverDensity.x, scatterHoverDensity.y)">
+              <strong>{{ scatterHoverDensity.count }} spans in this area</strong>
+              <span>{{ formatDuration(scatterHoverDensity.minNs) }}–{{ formatDuration(scatterHoverDensity.maxNs) }}</span>
+              <span>{{ scatterHoverDensity.errors }} errors</span>
+            </div>
+          </div>
+
+          <div class="scatter-footer">
+            <div class="scatter-legends">
+              <div class="scatter-percentile-legend" aria-label="Latency percentile reference lines">
+                <span v-for="line in scatterPercentiles" :key="`legend-${line.label}`">
+                  <i :class="`percentile-swatch ${line.cls}`" />
+                  <strong>{{ line.label }}</strong>
+                  <b class="mono">{{ formatDuration(line.value) }}</b>
+                </span>
+              </div>
+              <div class="scatter-legend">
+                <span><i class="legend-dot normal" /> normal span</span>
+                <span><i class="legend-dot error" /> error / HTTP 5xx</span>
+                <span><i class="legend-dot selected" /> selected</span>
+              </div>
+            </div>
+            <span>Chart uses loaded results; scroll the table to load up to 500 spans.</span>
+          </div>
+
+            <div v-if="scatterPendingSelection && scatterSelectionSummary" class="scatter-review" aria-live="polite">
+            <div class="scatter-review-copy">
+              <span class="scatter-review-kicker">Ready to compare</span>
+              <strong>{{ scatterPendingSelection.label }}</strong>
+              <p>
+                All matching spans in the full query · {{ scatterSelectionSummary.time }} · {{ scatterSelectionSummary.duration }}
+                <template v-if="scatterSelectionSummary.count">
+                  · loaded preview: {{ scatterSelectionSummary.count }} spans
+                  <template v-if="scatterSelectionSummary.errors">, {{ scatterSelectionSummary.errors }} errors</template>
+                  across {{ scatterSelectionSummary.services }} service{{ scatterSelectionSummary.services === 1 ? '' : 's' }}
+                </template>
+              </p>
+            </div>
+            <div class="scatter-review-actions">
+              <button class="scatter-clear" @click="clearScatterSelection">Clear selection</button>
+              <button class="scatter-analyze" :disabled="!scatterSelectionSummary.count && !scatterPendingSelection.queryWide" @click="analyzeScatterSelection">Compare with baseline</button>
+            </div>
+            </div>
+          </div>
         </div>
 
         <!-- ═══ Histogram: waiting / loading / ready ═══ -->
@@ -4896,78 +5290,6 @@ onMounted(async () => {
             <span>{{ matchHistoRange.to }}</span>
           </div>
         </PanelCard>
-
-        <!-- ═══ BubbleUp Analysis Panel ═══ -->
-        <div v-if="bubbleUpLoading || bubbleUpResult || bubbleUpError" class="bubbleup-panel card fade-in">
-          <div class="bubbleup-panel-header">
-            <div class="bubbleup-panel-title">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="flex-shrink:0">
-                <circle cx="8" cy="8" r="6" stroke="var(--amber)" stroke-width="1.5" fill="none"/>
-                <path d="M8 5v3M8 10v.5" stroke="var(--amber)" stroke-width="1.5" stroke-linecap="round"/>
-              </svg>
-              <span>BubbleUp Analysis</span>
-            </div>
-            <button class="bubbleup-close" @click="closeBubbleUp()" title="Close">&#10005;</button>
-          </div>
-          <div v-if="bubbleUpSelection" class="bubbleup-meta mono">
-            <span>Selection: {{ formatBubbleUpTime(bubbleUpSelection.startTime) }}&ndash;{{ formatBubbleUpTime(bubbleUpSelection.endTime) }}
-              <span v-if="bubbleUpResult" class="bubbleup-meta-count">({{ bubbleUpResult.selection_count.toLocaleString() }} events)</span>
-            </span>
-            <span v-if="bubbleUpResult">Baseline: rest of visible range
-              <span class="bubbleup-meta-count">({{ bubbleUpResult.baseline_count.toLocaleString() }} events)</span>
-            </span>
-          </div>
-
-          <!-- Loading state -->
-          <div v-if="bubbleUpLoading" class="bubbleup-loading">
-            <div class="bubbleup-skeleton" v-for="n in 3" :key="n">
-              <div class="bubbleup-skeleton-header"></div>
-              <div class="bubbleup-skeleton-bar" style="width:80%"></div>
-              <div class="bubbleup-skeleton-bar" style="width:45%"></div>
-              <div class="bubbleup-skeleton-bar" style="width:25%"></div>
-            </div>
-            <div style="text-align:center;padding:8px 0">
-              <svg width="20" height="20" viewBox="0 0 20 20" style="vertical-align:middle"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--border)" stroke-width="2"/><circle cx="10" cy="10" r="8" fill="none" stroke="var(--amber)" stroke-width="2" stroke-dasharray="20 32" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 10 10" to="360 10 10" dur="0.7s" repeatCount="indefinite"/></circle></svg>
-              <span class="text-muted" style="font-size:11px;margin-left:8px">Analyzing dimensions&hellip;</span>
-            </div>
-          </div>
-
-          <!-- Error state -->
-          <div v-else-if="bubbleUpError" class="bubbleup-error">
-            <span class="status-error">&#10005;</span>
-            <span class="mono" style="font-size:11px">{{ bubbleUpError }}</span>
-          </div>
-
-          <!-- Results -->
-          <div v-else-if="bubbleUpResult" class="bubbleup-dimensions">
-            <div v-if="!bubbleUpResult.dimensions.length" class="bubbleup-empty text-muted">
-              No significant dimensional differences found.
-            </div>
-            <div v-for="dim in bubbleUpResult.dimensions" :key="dim.name" class="bubbleup-dim">
-              <div class="bubbleup-dim-header">{{ dim.name }}</div>
-              <div class="bubbleup-dim-values">
-                <div
-                  v-for="val in dim.values"
-                  :key="val.value"
-                  class="bubbleup-val-row"
-                  :class="liftClass(val.lift)"
-                  @click="addFilterFromBubbleUp(dim.name, val.value)"
-                  :title="`Click to filter by ${dim.name}=${val.value}`"
-                >
-                  <span class="bubbleup-val-label">{{ val.value || '(empty)' }}</span>
-                  <div class="bubbleup-val-bar-bg">
-                    <div
-                      class="bubbleup-val-bar"
-                      :style="{ width: Math.max(2, val.selection_pct) + '%' }"
-                    ></div>
-                  </div>
-                  <span class="bubbleup-val-pct mono">{{ val.selection_pct.toFixed(0) }}%</span>
-                  <span class="bubbleup-val-lift mono" :class="liftClass(val.lift)">{{ liftLabel(val.lift) }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
 
         <!-- ═══ Loading State (all modes) ═══ -->
         <div v-if="searching" class="empty-state card">
@@ -5388,6 +5710,106 @@ onMounted(async () => {
         </div><!-- /event-table (logs) -->
 
       </div><!-- /explore-main -->
+
+      <aside
+        v-if="compareModeActive && viewMode === 'spans'"
+        class="compare-findings-rail fade-in"
+        aria-label="Cohort comparison findings"
+      >
+        <header class="compare-rail-header">
+          <div>
+            <span class="compare-rail-kicker">Investigation lens</span>
+            <h2>Compare cohorts</h2>
+          </div>
+          <button class="compare-rail-close" title="Close comparison" aria-label="Close comparison" @click="closeCompareMode">&#10005;</button>
+        </header>
+
+        <div v-if="bubbleUpSelection" class="compare-cohort-summary">
+          <div class="compare-cohort-row cohort-a">
+            <i aria-hidden="true" />
+            <div>
+              <span>Cohort A</span>
+              <strong>{{ compareSelectionLabel }}</strong>
+              <small>{{ formatBubbleUpTime(bubbleUpSelection.startTime) }}–{{ formatBubbleUpTime(bubbleUpSelection.endTime) }}</small>
+            </div>
+            <b v-if="bubbleUpResult" class="mono">{{ bubbleUpResult.selection_count.toLocaleString() }}</b>
+          </div>
+          <div class="compare-cohort-row cohort-b">
+            <i aria-hidden="true" />
+            <div>
+              <span>Baseline B</span>
+              <strong>Everything else</strong>
+              <small>Same query and visible time range</small>
+            </div>
+            <b v-if="bubbleUpResult" class="mono">{{ bubbleUpResult.baseline_count.toLocaleString() }}</b>
+          </div>
+        </div>
+
+        <div v-if="bubbleUpLoading" class="compare-rail-loading" aria-live="polite">
+          <span class="compare-loading-mark" aria-hidden="true" />
+          <strong>Comparing dimensions</strong>
+          <p>Testing services, operations, routes, status, and infrastructure attributes.</p>
+          <div v-for="n in 4" :key="n" class="compare-loading-row"><i /><span /></div>
+        </div>
+
+        <div v-else-if="bubbleUpError" class="compare-rail-error" role="alert">
+          <strong>Comparison could not run</strong>
+          <p>{{ bubbleUpError }}</p>
+          <button @click="runBubbleUp">Try again</button>
+        </div>
+
+        <template v-else-if="bubbleUpResult">
+          <div class="compare-findings-heading">
+            <div>
+              <span>Ranked evidence</span>
+              <strong>{{ compareFindings.length }} meaningful difference{{ compareFindings.length === 1 ? '' : 's' }}</strong>
+            </div>
+            <small>Selection vs baseline</small>
+          </div>
+
+          <div v-if="compareFindings.length" class="compare-findings-list">
+            <article v-for="(finding, index) in compareFindings" :key="`${finding.dimension}:${finding.rawValue}`" class="compare-finding">
+              <div class="compare-finding-topline">
+                <span class="compare-finding-rank mono">{{ String(index + 1).padStart(2, '0') }}</span>
+                <span class="compare-finding-dimension">{{ finding.dimension }}</span>
+                <span class="compare-finding-strength" :class="compareFindingStrength(finding.lift, finding.selectionCount)">
+                  {{ compareFindingStrength(finding.lift, finding.selectionCount) }}
+                </span>
+              </div>
+              <strong class="compare-finding-value">{{ finding.value }}</strong>
+              <p>{{ compareFindingSummary(finding) }}</p>
+              <div class="compare-finding-bars" aria-label="Cohort and baseline prevalence">
+                <div><span>A</span><i><b :style="{ width: `${Math.max(2, finding.selectionPct)}%` }" /></i><em>{{ finding.selectionPct.toFixed(0) }}%</em></div>
+                <div><span>B</span><i><b :style="{ width: `${Math.max(2, finding.baselinePct)}%` }" /></i><em>{{ finding.baselinePct.toFixed(0) }}%</em></div>
+              </div>
+              <button class="compare-finding-action" @click="filterToCompareFinding(finding.dimension, finding.rawValue)">
+                Filter to this evidence <span aria-hidden="true">&rarr;</span>
+              </button>
+            </article>
+          </div>
+          <div v-else class="compare-rail-empty compact">
+            <strong>No meaningful dimensional differences</strong>
+            <p>The selected cohort resembles the baseline across the dimensions Rush tested.</p>
+          </div>
+
+          <footer class="compare-trust-footer">
+            <span>Evidence scope</span>
+            <p><b>{{ bubbleUpResult.selection_count.toLocaleString() }}</b> selected and <b>{{ bubbleUpResult.baseline_count.toLocaleString() }}</b> baseline events. Rankings combine prevalence difference and supporting event count.</p>
+          </footer>
+        </template>
+
+        <div v-else class="compare-rail-empty">
+          <span class="compare-empty-glyph" aria-hidden="true">A/B</span>
+          <strong>Choose the behavior to explain</strong>
+          <p>Select an area in Latency over time, or begin with a common incident comparison.</p>
+          <div class="compare-starters">
+            <button :disabled="!scatterStats.count" @click="runQuickCompare('slow')"><b>Slowest 5%</b><span>vs all faster spans</span></button>
+            <button :disabled="!scatterStats.errors" @click="runQuickCompare('errors')"><b>Errors</b><span>vs successful spans</span></button>
+            <button :disabled="!scatterStats.count" @click="runQuickCompare('recent')"><b>Recent half</b><span>vs earlier traffic</span></button>
+          </div>
+          <small>Rush compares the full query, not only the rows currently loaded in the table.</small>
+        </div>
+      </aside>
     </div><!-- /explore-body -->
 
     <!-- ═══ Keyboard Shortcuts Overlay ═══ -->

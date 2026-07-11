@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
+import { useTenant } from '../composables/useTenant'
 import SpanLogTable from '../components/SpanLogTable.vue'
 import TimePicker from '../components/TimePicker.vue'
 import PanelCard from '../components/PanelCard.vue'
@@ -12,6 +13,7 @@ const route = useRoute()
 const router = useRouter()
 const api = useApi()
 const { features, loadFeatures } = useFeatures()
+const { activeTenant } = useTenant()
 
 const serviceName = computed(() => route.params.serviceName as string)
 
@@ -35,8 +37,8 @@ const endpoints = ref<EndpointRow[]>([])
 const endpointsMode = ref<'server' | 'operation'>('server')
 const endpointsLoading = ref(false)
 const endpointsSeen = ref(false)
-type EpSortKey = 'endpoint' | 'req' | 'errRate' | 'p50_ms' | 'p95_ms' | 'p99_ms'
-const epSortKey = ref<EpSortKey>('req')
+type EpSortKey = 'endpoint' | 'impact' | 'req' | 'errRate' | 'p50_ms' | 'p95_ms' | 'p99_ms'
+const epSortKey = ref<EpSortKey>('impact')
 const epSortDir = ref<'asc' | 'desc'>('desc')
 
 // Top Errors: grouped failures, by errored endpoint (status×method×path) or by
@@ -45,8 +47,15 @@ const errorGroups = ref<ErrorGroup[]>([])
 const errorsMode = ref<'endpoint' | 'message'>('endpoint')
 const errorsLoading = ref(false)
 const errorsSeen = ref(false)
+// Lightweight evidence used by the operational briefing. These are kept
+// separate from the lazy Endpoints tab so changing that tab to Operations or
+// message-pattern mode never changes the briefing's meaning.
+const briefingEndpoints = ref<EndpointRow[]>([])
+const briefingErrors = ref<ErrorGroup[]>([])
+const briefingSignalsLoading = ref(false)
 const traces = ref<RushEvent[]>([])
 const loading = ref(true)
+const serviceStatus = ref<'checking' | 'found' | 'missing' | 'error'>('checking')
 const initMinutes = Number(route.query.t)
 const minutes = ref(initMinutes > 0 ? initMinutes : 60)
 
@@ -114,17 +123,6 @@ function relTime(ts: string): string {
   return `${Math.floor(h / 24)}d ago`
 }
 
-// Raw fetch to avoid polluting shared api.loading
-async function fetchApi<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api/v1${path}`, {
-    method: body ? 'POST' : 'GET',
-    headers: { 'Content-Type': 'application/json' },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  })
-  if (!res.ok) throw new Error(`${res.status}`)
-  return res.json()
-}
-
 function detailInterval(): string {
   const m = minutes.value
   if (m <= 15) return '1m'
@@ -151,6 +149,11 @@ function svcFilters(): Filter[] {
 // a section that's already been revealed without waking ones still unseen.
 const tracesSeen = ref(false)
 const tracesLoading = ref(false)
+const logTraces = ref<RushEvent[]>([])
+const logsSeen = ref(false)
+const logsLoading = ref(false)
+const logsLoadingMore = ref(false)
+const logNextCursor = ref<string | null>(null)
 const funnelsSeen = ref(false)
 const funnelsRef = ref<HTMLElement | null>(null)
 // Combined Endpoints / Top Errors tabbed card (APM Logs is now its own top-level tab).
@@ -175,11 +178,13 @@ function tabFromRoute(): MainTab {
 }
 const activeTab = ref<MainTab>(tabFromRoute())
 
-// Trigger the lazy fetch backing a tab (no-op if already loaded). Spans and Logs
-// share the same span feed (logs are extracted from span events).
+// Trigger the lazy fetch backing a tab (no-op if already loaded). Logs are
+// extracted from span events, but use a deeper independent feed so the log
+// console can show substantially more lines without making Spans heavier.
 function loadTabData(t: MainTab) {
   if (t === 'endpoints') loadActiveServiceTab()
-  else if (t === 'spans' || t === 'logs') { if (!tracesSeen.value) loadTraces() }
+  else if (t === 'spans') { if (!tracesSeen.value) loadTraces() }
+  else if (t === 'logs') { if (!logsSeen.value) loadLogTraces() }
   else if (t === 'funnels') { if (!funnelsSeen.value) { funnelsSeen.value = true; loadSvcFunnels() } }
 }
 
@@ -241,7 +246,7 @@ async function loadData() {
   try {
     const [graphRes, tsRes] = await Promise.all([
       api.serviceGraph(minutes.value),
-      fetchApi<{ buckets: TimeseriesBucket[]; grouped: boolean }>('/query/timeseries', {
+      api.queryTimeseries({
         time_range: { from, to },
         filters,
         interval: detailInterval(),
@@ -261,11 +266,13 @@ async function loadData() {
   // to avoid a flash of empty overlay/histogram.
   loadSecondaryCharts()
   loadDeploys(from, to)
+  loadBriefingSignals()
 
   // A window change refetches sections the user has already scrolled to.
   if (endpointsSeen.value) loadEndpoints()
   if (errorsSeen.value) loadErrors()
-  if (tracesSeen.value) loadTraces()
+  if (tracesSeen.value && !tracesLoading.value) loadTraces()
+  if (logsSeen.value && !logsLoading.value && !logsLoadingMore.value) loadLogTraces()
   if (funnelsSeen.value) loadSvcFunnels()
 }
 
@@ -277,7 +284,7 @@ async function loadSecondaryCharts() {
   const filters = svcFilters()
   try {
     const [tsPrevRes, histRes] = await Promise.all([
-      fetchApi<{ buckets: TimeseriesBucket[]; grouped: boolean }>('/query/timeseries', {
+      api.queryTimeseries({
         time_range: { from: prevFrom, to: prevTo },
         filters,
         interval: detailInterval(),
@@ -297,7 +304,7 @@ async function loadTraces() {
   tracesLoading.value = true
   const { from, to } = windowRange()
   try {
-    const res = await fetchApi<{ rows: RushEvent[]; total: number }>('/query', {
+    const res = await api.queryEvents({
       time_range: { from, to },
       filters: svcFilters(),
       limit: 100,
@@ -307,6 +314,50 @@ async function loadTraces() {
     // silent
   } finally {
     tracesLoading.value = false
+  }
+}
+
+// The log console gets five times the source-event depth of the Spans tab.
+// This stays below the query API's 1,000-row cap and remains lazy/non-critical.
+const LOG_SOURCE_PAGE_SIZE = 500
+
+async function loadLogTraces(append = false) {
+  if (append && (!logNextCursor.value || logsLoadingMore.value)) return
+  logsSeen.value = true
+  if (append) logsLoadingMore.value = true
+  else {
+    logsLoading.value = true
+    logNextCursor.value = null
+  }
+  const { from, to } = windowRange()
+  try {
+    const res = await api.queryEvents({
+      time_range: { from, to },
+      filters: svcFilters(),
+      limit: LOG_SOURCE_PAGE_SIZE,
+      ...(append && logNextCursor.value ? { cursor: logNextCursor.value } : {}),
+    })
+    if (append) {
+      // Cursor pages should not overlap, but de-dupe defensively in case older
+      // servers fall back to offset behavior for a malformed/stale cursor.
+      const seen = new Set(logTraces.value.map((row) => `${row.timestamp}:${row.span_id}`))
+      logTraces.value = [...logTraces.value, ...res.rows.filter((row) => !seen.has(`${row.timestamp}:${row.span_id}`))]
+    } else {
+      logTraces.value = res.rows
+    }
+    logNextCursor.value = res.rows.length === LOG_SOURCE_PAGE_SIZE ? (res.next_cursor ?? null) : null
+  } catch {
+    if (append) {
+      // Stop auto-retry loops while the sentinel remains visible. Refreshing or
+      // changing the time window starts a fresh cursor chain.
+      logNextCursor.value = null
+    } else {
+      logTraces.value = []
+      logNextCursor.value = null
+    }
+  } finally {
+    if (append) logsLoadingMore.value = false
+    else logsLoading.value = false
   }
 }
 
@@ -361,16 +412,67 @@ async function loadDeploys(from: string, to: string) {
   }
 }
 
-onMounted(() => {
-  loadData().then(() => nextTick(setupLazyObservers))
+// The briefing is useful above the fold, but its supporting endpoint/error
+// queries must not delay the primary RED metrics. Load them in parallel after
+// the critical timeseries request has settled.
+async function loadBriefingSignals() {
+  briefingSignalsLoading.value = true
+  const [ep, err] = await Promise.allSettled([
+    api.serviceEndpoints(serviceName.value, minutes.value, 'server'),
+    api.serviceErrors(serviceName.value, minutes.value, 'endpoint'),
+  ])
+  briefingEndpoints.value = ep.status === 'fulfilled' ? ep.value.endpoints : []
+  briefingErrors.value = err.status === 'fulfilled' ? err.value.groups : []
+  briefingSignalsLoading.value = false
+}
+
+async function initializeService() {
+  serviceStatus.value = 'checking'
+  loading.value = true
+  try {
+    const { services } = await api.getServices()
+    serviceStatus.value = services.some((service) => service.service_name === serviceName.value)
+      ? 'found'
+      : 'missing'
+  } catch {
+    serviceStatus.value = 'error'
+  }
+
+  if (serviceStatus.value !== 'found') {
+    loading.value = false
+    return
+  }
+
+  await loadData()
+  await nextTick(setupLazyObservers)
   // Deep link (?tab=spans|logs|endpoints|funnels): load that tab's data now.
   if (activeTab.value !== 'overview') loadTabData(activeTab.value)
   loadAttachments()
   if (features.value.deploy_markers === undefined) loadFeatures()
-})
+}
+
+onMounted(initializeService)
 onUnmounted(() => { lazyObservers.forEach((o) => o.disconnect()); lazyObservers = [] })
-watch(serviceName, loadAttachments)
-watch(minutes, loadData)
+watch(serviceName, () => {
+  // Vue reuses this component for /services/:serviceName navigation. Clear the
+  // previous service immediately so a failed or slow tenant-scoped request can
+  // never leave another service's data visible under the new URL.
+  graphNodes.value = []
+  graphEdges.value = []
+  timeseries.value = []
+  timeseriesPrev.value = []
+  latencyHist.value = null
+  endpoints.value = []
+  errorGroups.value = []
+  briefingEndpoints.value = []
+  briefingErrors.value = []
+  traces.value = []
+  logTraces.value = []
+  logNextCursor.value = null
+  deploys.value = []
+  initializeService()
+})
+watch(minutes, () => { if (serviceStatus.value === 'found') loadData() })
 
 const windowTo = computed(() => new Date().toISOString())
 const windowFrom = computed(() => new Date(Date.now() - minutes.value * 60_000).toISOString())
@@ -601,9 +703,9 @@ function histHoverLabel(idx: number): string {
 const histMinLabel = computed(() => hasHist.value ? fmtDur(Math.pow(2, histBars.value.minExp)) : '')
 const histMaxLabel = computed(() => hasHist.value ? fmtDur(Math.pow(2, histBars.value.maxExp + 1)) : '')
 
-// Summary stats
-const summary = computed(() => {
-  const buckets = timeseries.value
+type ServiceSummary = { total: number; errors: number; errorRate: number; avgMs: number; p50: number; p95: number; p99: number }
+
+function summarizeBuckets(buckets: TimeseriesBucket[]): ServiceSummary {
   if (buckets.length === 0) return { total: 0, errors: 0, errorRate: 0, avgMs: 0, p50: 0, p95: 0, p99: 0 }
   const total = buckets.reduce((s, b) => s + b.count, 0)
   const errors = buckets.reduce((s, b) => s + b.error_count, 0)
@@ -611,7 +713,12 @@ const summary = computed(() => {
   const avgMs = total > 0 ? buckets.reduce((s, b) => s + b.avg_duration_ms * b.count, 0) / total : 0
   const last = [...buckets].reverse().find((b) => b.count > 0)
   return { total, errors, errorRate, avgMs, p50: last?.p50_ms ?? 0, p95: last?.p95_ms ?? 0, p99: last?.p99_ms ?? 0 }
-})
+}
+
+// Summary stats for the active and immediately preceding windows. Keeping the
+// aggregation identical makes briefing deltas consistent with the cards.
+const summary = computed(() => summarizeBuckets(timeseries.value))
+const previousSummary = computed(() => summarizeBuckets(timeseriesPrev.value))
 
 // Service map edges
 const svcEdges = computed(() => {
@@ -654,6 +761,102 @@ function goToService(name: string) {
   router.push({ path: `/services/${encodeURIComponent(name)}`, query: { t: String(minutes.value) } })
 }
 
+// ═══ Operational briefing ═══
+// Rank evidence by likely user impact rather than by any one raw metric. The
+// score stays internal; the UI explains the concrete traffic/error/latency
+// facts so responders never have to trust an opaque number.
+function endpointImpact(e: EndpointRow): number {
+  return e.req * Math.max(e.p95_ms, 1) * (1 + epErrorRate(e) * 20)
+}
+function dependencyImpact(e: GraphEdge): number {
+  return e.request_count * Math.max(e.avg_duration_ms, 1) * (1 + edgeErrorRate(e) * 20)
+}
+
+const briefingTopEndpoint = computed(() =>
+  [...briefingEndpoints.value].sort((a, b) => endpointImpact(b) - endpointImpact(a))[0] ?? null
+)
+const briefingTopError = computed(() =>
+  [...briefingErrors.value].sort((a, b) => b.count - a.count)[0] ?? null
+)
+const briefingDependency = computed(() =>
+  [...svcEdges.value.outgoing].sort((a, b) => dependencyImpact(b) - dependencyImpact(a))[0] ?? null
+)
+
+function relativeDelta(current: number, previous: number): number | null {
+  if (!timeseriesPrev.value.length || previous <= 0) return null
+  return ((current - previous) / previous) * 100
+}
+function signedPct(value: number | null): string {
+  if (value === null) return 'no baseline'
+  if (Math.abs(value) < 0.5) return 'unchanged'
+  return `${value > 0 ? '+' : ''}${value.toFixed(0)}%`
+}
+function deltaTone(value: number | null, increaseIsBad = true): string {
+  if (value === null || Math.abs(value) < 0.5) return 'flat'
+  const worse = increaseIsBad ? value > 0 : value < 0
+  return worse ? 'bad' : 'good'
+}
+
+const briefingDeltas = computed(() => ({
+  traffic: relativeDelta(summary.value.total, previousSummary.value.total),
+  errors: relativeDelta(summary.value.errorRate, previousSummary.value.errorRate),
+  p95: relativeDelta(summary.value.p95, previousSummary.value.p95),
+}))
+
+const briefingHeadline = computed(() => {
+  if (summary.value.total === 0) return 'No service traffic was observed in this window.'
+  if (health.value === 'unhealthy') return `Immediate attention: ${healthVerdict.value.reasons.join(', ')}.`
+  if (health.value === 'degraded') return `Service degradation detected: ${healthVerdict.value.reasons.join(', ')}.`
+  const d = briefingDeltas.value
+  if (d.errors !== null && d.errors >= 25) return `Error rate climbed ${signedPct(d.errors)} versus the previous ${humanWindow.value}.`
+  if (d.p95 !== null && d.p95 >= 25) return `P95 latency climbed ${signedPct(d.p95)} versus the previous ${humanWindow.value}.`
+  return `No material regression detected versus the previous ${humanWindow.value}.`
+})
+
+const briefingDetail = computed(() => {
+  const parts: string[] = []
+  const err = briefingTopError.value
+  const ep = briefingTopEndpoint.value
+  const dep = briefingDependency.value
+  if (err) parts.push(`${err.key} is the most frequent error (${formatCount(err.count)})`)
+  if (ep) parts.push(`${ep.endpoint} has the highest current impact`)
+  if (dep && edgeHealth(dep) !== 'healthy') parts.push(`${dep.target} is a ${edgeHealth(dep)} dependency`)
+  if (lastDeploy.value) parts.push(`${lastDeploy.value.version ? `v${lastDeploy.value.version}` : 'a deploy'} landed ${relTime(lastDeploy.value.deployed_at)}`)
+  return parts.length ? parts.join(' · ') : 'Traffic, errors, latency, dependencies, and attached signals are within their current thresholds.'
+})
+
+const briefingInvestigateTo = computed(() => {
+  const ep = briefingTopEndpoint.value
+  const err = briefingTopError.value
+  const dep = briefingDependency.value
+  const q = `Investigate what changed for ${serviceName.value} in the last ${humanWindow.value} and explain the likely cause of its ${healthVerdict.value.label} state.`
+  const context = [
+    `Traffic ${signedPct(briefingDeltas.value.traffic)} vs previous window`,
+    `error rate ${formatPercent(summary.value.errorRate)} (${signedPct(briefingDeltas.value.errors)})`,
+    `p95 ${formatMs(summary.value.p95)} (${signedPct(briefingDeltas.value.p95)})`,
+    ep ? `highest-impact endpoint ${ep.endpoint}` : '',
+    err ? `top error ${err.key} (${err.count})` : '',
+    dep ? `highest-impact downstream ${dep.target}` : '',
+    lastDeploy.value ? `latest deploy ${lastDeploy.value.version || lastDeploy.value.id} ${relTime(lastDeploy.value.deployed_at)}` : '',
+  ].filter(Boolean).join('; ')
+  return { path: '/investigate', query: { q, ctx: context } }
+})
+
+function exploreBriefingEndpoint() {
+  const e = briefingTopEndpoint.value
+  if (!e) return
+  const parts = [`service_name=${serviceName.value}`]
+  if (e.method) parts.push(`http_method=${e.method}`)
+  if (e.path) parts.push(`http_path=${e.path}`)
+  router.push({ path: '/', query: { q: parts.join(' '), t: String(minutes.value) } })
+}
+
+function openBriefingErrors() {
+  activeServiceTab.value = 'errors'
+  loadActiveServiceTab()
+  router.push({ query: { ...route.query, tab: 'endpoints' } })
+}
+
 // ═══ Endpoint breakdown helpers ═══
 function epErrorRate(e: EndpointRow): number {
   return e.req > 0 ? e.errors / e.req : 0
@@ -672,8 +875,25 @@ function formatRps(r: number): string {
   if (r > 0) return `${(r * 60).toFixed(1)}/min`
   return '0'
 }
+
+// Impact is deliberately modeled from metrics responders can verify in the
+// same row: traffic × p95 latency × an error-rate penalty. The table shows each
+// row's share of total modeled impact rather than the raw unitless score.
+const totalEndpointImpact = computed(() =>
+  endpoints.value.reduce((total, e) => total + endpointImpact(e), 0)
+)
+function epImpactShare(e: EndpointRow): number {
+  const total = totalEndpointImpact.value
+  return total > 0 ? endpointImpact(e) / total : 0
+}
+function formatImpactShare(e: EndpointRow): string {
+  const pct = epImpactShare(e) * 100
+  if (pct >= 10) return `${pct.toFixed(0)}%`
+  if (pct >= 1) return `${pct.toFixed(1)}%`
+  return pct > 0 ? '<1%' : '0%'
+}
 // Sorted view of the endpoint rows. Numeric keys sort by value; 'endpoint' by
-// label; 'errRate' is derived. Direction toggles per the header controls.
+// label; 'impact' and 'errRate' are derived. Direction toggles per the header.
 const sortedEndpoints = computed(() => {
   const rows = [...endpoints.value]
   const k = epSortKey.value
@@ -681,6 +901,7 @@ const sortedEndpoints = computed(() => {
   rows.sort((a, b) => {
     let av: number | string, bv: number | string
     if (k === 'endpoint') { av = a.endpoint; bv = b.endpoint }
+    else if (k === 'impact') { av = endpointImpact(a); bv = endpointImpact(b) }
     else if (k === 'errRate') { av = epErrorRate(a); bv = epErrorRate(b) }
     else { av = a[k]; bv = b[k] }
     if (typeof av === 'string') return dir * av.localeCompare(bv as string)
@@ -1037,6 +1258,26 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
 
 <template>
   <div class="svc-page">
+    <div v-if="serviceStatus === 'checking'" class="empty-state card">
+      <div class="empty-state-icon">&#9676;</div>
+      <div>Checking service access...</div>
+    </div>
+
+    <div v-else-if="serviceStatus === 'missing'" class="empty-state card">
+      <div class="empty-state-icon">&#8709;</div>
+      <div>Service not found in <span class="mono">{{ activeTenant }}</span></div>
+      <div class="text-muted"><span class="mono">{{ serviceName }}</span> has no APM data in the active tenant.</div>
+      <button class="back-btn" @click="router.push('/services')">&larr; Back to services</button>
+    </div>
+
+    <div v-else-if="serviceStatus === 'error'" class="empty-state card">
+      <div class="empty-state-icon">!</div>
+      <div>Could not verify service access</div>
+      <div class="text-muted">The tenant-scoped service list could not be loaded.</div>
+      <button class="refresh-btn" @click="initializeService">Try again</button>
+    </div>
+
+    <template v-else>
     <!-- Header -->
     <div class="svc-page-header">
       <div class="svc-page-left">
@@ -1080,6 +1321,59 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
     <template v-else>
       <!-- ░░░░ OVERVIEW ░░░░ — health KPIs, attached signals, topology -->
       <section v-show="activeTab === 'overview'" class="svc-panel">
+      <!-- Operational briefing: a concise answer to what changed and where to start. -->
+      <section class="svc-briefing" :class="health" aria-labelledby="svc-briefing-title">
+        <div class="svc-briefing-main">
+          <div class="svc-briefing-kicker">
+            <span class="svc-briefing-pulse" :class="health" />
+            <span>What changed</span>
+            <span class="svc-briefing-window">{{ humanWindow }} vs previous {{ humanWindow }}</span>
+          </div>
+          <h2 id="svc-briefing-title">{{ briefingHeadline }}</h2>
+          <p>{{ briefingSignalsLoading && !briefingTopEndpoint ? 'Ranking endpoint and error evidence…' : briefingDetail }}</p>
+        </div>
+        <router-link
+          v-if="features.sre_agent"
+          :to="briefingInvestigateTo"
+          class="svc-briefing-investigate"
+        >
+          Investigate regression <span aria-hidden="true">→</span>
+        </router-link>
+
+        <div class="svc-briefing-evidence">
+          <div class="svc-evidence">
+            <span class="svc-evidence-label">Traffic</span>
+            <strong class="mono">{{ formatCount(summary.total) }}</strong>
+            <span class="svc-evidence-delta" :class="deltaTone(briefingDeltas.traffic, false)">{{ signedPct(briefingDeltas.traffic) }}</span>
+          </div>
+          <div class="svc-evidence">
+            <span class="svc-evidence-label">Error rate</span>
+            <strong class="mono">{{ formatPercent(summary.errorRate) }}</strong>
+            <span class="svc-evidence-delta" :class="deltaTone(briefingDeltas.errors)">{{ signedPct(briefingDeltas.errors) }}</span>
+          </div>
+          <div class="svc-evidence">
+            <span class="svc-evidence-label">P95 latency</span>
+            <strong class="mono">{{ formatMs(summary.p95) }}</strong>
+            <span class="svc-evidence-delta" :class="deltaTone(briefingDeltas.p95)">{{ signedPct(briefingDeltas.p95) }}</span>
+          </div>
+          <button class="svc-evidence svc-evidence-action" :disabled="!briefingTopEndpoint" @click="exploreBriefingEndpoint">
+            <span class="svc-evidence-label">Highest-impact endpoint</span>
+            <strong class="mono svc-evidence-name">{{ briefingTopEndpoint?.endpoint || (briefingSignalsLoading ? 'Ranking…' : 'No endpoint data') }}</strong>
+            <span v-if="briefingTopEndpoint" class="svc-evidence-meta">{{ formatCount(briefingTopEndpoint.req) }} req · {{ formatPercent(epErrorRate(briefingTopEndpoint)) }} err · {{ formatMs(briefingTopEndpoint.p95_ms) }} p95</span>
+          </button>
+          <button class="svc-evidence svc-evidence-action" :disabled="!briefingDependency" @click="briefingDependency && goToService(briefingDependency.target)">
+            <span class="svc-evidence-label">Downstream risk</span>
+            <strong class="mono svc-evidence-name">{{ briefingDependency?.target || 'No downstream calls' }}</strong>
+            <span v-if="briefingDependency" class="svc-evidence-meta" :class="`tone-${edgeHealth(briefingDependency)}`">{{ formatPercent(edgeErrorRate(briefingDependency)) }} err · {{ formatMs(briefingDependency.avg_duration_ms) }} avg</span>
+          </button>
+          <button class="svc-evidence svc-evidence-action" :disabled="!briefingTopError" @click="openBriefingErrors">
+            <span class="svc-evidence-label">Top error</span>
+            <strong class="mono svc-evidence-name">{{ briefingTopError?.key || (briefingSignalsLoading ? 'Grouping…' : 'No errors') }}</strong>
+            <span v-if="briefingTopError" class="svc-evidence-meta">{{ formatCount(briefingTopError.count) }} occurrences · {{ relTime(briefingTopError.last_seen) }}</span>
+          </button>
+        </div>
+      </section>
+
       <!-- Summary stats -->
       <div class="svc-stats-row">
         <div class="svc-stat card">
@@ -1399,10 +1693,16 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
           <div v-else-if="sortedEndpoints.length === 0" class="ep-empty text-muted">
             {{ endpointsMode === 'server' ? 'No HTTP endpoints in this window' : 'No operations in this window' }}
           </div>
-          <table v-else class="ep-table">
+          <div v-else class="ep-table-wrap">
+          <div class="ep-impact-note">
+            <span aria-hidden="true">◎</span>
+            Impact estimates user exposure from traffic × p95 latency × error rate. Higher-impact rows are the best starting point.
+          </div>
+          <table class="ep-table">
             <thead>
               <tr>
                 <th class="ep-th-name sortable" @click="setEpSort('endpoint')">{{ endpointsMode === 'server' ? 'Endpoint' : 'Operation' }}<span class="ep-sort">{{ epSortIndicator('endpoint') }}</span></th>
+                <th class="sortable ep-th-impact" title="Share of modeled impact: traffic × p95 latency × error-rate penalty" @click="setEpSort('impact')">Impact<span class="ep-sort">{{ epSortIndicator('impact') }}</span></th>
                 <th class="sortable" @click="setEpSort('req')">Req<span class="ep-sort">{{ epSortIndicator('req') }}</span></th>
                 <th>Rate</th>
                 <th class="sortable" @click="setEpSort('errRate')">Err%<span class="ep-sort">{{ epSortIndicator('errRate') }}</span></th>
@@ -1418,6 +1718,12 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
                   <span v-if="e.method" class="ep-method">{{ e.method }}</span>
                   <span class="mono ep-path">{{ endpointsMode === 'server' ? (e.path || '/') : e.endpoint }}</span>
                 </td>
+                <td class="ep-impact">
+                  <div class="ep-impact-value">
+                    <span class="mono">{{ formatImpactShare(e) }}</span>
+                    <span class="ep-impact-track" aria-hidden="true"><span :style="{ width: `${Math.max(epImpactShare(e) * 100, 1)}%` }" /></span>
+                  </div>
+                </td>
                 <td class="mono">{{ formatCount(e.req) }}</td>
                 <td class="mono ep-sub">{{ formatRps(epRps(e)) }}</td>
                 <td class="mono" :style="{ color: epColor(e) }">{{ formatPercent(epErrorRate(e)) }}</td>
@@ -1427,6 +1733,7 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
               </tr>
             </tbody>
           </table>
+          </div>
         </template>
 
         <!-- Top Errors tab -->
@@ -1468,7 +1775,7 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
 
       <!-- ░░░░ SPANS ░░░░ — recent spans for this service -->
       <section v-show="activeTab === 'spans'" class="svc-panel">
-        <div class="svc-tab-logs card">
+        <div class="svc-tab-logs">
           <SpanLogTable
             force-mode="spans"
             :spans="traces"
@@ -1484,14 +1791,18 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
 
       <!-- ░░░░ LOGS ░░░░ — APM log lines extracted from span events -->
       <section v-show="activeTab === 'logs'" class="svc-panel">
-        <div class="svc-tab-logs card">
+        <div class="svc-tab-logs">
           <SpanLogTable
             force-mode="logs"
-            :spans="traces"
+            :spans="logTraces"
             :show-service="false"
-            :loading="loading || tracesLoading || !tracesSeen"
+            :loading="loading || logsLoading || !logsSeen"
             :service-name="serviceName"
             :minutes="minutes"
+            :result-limit="500"
+            :has-more="!!logNextCursor"
+            :loading-more="logsLoadingMore"
+            @load-more="loadLogTraces(true)"
             @click-span="(span) => router.push(`/trace/${span.trace_id}`)"
             @click-trace="(traceId) => router.push(`/trace/${traceId}`)"
           />
@@ -1851,6 +2162,7 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
         </div>
       </div>
     </Teleport>
+    </template>
   </div>
 </template>
 

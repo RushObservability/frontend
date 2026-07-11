@@ -244,6 +244,23 @@ export function useApi() {
     })
   }
 
+  // Investigation responses are streamed as SSE, so they cannot use request(),
+  // which consumes JSON bodies. Keep the transport here so this data-bearing
+  // endpoint cannot accidentally omit the active tenant scope.
+  async function openInvestigationStream(body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
+    const { activeTenant } = useTenant()
+    return await fetch(`${API_BASE}/investigate`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Rush-Tenant': activeTenant.value,
+      },
+      body: JSON.stringify(body),
+      signal,
+    })
+  }
+
   // ── Dashboard API ──
 
   async function listDashboards(): Promise<{ dashboards: Dashboard[] }> {
@@ -1503,7 +1520,7 @@ export function useApi() {
     loading, error,
     login, logout, getMe,
     getAuditEvents, verifyAuditChain,
-    getTrace, queryEvents, queryCount, queryTimeseries, getServices, serviceGraph, serviceLatencyHistogram, serviceEndpoints, serviceErrors, getLicense, submitExplain, getExplainJob, suggestValues, queryGroup,
+    getTrace, queryEvents, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceLatencyHistogram, serviceEndpoints, serviceErrors, getLicense, submitExplain, getExplainJob, suggestValues, queryGroup,
     queryLogs, countLogs, groupLogs, getLogHistogram,
     listDashboards, getDashboard, createDashboard, updateDashboard, deleteDashboard,
     exportDashboard, importDashboard, listDashboardTemplates, createFromTemplate,
