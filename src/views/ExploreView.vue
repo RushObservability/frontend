@@ -199,6 +199,7 @@ async function fetchOtelLogs() {
       .filter(f => !SPAN_ONLY_FIELDS.includes(f.field))
     const searchParam = searchText.value || undefined
     const res = await api.queryLogs({
+      slim: true,
       time_range: timeRange.value,
       filters: activeFilters,
       limit: 500,
@@ -250,6 +251,7 @@ async function livePoll() {
       })
       histogram.value = countRes as CountBucket[]
       const logsRes = await api.queryLogs({
+        slim: true,
         time_range: tr,
         filters: logFilters,
         limit: 500,
@@ -310,6 +312,8 @@ interface LogEntry {
   span_http_method: string
   span_http_path: string
   _sourceRowIndex: number
+  _sourceLogIndex: number
+  _detailLoaded: boolean
   _source: 'span' | 'otel'
 }
 
@@ -347,13 +351,16 @@ const logEntries = computed(() => {
         span_http_method: row.http_method,
         span_http_path: row.http_path,
         _sourceRowIndex: ri,
+        _sourceLogIndex: -1,
+        _detailLoaded: true,
         _source: 'span',
       })
     }
   }
 
   // logs records
-  for (const log of otelLogs.value) {
+  for (let sourceLogIndex = 0; sourceLogIndex < otelLogs.value.length; sourceLogIndex++) {
+    const log = otelLogs.value[sourceLogIndex]!
     entries.push({
       timestamp: log.Timestamp,
       service_name: log.ServiceName,
@@ -367,6 +374,8 @@ const logEntries = computed(() => {
       span_http_method: '',
       span_http_path: '',
       _sourceRowIndex: -1,
+      _sourceLogIndex: sourceLogIndex,
+      _detailLoaded: log.ResourceAttributes !== undefined && log.LogAttributes !== undefined,
       _source: 'otel',
     })
   }
@@ -454,12 +463,44 @@ const logEntries = computed(() => {
   if (!groups.length) return entries
 
   return entries.filter(e => {
+    // Collected logs have already been filtered by the shared server compiler.
+    // Their attribute maps are intentionally absent from slim list rows, so a
+    // second client-side attribute search would incorrectly hide valid matches.
+    if (e._source === 'otel') return true
     // OR between groups, AND within each group
     return groups.some(group => group.every(term => matchEntry(e, term)))
   })
 })
 
 const expandedLogRow = ref<number | null>(null)
+
+const logDetailLoading = ref(new Set<number>())
+const logDetailErrors = ref(new Set<number>())
+
+async function hydrateOtelLog(entry: LogEntry): Promise<void> {
+  const idx = entry._sourceLogIndex
+  if (entry._source !== 'otel' || idx < 0 || entry._detailLoaded || logDetailLoading.value.has(idx)) return
+  const row = otelLogs.value[idx]
+  if (!row) return
+
+  logDetailLoading.value = new Set(logDetailLoading.value).add(idx)
+  const errors = new Set(logDetailErrors.value)
+  errors.delete(idx)
+  logDetailErrors.value = errors
+  try {
+    const detail = await api.getLogDetail(row)
+    const next = [...otelLogs.value]
+    // Preserve list-only locator fields so reopening does not require another list query.
+    next[idx] = { ...row, ...detail }
+    otelLogs.value = next
+  } catch {
+    logDetailErrors.value = new Set(logDetailErrors.value).add(idx)
+  } finally {
+    const loading = new Set(logDetailLoading.value)
+    loading.delete(idx)
+    logDetailLoading.value = loading
+  }
+}
 
 function toggleLogRow(index: number) {
   // A user interaction dismisses the deep-link highlight.
@@ -468,6 +509,8 @@ function toggleLogRow(index: number) {
     inlineExpandedLog.value = null
   } else {
     inlineExpandedLog.value = index
+    const entry = logEntries.value[index]
+    if (entry) void hydrateOtelLog(entry)
   }
   // Keep the address bar shareable: an expanded log encodes `&log=<ts>` so the
   // link reopens and scrolls to this exact line for context.
@@ -967,6 +1010,7 @@ async function search(opts?: { skipHistory?: boolean }) {
 
       const logPromises: Promise<any>[] = [
         api.queryLogs({
+          slim: true,
           time_range: timeRange.value,
           filters: logFilters,
           limit: 500,
@@ -1025,6 +1069,7 @@ async function search(opts?: { skipHistory?: boolean }) {
       if (searchParam) {
         resultPromises.push(
           api.queryLogs({
+            slim: true,
             time_range: timeRange.value,
             filters: logFilters,
             limit: 500,
@@ -2176,9 +2221,11 @@ function openDetailModal(index: number) {
   syncUrlState()
 }
 
-function openLogDetailModal(logIdx: number) {
-  const entry = logEntries.value[logIdx]
+async function openLogDetailModal(logIdx: number) {
+  let entry = logEntries.value[logIdx]
   if (!entry) return
+  await hydrateOtelLog(entry)
+  entry = logEntries.value[logIdx] || entry
   modalOpen.value = true
   modalSource.value = 'log'
   modalLogIndex.value = logIdx
@@ -2647,7 +2694,7 @@ async function openContextStream(entry: LogEntry) {
     for (const r of radiiMs) {
       const from = new Date(tsMs - r).toISOString()
       const to = new Date(tsMs + r).toISOString()
-      const res = await api.queryLogs({ time_range: { from, to }, filters, limit: 500 })
+      const res = await api.queryLogs({ slim: true, time_range: { from, to }, filters, limit: 500 })
       rows = res.rows
       contextStreamRadiusLabel.value = r >= 60_000 ? `±${r / 60_000} min` : `±${r / 1000}s`
       // Whole window fetched (under the cap) → the source is in it; or the
@@ -2670,6 +2717,24 @@ function closeContextStream() {
   contextStreamFilters.value = []
   contextStreamSelectedAttrs.value = new Set()
   contextStreamExpandedIdx.value = null
+}
+
+async function toggleContextStreamRow(index: number) {
+  if (contextStreamExpandedIdx.value === index) {
+    contextStreamExpandedIdx.value = null
+    return
+  }
+  contextStreamExpandedIdx.value = index
+  const row = contextStreamLogs.value[index]
+  if (!row || (row.ResourceAttributes !== undefined && row.LogAttributes !== undefined)) return
+  try {
+    const detail = await api.getLogDetail(row)
+    const next = [...contextStreamLogs.value]
+    next[index] = { ...row, ...detail }
+    contextStreamLogs.value = next
+  } catch {
+    // The slim row remains useful if its full detail was concurrently retained away.
+  }
 }
 
 function isSourceLog(record: LogRecord): boolean {
@@ -4527,7 +4592,7 @@ onMounted(async () => {
                 <div
                   class="ctx-stream-row"
                   :class="{ 'ctx-source': isSourceLog(rec) }"
-                  @click.stop="contextStreamExpandedIdx = contextStreamExpandedIdx === ri ? null : ri"
+                  @click.stop="toggleContextStreamRow(ri)"
                 >
                   <div class="mono">{{ formatCtxTimestamp(rec.Timestamp) }}</div>
                   <div><span class="log-level-badge" :class="logLevelClass(rec.SeverityText)">{{ rec.SeverityText || 'log' }}</span></div>
@@ -5521,6 +5586,13 @@ onMounted(async () => {
               </div>
               <!-- Inline preview expansion -->
               <div v-if="inlineExpandedLog === i" class="log-inline-detail" @click.stop>
+                <div v-if="logDetailLoading.has(entry._sourceLogIndex)" class="loading-more" style="padding: 10px 12px;">
+                  <span class="loading-more-spinner">&#9676;</span> Loading full attributes…
+                </div>
+                <div v-else-if="logDetailErrors.has(entry._sourceLogIndex)" class="loading-more" style="padding: 10px 12px;">
+                  Full attributes could not be loaded.
+                  <button class="lid-action" @click.stop="hydrateOtelLog(entry)">Retry</button>
+                </div>
                 <!-- Toolbar -->
                 <div class="lid-toolbar">
                   <div class="lid-toolbar-left">

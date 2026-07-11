@@ -144,6 +144,10 @@ export interface LogRecord {
   ResourceAttributes: Record<string, string>
   ScopeName: string
   LogAttributes: Record<string, string>
+  TimestampNs?: string
+  BlockNumber?: string
+  BlockOffset?: string
+  BodyHash?: string
 }
 
 // ── Stats types ──

@@ -549,6 +549,7 @@ export function useApi() {
     limit?: number
     offset?: number
     search?: string
+    slim?: boolean
   }): Promise<{ rows: LogRecord[]; total: number }> {
     loading.value = true
     error.value = null
@@ -563,6 +564,25 @@ export function useApi() {
     } finally {
       loading.value = false
     }
+  }
+
+  async function getLogDetail(row: LogRecord): Promise<LogRecord> {
+    if (row.TimestampNs === undefined || row.BlockNumber === undefined || row.BlockOffset === undefined || row.BodyHash === undefined) {
+      throw new Error('log detail locator is missing')
+    }
+    return await request('/logs/detail', {
+      method: 'POST',
+      body: JSON.stringify({
+        timestamp_ns: row.TimestampNs,
+        block_number: row.BlockNumber,
+        block_offset: row.BlockOffset,
+        body_hash: row.BodyHash,
+        service_name: row.ServiceName,
+        severity_text: row.SeverityText,
+        trace_id: row.TraceId,
+        span_id: row.SpanId,
+      }),
+    })
   }
 
   async function groupLogs(req: {
@@ -1521,7 +1541,7 @@ export function useApi() {
     login, logout, getMe,
     getAuditEvents, verifyAuditChain,
     getTrace, queryEvents, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceLatencyHistogram, serviceEndpoints, serviceErrors, getLicense, submitExplain, getExplainJob, suggestValues, queryGroup,
-    queryLogs, countLogs, groupLogs, getLogHistogram,
+    queryLogs, getLogDetail, countLogs, groupLogs, getLogHistogram,
     listDashboards, getDashboard, createDashboard, updateDashboard, deleteDashboard,
     exportDashboard, importDashboard, listDashboardTemplates, createFromTemplate,
     createWidget, updateWidget, deleteWidget,
