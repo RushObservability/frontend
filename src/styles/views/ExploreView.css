@@ -1020,6 +1020,19 @@
 /* ═══════════════════════════════════════════
    Event Table — Dense list (Datadog/Kibana style)
    ═══════════════════════════════════════════ */
+.scatter-card { margin-bottom: var(--sp-3); padding: var(--sp-3); overflow: hidden; }
+.scatter-header, .scatter-footer { display: flex; align-items: center; justify-content: space-between; }
+.scatter-title { color: var(--text-primary); font-size: 11px; font-weight: 700; }
+.scatter-subtitle { margin-left: 8px; color: var(--text-muted); font-size: 10px; }
+.scatter-hint { color: var(--amber); font-size: 9px; }
+.scatter-svg { display: block; width: 100%; height: 150px; margin-top: 5px; cursor: crosshair; touch-action: none; user-select: none; }
+.scatter-axis { stroke: var(--border-default); stroke-width: 1; }
+.scatter-point { fill: var(--ok); opacity: .62; stroke: var(--bg-raised); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.scatter-point.error { fill: var(--error); opacity: .95; }
+.scatter-selection { fill: var(--amber-glow); stroke: var(--amber); stroke-width: 1.5; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.scatter-footer { color: var(--text-muted); font-size: 9px; }
+.scatter-selected { color: var(--amber); }
+
 .event-table {
   overflow: hidden;
 }
@@ -1884,6 +1897,23 @@
   padding: var(--sp-2) var(--sp-3) var(--sp-3);
   min-height: 0;
 }
+
+/* Investigation context: a compact, action-oriented rail within the detail panel. */
+.investigation-rail { max-width: 420px; margin: var(--sp-3) auto; padding: var(--sp-4); background: var(--bg-surface); border: 1px solid var(--border-default); border-left: 3px solid var(--amber); border-radius: var(--r-md); }
+.investigation-rail h3 { margin: 3px 0 var(--sp-3); font-size: 16px; color: var(--text-primary); }
+.ir-eyebrow, .ir-section-title { font-size: 9px; font-weight: 700; color: var(--text-muted); letter-spacing: .09em; text-transform: uppercase; }
+.ir-summary { display: flex; gap: var(--sp-3); padding-bottom: var(--sp-3); font-size: 11px; color: var(--text-secondary); }
+.ir-summary b { color: var(--text-primary); }
+.ir-actions { display: grid; gap: 6px; }
+.ir-primary, .ir-action, .ir-link { text-align: left; border-radius: var(--r-sm); padding: 8px 10px; font-size: 11px; cursor: pointer; }
+.ir-primary { background: var(--amber); color: var(--bg-void); font-weight: 700; text-decoration: none; }
+.ir-action { border: 1px solid var(--border-default); background: var(--bg-raised); color: var(--text-primary); }
+.ir-link { padding: 0; border: 0; background: none; color: var(--amber); }
+.ir-section { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border-subtle); }
+.ir-section-title { margin-bottom: var(--sp-2); }
+.ir-empty { margin: 0; color: var(--text-muted); font-size: 11px; }
+.ir-service-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.ir-service-list span { padding: 3px 6px; background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-secondary); font: 10px var(--font-mono, monospace); }
 .trace-summary {
   display: flex;
   flex-wrap: wrap;

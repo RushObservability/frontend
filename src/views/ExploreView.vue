@@ -99,7 +99,7 @@ const PAGE_SIZE = 100
 const loadingMore = ref(false)
 const hasMore = computed(() => results.value.length < total.value)
 const expandedRow = ref<number | null>(null)
-const expandedTab = ref<'metrics' | 'attributes' | 'k8s' | null>(null)
+const expandedTab = ref<'metrics' | 'attributes' | 'k8s' | 'context' | null>(null)
 
 // ═══ Keyboard navigation (vim/k9s style) ═══
 const selectedRowIndex = ref(-1)
@@ -1448,6 +1448,59 @@ const filledHistogram = computed(() => {
 
 const histogramMax = computed(() => Math.max(...filledHistogram.value.map((b) => b.count), 1))
 
+// ═══ Latency / error scatterplot ═══
+const SCATTER_W = 1000
+const SCATTER_H = 170
+const scatterBrush = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
+const scatterDragging = ref(false)
+const scatterSelectionSummary = ref('')
+
+const scatterPoints = computed(() => {
+  if (!results.value.length) return []
+  const rows = results.value.slice(0, 500)
+  const times = rows.map(r => Number(r.timestamp) / 1_000_000)
+  const minT = Math.min(...times)
+  const maxT = Math.max(...times)
+  const maxLog = Math.max(...rows.map(r => Math.log10(Math.max(1, r.duration_ns))), 1)
+  return rows.map((row, i) => ({
+    row,
+    x: 24 + ((times[i]! - minT) / Math.max(1, maxT - minT)) * (SCATTER_W - 48),
+    y: 10 + (1 - Math.log10(Math.max(1, row.duration_ns)) / maxLog) * (SCATTER_H - 30),
+    error: row.status === 'ERROR' || row.http_status_code >= 500,
+  }))
+})
+
+function scatterCoord(e: PointerEvent) {
+  const el = e.currentTarget as SVGElement
+  const rect = el.getBoundingClientRect()
+  return { x: (e.clientX - rect.left) / rect.width * SCATTER_W, y: (e.clientY - rect.top) / rect.height * SCATTER_H }
+}
+function startScatterBrush(e: PointerEvent) {
+  const p = scatterCoord(e); scatterDragging.value = true
+  scatterBrush.value = { x1: p.x, y1: p.y, x2: p.x, y2: p.y }
+  ;(e.currentTarget as SVGElement).setPointerCapture(e.pointerId)
+}
+function moveScatterBrush(e: PointerEvent) {
+  if (!scatterDragging.value || !scatterBrush.value) return
+  const p = scatterCoord(e); scatterBrush.value = { ...scatterBrush.value, x2: p.x, y2: p.y }
+}
+function finishScatterBrush() {
+  if (!scatterBrush.value) return
+  scatterDragging.value = false
+  const b = scatterBrush.value
+  const left = Math.min(b.x1, b.x2), right = Math.max(b.x1, b.x2)
+  const top = Math.min(b.y1, b.y2), bottom = Math.max(b.y1, b.y2)
+  const selected = scatterPoints.value.filter(p => p.x >= left && p.x <= right && p.y >= top && p.y <= bottom)
+  if (!selected.length) { scatterBrush.value = null; scatterSelectionSummary.value = ''; return }
+  const times = selected.map(p => Number(p.row.timestamp) / 1_000_000)
+  const durations = selected.map(p => p.row.duration_ns)
+  const from = new Date(Math.min(...times)).toISOString()
+  const to = new Date(Math.max(...times) + 1).toISOString()
+  bubbleUpSelection.value = { startIdx: 0, endIdx: 0, startTime: from, endTime: to }
+  scatterSelectionSummary.value = `${selected.length} spans · ${formatDuration(Math.min(...durations))}–${formatDuration(Math.max(...durations))}`
+  void runBubbleUp()
+}
+
 // ═══ Logs match histogram: fetch + render + click-to-zoom ═══
 
 // Fetch the adaptive match histogram in parallel with (and never blocking) the
@@ -1763,6 +1816,8 @@ function closeBubbleUp() {
   bubbleUpResult.value = null
   bubbleUpLoading.value = false
   bubbleUpError.value = null
+  scatterBrush.value = null
+  scatterSelectionSummary.value = ''
 }
 
 // Map friendly dimension names back to ClickHouse column names for filtering
@@ -2437,6 +2492,16 @@ async function loadTraceData(row: RushEvent) {
 
 function selectDetailTab(tab: 'metrics' | 'attributes' | 'k8s') {
   expandedTab.value = expandedTab.value === tab ? null : tab
+}
+
+function openServiceContext() {
+  const service = activeSpanNode.value?.service_name || expandedRowData.value?.service_name || modalLogEntry.value?.service_name
+  if (service) router.push(`/services/${encodeURIComponent(service)}`)
+}
+
+function openInvestigationContext() {
+  const traceId = expandedRowData.value?.trace_id || modalLogEntry.value?.trace_id || expandedTrace.value?.trace_id
+  router.push({ path: '/investigate', query: traceId ? { trace_id: traceId } : {} })
 }
 
 function selectTraceSpan(spanId: string) {
@@ -3588,6 +3653,7 @@ onMounted(async () => {
             <button class="dp-tab" :class="{ active: expandedTab === null }" @click.stop="expandedTab = null">Details</button>
             <button v-if="expandedRowData || activeSpanNode" class="dp-tab" :class="{ active: expandedTab === 'metrics' }" @click.stop="selectDetailTab('metrics')">Metrics</button>
             <button class="dp-tab" :class="{ active: expandedTab === 'attributes' }" @click.stop="selectDetailTab('attributes')">Attributes</button>
+            <button class="dp-tab" :class="{ active: expandedTab === 'context' }" @click.stop="expandedTab = 'context'">Context</button>
           </div>
 
           <div class="dp-body">
@@ -4109,6 +4175,33 @@ onMounted(async () => {
               </template>
             </template>
 
+            <template v-if="expandedTab === 'context'">
+              <aside class="investigation-rail">
+                <div class="ir-eyebrow">Investigation context</div>
+                <h3>{{ activeSpanNode?.service_name || expandedRowData?.service_name || modalLogEntry?.service_name || 'Selected event' }}</h3>
+                <div class="ir-summary">
+                  <span v-if="expandedTrace"><b>{{ expandedTrace.span_count }}</b> spans</span>
+                  <span v-if="expandedTrace"><b>{{ expandedTrace.services.length }}</b> services</span>
+                  <span v-if="traceLogs.length"><b>{{ traceLogs.length }}</b> trace events</span>
+                </div>
+                <div class="ir-actions">
+                  <router-link v-if="expandedRowData?.trace_id || modalLogEntry?.trace_id" :to="`/trace/${expandedRowData?.trace_id || modalLogEntry?.trace_id}`" class="ir-primary">Open full trace</router-link>
+                  <button class="ir-action" @click="openServiceContext">Open service health</button>
+                  <button class="ir-action" @click="openInvestigationContext">Investigate with AI</button>
+                </div>
+                <section class="ir-section">
+                  <div class="ir-section-title">Correlated signals</div>
+                  <button v-if="modalLogEntry" class="ir-link" @click="openContextStream(modalLogEntry)">Show surrounding logs {{ contextStreamRadiusLabel }}</button>
+                  <button v-else-if="traceLogs.length" class="ir-link" @click="expandedTab = null">Review {{ traceLogs.length }} trace log events</button>
+                  <p v-else class="ir-empty">No correlated log events were collected for this selection.</p>
+                </section>
+                <section v-if="expandedTrace?.services.length" class="ir-section">
+                  <div class="ir-section-title">Request path</div>
+                  <div class="ir-service-list"><span v-for="service in expandedTrace.services" :key="service">{{ service }}</span></div>
+                </section>
+              </aside>
+            </template>
+
           </div>
         </div>
       </div>
@@ -4592,6 +4685,39 @@ onMounted(async () => {
 
       <!-- ═══ Main Content ═══ -->
       <div class="explore-main">
+
+        <!-- Latency/error scatter: brush outliers to run BubbleUp -->
+        <div v-if="viewMode === 'spans' && scatterPoints.length" class="scatter-card card fade-in">
+          <div class="scatter-header">
+            <div><span class="scatter-title">Latency outliers</span><span class="scatter-subtitle">time × duration · red = error</span></div>
+            <span class="scatter-hint mono">Drag a region to compare it with baseline</span>
+          </div>
+          <svg
+            class="scatter-svg"
+            :viewBox="`0 0 ${SCATTER_W} ${SCATTER_H}`"
+            preserveAspectRatio="none"
+            @pointerdown="startScatterBrush"
+            @pointermove="moveScatterBrush"
+            @pointerup="finishScatterBrush"
+          >
+            <line x1="24" :y1="SCATTER_H - 18" :x2="SCATTER_W - 24" :y2="SCATTER_H - 18" class="scatter-axis" />
+            <circle
+              v-for="point in scatterPoints"
+              :key="point.row.span_id"
+              :cx="point.x" :cy="point.y" :r="point.error ? 4 : 3"
+              class="scatter-point" :class="{ error: point.error }"
+            ><title>{{ point.row.service_name }} · {{ formatDuration(point.row.duration_ns) }} · {{ point.row.http_status_code || point.row.status }}</title></circle>
+            <rect
+              v-if="scatterBrush"
+              :x="Math.min(scatterBrush.x1, scatterBrush.x2)"
+              :y="Math.min(scatterBrush.y1, scatterBrush.y2)"
+              :width="Math.abs(scatterBrush.x2 - scatterBrush.x1)"
+              :height="Math.abs(scatterBrush.y2 - scatterBrush.y1)"
+              class="scatter-selection"
+            />
+          </svg>
+          <div class="scatter-footer"><span>earlier</span><span v-if="scatterSelectionSummary" class="scatter-selected">{{ scatterSelectionSummary }} · analyzing</span><span>later</span></div>
+        </div>
 
         <!-- ═══ Histogram: waiting / loading / ready ═══ -->
         <div v-if="histogramPhase === 'waiting'" class="histo card" style="min-height:90px;display:flex;align-items:center;justify-content:center">
