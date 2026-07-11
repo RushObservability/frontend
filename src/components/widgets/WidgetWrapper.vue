@@ -3,6 +3,7 @@ import PanelCard from '../PanelCard.vue'
 
 defineProps<{
   title: string
+  type?: string
   description?: string
   unit?: string
   loading?: boolean
@@ -24,14 +25,16 @@ defineEmits<{
     <PanelCard :title="title" :description="description" :unit="unit" :loading="loading" :error="error">
       <template v-if="editMode" #actions>
         <div class="widget-actions">
+          <span v-if="type" class="widget-type">{{ type }}</span>
           <div
             class="drag-handle"
             title="Drag to reposition"
+            aria-label="Drag panel to reposition"
             @pointerdown.prevent="$emit('dragstart', $event)"
-          >&#9776;</div>
-          <button class="widget-btn" title="Edit" @click="$emit('edit')">&#9998;</button>
-          <button class="widget-btn" title="Duplicate" @click="$emit('duplicate')">&#10697;</button>
-          <button class="widget-btn widget-btn-danger" title="Remove" @click="$emit('remove')">&times;</button>
+          >⠿</div>
+          <button class="widget-btn" title="Edit panel" @click="$emit('edit')"><span class="widget-btn-glyph">✎</span><span class="widget-btn-label">Edit</span></button>
+          <button class="widget-btn" title="Duplicate panel" @click="$emit('duplicate')"><span class="widget-btn-glyph">＋</span><span class="widget-btn-label">Clone</span></button>
+          <button class="widget-btn widget-btn-danger" title="Remove panel" @click="$emit('remove')"><span class="widget-btn-glyph">×</span><span class="widget-btn-label">Remove</span></button>
         </div>
       </template>
       <slot />

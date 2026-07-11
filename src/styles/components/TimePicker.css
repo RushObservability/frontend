@@ -61,8 +61,10 @@
 .tp-popover {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  left: 0;
   display: flex;
+  width: max-content;
+  max-width: calc(100vw - 24px);
   background: var(--bg-raised);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
@@ -72,6 +74,11 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
   z-index: 100;
   overflow: hidden;
+}
+
+.tp-popover.align-end {
+  right: 0;
+  left: auto;
 }
 
 .tp-pop-enter-active {
@@ -206,4 +213,37 @@
   color: var(--amber);
   background: var(--amber-dim);
   font-weight: 600;
+}
+
+@media (max-width: 520px) {
+  .tp-popover,
+  .tp-popover.align-end {
+    position: fixed;
+    inset: auto 12px 12px;
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - 24px);
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .tp-divider {
+    width: auto;
+    height: 1px;
+  }
+
+  .tp-custom,
+  .tp-presets {
+    min-width: 0;
+  }
+
+  .tp-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px;
+  }
+
+  .tp-preset {
+    min-height: 38px;
+  }
 }

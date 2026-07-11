@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
+import { useAuth } from '../composables/useAuth'
 import { useWidgetData } from '../composables/useWidgetData'
 import { substitute } from '../composables/useVarSubst'
 import { provideChartHover } from '../composables/useChartHover'
@@ -19,6 +20,7 @@ import TimePicker from '../components/TimePicker.vue'
 const props = defineProps<{ id: string }>()
 
 const api = useApi()
+const { canWrite } = useAuth()
 const router = useRouter()
 const route = useRoute()
 const { fetchWidgetData } = useWidgetData()
@@ -39,6 +41,7 @@ const showAddWidget = ref(false)
 const showVarEditor = ref(false)
 const editingWidget = ref<Widget | null>(null)
 const deploys = ref<DeployMarker[]>([])
+const lastRefreshedAt = ref<Date | null>(null)
 
 // ── Template variables ──
 const variables = computed<DashboardVariable[]>(() => dashboard.value?.variables || [])
@@ -103,6 +106,16 @@ const refreshInterval = ref(0)
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const isAutoRefreshing = computed(() => refreshInterval.value > 0)
+const refreshLabel = computed(() => {
+  if (!lastRefreshedAt.value) return 'Waiting for data'
+  return `Updated ${lastRefreshedAt.value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+})
+
+function visibilityLabel(value: string): string {
+  if (value === 'private') return 'Private'
+  if (value === 'global') return 'Global'
+  return 'Team'
+}
 
 // ═══ Share link ═══
 const shareCopied = ref(false)
@@ -268,9 +281,8 @@ async function loadDeploys() {
 
 async function loadAllWidgetData() {
   if (!dashboard.value) return
-  for (const widget of dashboard.value.widgets) {
-    loadSingleWidget(widget)
-  }
+  await Promise.all(dashboard.value.widgets.map(widget => loadSingleWidget(widget)))
+  lastRefreshedAt.value = new Date()
 }
 
 async function loadSingleWidget(widget: Widget) {
@@ -381,37 +393,68 @@ function widgetStyle(widget: Widget) {
 
 <template>
   <div class="dashboard-page">
-    <div class="page-header">
-      <div class="page-header-left">
-        <router-link to="/dashboards" class="back-link">&larr;</router-link>
-        <h1 class="page-title">{{ dashboard?.name || 'Loading...' }}</h1>
-        <span v-if="dashboard?.description" class="page-desc text-secondary">{{ dashboard.description }}</span>
+    <header class="dashboard-header">
+      <div class="dashboard-heading">
+        <router-link to="/dashboards" class="back-link"><span aria-hidden="true">←</span> All dashboards</router-link>
+        <div class="dashboard-title-row">
+          <h1 class="page-title">{{ dashboard?.name || 'Loading dashboard…' }}</h1>
+          <span v-if="dashboard" class="dashboard-scope" :class="`dashboard-scope--${dashboard.visibility}`">
+            <span class="scope-dot"></span>{{ visibilityLabel(dashboard.visibility) }}
+          </span>
+          <span v-if="dashboard" class="widget-count mono">{{ dashboard.widgets.length }} panels</span>
+        </div>
+        <p v-if="dashboard?.description" class="page-desc">{{ dashboard.description }}</p>
       </div>
-      <div class="page-header-right">
+      <div class="dashboard-primary-actions">
+        <button class="share-btn" @click="shareLink" :title="shareCopied ? 'Copied!' : 'Copy a link with the current time and variables'">
+          {{ shareCopied ? '✓ Link copied' : 'Share view' }}
+        </button>
+        <button v-if="canWrite" class="btn-edit" :class="{ active: editMode }" @click="editMode = !editMode">
+          {{ editMode ? 'Finish editing' : 'Edit dashboard' }}
+        </button>
+      </div>
+    </header>
+
+    <section class="dashboard-control-deck" aria-label="Dashboard time and refresh controls">
+      <div class="control-cluster time-control">
+        <span class="control-label">TIME RANGE</span>
         <TimePicker v-model="dashMinutes" />
-        <div v-if="isAutoRefreshing" class="refresh-dot" title="Auto-refreshing"></div>
+      </div>
+      <div class="control-divider"></div>
+      <div class="control-cluster refresh-control">
+        <span class="control-label">REFRESH</span>
         <select
           class="refresh-select mono"
           :value="refreshInterval"
+          aria-label="Auto-refresh interval"
           @change="setRefresh(Number(($event.target as HTMLSelectElement).value))"
         >
           <option v-for="opt in refreshOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
         </select>
-        <button class="share-btn" @click="shareLink" :title="shareCopied ? 'Copied!' : 'Copy shareable link'">
-          {{ shareCopied ? '&#10003; Copied' : '&#128279; Share' }}
-        </button>
-        <button class="btn-edit" @click="editMode = !editMode">
-          {{ editMode ? 'Done' : 'Edit' }}
-        </button>
-        <button v-if="editMode" class="btn-edit" @click="showVarEditor = true">Variables</button>
-        <button v-if="editMode" class="btn-add" @click="openAddWidget">+ Widget</button>
+        <button class="refresh-now" title="Refresh all widgets now" aria-label="Refresh all widgets now" @click="loadAllWidgetData">↻</button>
+      </div>
+      <div class="refresh-status mono" :class="{ live: isAutoRefreshing }">
+        <span class="refresh-dot"></span>
+        {{ isAutoRefreshing ? `Live · ${refreshLabel}` : refreshLabel }}
+      </div>
+    </section>
+
+    <div v-if="editMode" class="edit-mode-bar">
+      <div class="edit-mode-copy">
+        <span class="edit-mode-mark">EDIT</span>
+        <span>Drag panels to move them. Use the corner handle to resize.</span>
+      </div>
+      <div class="edit-mode-actions">
+        <button class="btn-edit" @click="showVarEditor = true">Manage variables</button>
+        <button class="btn-add" @click="openAddWidget">+ Add panel</button>
       </div>
     </div>
 
     <!-- ── Template variable bar ── -->
     <div v-if="variables.length" class="dash-var-bar">
+      <span class="control-label variable-heading">FILTERS</span>
       <div v-for="v in variables" :key="v.name" class="dash-var">
         <label class="dash-var-label">{{ varLabel(v) }}</label>
         <select
@@ -439,11 +482,10 @@ function widgetStyle(widget: Widget) {
     </div>
 
     <div v-else-if="dashboard && dashboard.widgets.length === 0" class="empty-state card">
-      <div class="empty-state-icon">&#9632;</div>
-      <div>No widgets yet</div>
-      <div class="text-secondary" style="font-size: 11px">
-        <button class="btn-inline" @click="editMode = true; openAddWidget()">Add a widget</button> to start
-      </div>
+      <div class="empty-state-icon">+</div>
+      <strong>This dashboard is ready for its first signal</strong>
+      <div class="text-secondary" style="font-size: 11px">Add a time series, stat, bar chart, or table to start answering an operational question.</div>
+      <button v-if="canWrite" class="btn-add empty-add" @click="editMode = true; openAddWidget()">Add first panel</button>
     </div>
 
     <div v-else ref="gridRef" class="widget-grid">
@@ -456,6 +498,7 @@ function widgetStyle(widget: Widget) {
       >
         <WidgetWrapper
           :title="titleFor(widget)"
+          :type="widget.widget_type"
           :description="(widget.display_config?.description as string) || ''"
           :unit="(widget.display_config?.unit as string) || ''"
           :loading="widgetLoadingMap[widget.id]"
@@ -494,6 +537,15 @@ function widgetStyle(widget: Widget) {
       <!-- Resize ghost -->
       <div v-if="resizeGhost" class="widget-ghost widget-ghost-resize" :style="ghostStyle(resizeGhost)"></div>
     </div>
+
+    <button v-if="editMode && dashboard?.widgets.length" class="add-panel-zone" @click="openAddWidget">
+      <span class="add-panel-glyph">+</span>
+      <span class="add-panel-copy">
+        <strong>Add visualization</strong>
+        <small>Build a panel from spans, logs, or metrics</small>
+      </span>
+      <span class="add-panel-types mono">TIME SERIES · STAT · BAR · TABLE</span>
+    </button>
 
     <WidgetEditor
       v-if="showAddWidget"

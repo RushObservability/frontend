@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 
 interface Preset {
   label: string
@@ -34,6 +34,8 @@ const emit = defineEmits<{
 
 const open = ref(false)
 const wrapperRef = ref<HTMLElement | null>(null)
+const popoverRef = ref<HTMLElement | null>(null)
+const alignEnd = ref(false)
 const customFrom = ref('')
 const customTo = ref('')
 
@@ -102,9 +104,20 @@ function toLocalISO(d: Date): string {
   return `${y}-${m}-${dd}T${hh}:${mi}`
 }
 
-function toggle() {
+async function toggle() {
   open.value = !open.value
-  if (open.value) initDefaults()
+  if (open.value) {
+    initDefaults()
+    alignEnd.value = false
+    await nextTick()
+    const triggerRect = wrapperRef.value?.getBoundingClientRect()
+    const popoverWidth = popoverRef.value?.getBoundingClientRect().width || 410
+    if (triggerRect) {
+      const spaceToRight = window.innerWidth - triggerRect.left - 12
+      const spaceToLeft = triggerRect.right - 12
+      alignEnd.value = popoverWidth > spaceToRight && spaceToLeft > spaceToRight
+    }
+  }
 }
 
 function onClickOutside(e: MouseEvent) {
@@ -131,7 +144,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
     </button>
 
     <Transition name="tp-pop">
-      <div v-if="open" class="tp-popover">
+      <div v-if="open" ref="popoverRef" class="tp-popover" :class="{ 'align-end': alignEnd }">
         <!-- Left: Custom range -->
         <div class="tp-custom">
           <div class="tp-section-label">Custom range</div>

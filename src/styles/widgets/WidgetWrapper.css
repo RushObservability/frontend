@@ -3,6 +3,7 @@
 .widget-wrap {
   position: relative;
   height: 100%;
+  container-type: inline-size;
 }
 /* Lift the hovered dashboard panel above its grid neighbors so the chart
    tooltip (which overflows the card) isn't painted under the next panel. */
@@ -22,15 +23,29 @@
 .widget-actions {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
+  gap: 2px;
+  margin-right: -5px;
+}
+.widget-type {
+  margin-right: 3px;
+  color: var(--text-muted);
+  font: 700 7px var(--font-mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
 }
 .widget-btn {
-  font-size: 13px;
-  padding: 1px 5px;
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
   border-radius: var(--r-sm);
   color: var(--text-secondary);
+  font-size: 8px;
   transition: color 0.15s, background 0.15s;
 }
+.widget-btn-glyph { font-size: 11px; line-height: 1; }
+.widget-btn-label { font-weight: 600; }
 .widget-btn:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
@@ -39,14 +54,15 @@
   color: var(--error);
 }
 .widget-edit-mode :deep(.panel-card) {
-  outline: 1px dashed var(--border-strong);
-  outline-offset: -1px;
+  border-color: var(--border-strong);
+  box-shadow: inset 0 2px 0 var(--amber-dim);
 }
+.widget-edit-mode:hover :deep(.panel-card) { border-color: var(--amber-muted); }
 .drag-handle {
   cursor: grab;
   color: var(--text-muted);
-  font-size: 12px;
-  padding: 0 4px;
+  font-size: 15px;
+  padding: 2px 5px;
   user-select: none;
   transition: color 0.15s;
   line-height: 1;
@@ -59,11 +75,15 @@
 }
 .resize-handle {
   position: absolute;
-  bottom: 2px;
-  right: 4px;
+  bottom: 0;
+  right: 0;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: end;
   cursor: nwse-resize;
-  color: var(--text-muted);
-  font-size: 11px;
+  color: var(--amber-muted);
+  font-size: 10px;
   line-height: 1;
   user-select: none;
   transition: color 0.15s;
@@ -71,4 +91,14 @@
 }
 .resize-handle:hover {
   color: var(--amber);
+}
+
+@container (max-width: 420px) {
+  .widget-btn-label,
+  .widget-type { display: none; }
+}
+
+@container (max-width: 260px) {
+  .widget-btn { padding-inline: 3px; }
+  .drag-handle { padding-inline: 3px; }
 }
