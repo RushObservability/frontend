@@ -56,6 +56,17 @@ const alertmanagerLabels = ref(
     : ''
 )
 
+// Secret values are deliberately never returned by the API. These flags keep
+// an existing channel editable without exposing its credential; submitting an
+// empty secret field preserves the stored value server-side.
+const slackWebhookConfigured = !!(props.channel?.config?.webhook_url_configured || props.channel?.config?.url_configured)
+const slackAppTokenConfigured = !!props.channel?.config?.token_configured
+const webhookUrlConfigured = !!props.channel?.config?.url_configured
+const pdRoutingKeyConfigured = !!props.channel?.config?.routing_key_configured
+const ogApiKeyConfigured = !!props.channel?.config?.api_key_configured
+const discordWebhookConfigured = !!props.channel?.config?.webhook_url_configured
+const alertmanagerUrlConfigured = !!props.channel?.config?.url_configured
+
 const channelTypes = [
   { value: 'slack',        label: 'Slack Webhook', icon: '#',  desc: 'Incoming webhook URL from Slack' },
   { value: 'slack_app',    label: 'Slack App',     icon: 'S',  desc: 'Post via Slack Bot Token (chat.postMessage)' },
@@ -70,14 +81,14 @@ const channelTypes = [
 const isValid = computed(() => {
   if (!name.value.trim()) return false
   switch (channelType.value) {
-    case 'slack':        return !!slackWebhookUrl.value.trim()
-    case 'slack_app':    return !!slackAppToken.value.trim() && !!slackAppChannel.value.trim()
-    case 'discord':      return !!discordWebhookUrl.value.trim()
-    case 'webhook':      return !!webhookUrl.value.trim()
-    case 'alertmanager': return !!alertmanagerUrl.value.trim()
+    case 'slack':        return !!slackWebhookUrl.value.trim() || slackWebhookConfigured
+    case 'slack_app':    return (!!slackAppToken.value.trim() || slackAppTokenConfigured) && !!slackAppChannel.value.trim()
+    case 'discord':      return !!discordWebhookUrl.value.trim() || discordWebhookConfigured
+    case 'webhook':      return !!webhookUrl.value.trim() || webhookUrlConfigured
+    case 'alertmanager': return !!alertmanagerUrl.value.trim() || alertmanagerUrlConfigured
     case 'email':        return !!emailRecipients.value.trim()
-    case 'pagerduty':    return !!pdRoutingKey.value.trim()
-    case 'opsgenie':     return !!ogApiKey.value.trim()
+    case 'pagerduty':    return !!pdRoutingKey.value.trim() || pdRoutingKeyConfigured
+    case 'opsgenie':     return !!ogApiKey.value.trim() || ogApiKeyConfigured
     default: return false
   }
 })
