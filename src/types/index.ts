@@ -225,8 +225,31 @@ export interface WidgetPosition {
   row_span: number
 }
 
+/** One independently executable query inside a dashboard panel. */
+export interface WidgetPanelQuery {
+  /** Stable Grafana-style reference used in the editor and future expressions (A, B, C...). */
+  ref_id: string
+  source: 'spans' | 'metrics' | 'logs'
+  /** Human-friendly legend label. Empty falls back to the query/series name. */
+  alias?: string
+  /** Optional series color; charts fall back to the shared palette. */
+  color?: string
+  /** Y-axis used by this query's series in time-series panels. */
+  axis?: 'left' | 'right'
+  /** Hidden queries remain configured but are not executed or rendered. */
+  hidden?: boolean
+  filters: Filter[]
+  group_by?: string[]
+  aggregation?: string
+  interval?: string
+  limit?: number
+  promql?: string
+}
+
 export interface WidgetQueryConfig {
   time_range_minutes: number
+  /** Multi-query panels. When absent, legacy top-level fields below remain supported. */
+  queries?: WidgetPanelQuery[]
   filters: Filter[]
   group_by?: string[]
   aggregation?: string
@@ -324,7 +347,9 @@ export interface WidgetData {
   rows?: Record<string, unknown>[]
   count?: number
   /** Multi-series timeseries (PromQL/metrics source): each series is a label + [unixSec, value] points. */
-  series?: Array<{ name: string; points: [number, number][] }>
+  series?: Array<{ name: string; points: [number, number][]; color?: string; ref_id?: string; axis?: 'left' | 'right' }>
+  /** Individual query failures when at least one sibling query still returned data. */
+  query_errors?: Array<{ ref_id: string; message: string }>
 }
 
 // ── Alert types ──
@@ -540,8 +565,10 @@ export interface ApiKeyCreated extends ApiKey {
 // ── Service Link types ──
 
 export interface ServiceLink {
+  tenant_id: string
   service_name: string
   github_repo: string
+  github_installation_id: number
   default_branch: string
   root_path: string
   updated_at: string

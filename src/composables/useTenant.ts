@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import type { Tenant } from '../types'
+import { authenticatedFetch } from './authSession'
 
 // The active tenant is stored by NAME (not UUID) because that's what the
 // X-Rush-Tenant header uses and what ClickHouse data has in the tenant_id column.
@@ -33,7 +34,7 @@ const metricsEnabled = computed(() => {
 
 async function loadTenants(): Promise<void> {
   try {
-    const res = await fetch('/api/v1/tenants', {
+    const res = await authenticatedFetch('/api/v1/tenants', {
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
     })

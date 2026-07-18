@@ -9,6 +9,7 @@
 import { ref, watch, nextTick } from 'vue'
 import type { QueryFilter } from '../types'
 import { useApi } from '../composables/useApi'
+import { authenticatedFetch } from '../composables/authSession'
 
 const props = defineProps<{ placeholder?: string; initial?: QueryFilter[] }>()
 const emit = defineEmits<{ apply: [filters: QueryFilter[]] }>()
@@ -196,7 +197,7 @@ async function onEnterOrButton() {
     let leftover = ''
     let source = 'rules'
     try {
-      const res = await fetch('/api/v1/parse-query', {
+      const res = await authenticatedFetch('/api/v1/parse-query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: text.value }),

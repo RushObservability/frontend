@@ -3,6 +3,7 @@ import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { useFeatures } from '../composables/useFeatures'
+import { useTenant } from '../composables/useTenant'
 import { apiBaseUrl } from '../config'
 import type { ApiKey, ApiKeyCreated, ServiceLink, CustomSkill, Group, Tenant, TenantRetention, TenantSignals, GlobalRetention, User, SsoProvider, IdpGroupMapping, SetupToken, NotificationChannel, MetricFirewallRule, MetricFirewallInput, LicenseStatus } from '../types'
 import SkillEditDialog from '../components/SkillEditDialog.vue'
@@ -15,6 +16,7 @@ import { isAddonEnabled, setAddonEnabled, addonNamespace, saveAddonNamespace, na
 const api = useApi()
 const { user: currentUser } = useAuth()
 const { features, loadFeatures } = useFeatures()
+const { activeTenantName } = useTenant()
 
 // Whether an integration is enabled at the platform level (Helm chart / env →
 // /api/v1/features). Free integrations can only be toggled here when this is on;
@@ -71,6 +73,7 @@ function saveKubernetes() {
 
 // ── Tab navigation ──
 type TabId = 'keys' | 'auth' | 'links' | 'integrations' | 'agent' | 'tenants' | 'retention' | 'groups' | 'users' | 'alerting' | 'general' | 'firewall' | 'license' | 'stats'
+type AgentSubtabId = 'access' | 'models' | 'limits' | 'skills'
 interface TabDef {
   id: TabId
   label: string
@@ -157,6 +160,13 @@ async function loadLicense() {
 }
 
 const activeTab = ref<TabId>('general')
+const activeAgentSubtab = ref<AgentSubtabId>(currentUser.value?.role === 'admin' ? 'access' : 'skills')
+const agentSubtabs: Array<{ id: AgentSubtabId; label: string; eyebrow: string; adminOnly: boolean }> = [
+  { id: 'access', label: 'Tenant access', eyebrow: 'Scope', adminOnly: true },
+  { id: 'models', label: 'Models', eyebrow: 'Policy', adminOnly: true },
+  { id: 'limits', label: 'Investigation limits', eyebrow: 'Budget', adminOnly: true },
+  { id: 'skills', label: 'Custom skills', eyebrow: 'Playbooks', adminOnly: false },
+]
 const activeIndex = computed(() => orderedTabs.value.findIndex(t => t.id === activeTab.value))
 const activeTabDef = computed(() => tabs.find(t => t.id === activeTab.value) ?? tabs[0]!)
 const activeHint = computed(() => activeTabDef.value.hint)
@@ -173,7 +183,7 @@ function navHash(hash: string) {
 
 function setTab(id: TabId) {
   activeTab.value = id
-  navHash(`#${id}`)
+  navHash(id === 'agent' ? `#agent/${activeAgentSubtab.value}` : `#${id}`)
   if (id === 'alerting' && !alertChannelsLoaded.value) {
     loadAlertChannels()
   }
@@ -186,6 +196,44 @@ function setTab(id: TabId) {
   if (id === 'integrations') {
     integrationsExpanded.value = true
   }
+}
+
+function validAgentSubtab(sub: string): AgentSubtabId {
+  const found = agentSubtabs.find(item => item.id === sub && (!item.adminOnly || isAdmin.value))
+  return found?.id ?? (isAdmin.value ? 'access' : 'skills')
+}
+
+function selectAgentSubtab(id: AgentSubtabId) {
+  activeTab.value = 'agent'
+  activeAgentSubtab.value = validAgentSubtab(id)
+  navHash(`#agent/${activeAgentSubtab.value}`)
+}
+
+function agentSubtabMeta(id: AgentSubtabId): string {
+  if (id === 'access') {
+    return agentTenantMode.value === 'all'
+      ? `${enabledAgentTenants.value.length} enabled`
+      : `${agentAllowedTenants.value.length} selected`
+  }
+  if (id === 'models') return agentAllowedIds.value.length ? `${agentAllowedIds.value.length} allowed` : 'Default only'
+  if (id === 'limits') return agentMaxToolSteps.value ? `${agentMaxToolSteps.value} tool calls` : 'Cost controls'
+  return customSkills.value.length ? `${customSkills.value.length} custom` : 'Built-in only'
+}
+
+function onAgentSubtabKeydown(e: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
+  e.preventDefault()
+  const items = agentSubtabs.filter(item => !item.adminOnly || isAdmin.value)
+  const current = items.findIndex(item => item.id === activeAgentSubtab.value)
+  let next = current
+  if (e.key === 'ArrowLeft') next = (current - 1 + items.length) % items.length
+  if (e.key === 'ArrowRight') next = (current + 1) % items.length
+  if (e.key === 'Home') next = 0
+  if (e.key === 'End') next = items.length - 1
+  const target = items[next]
+  if (!target) return
+  selectAgentSubtab(target.id)
+  requestAnimationFrame(() => document.getElementById(`agent-tab-${target.id}`)?.focus())
 }
 
 function onTabKeydown(e: KeyboardEvent) {
@@ -222,6 +270,7 @@ function onHashChange() {
     // sub names a specific integration; '' shows the overview table.
     activeIntegration.value = integrationsMeta.some(m => m.key === sub) ? sub : ''
   }
+  if (tab === 'agent') activeAgentSubtab.value = validAgentSubtab(sub)
 }
 
 // ── Data export (max rows) ──
@@ -939,6 +988,8 @@ const serviceLinks = ref<ServiceLink[]>([])
 const showLinkForm = ref(false)
 const linkServiceName = ref('')
 const linkGithubRepo = ref('')
+const linkGithubInstallationId = ref('')
+const linkDefaultBranch = ref('main')
 const linkRootPath = ref('')
 const serviceSuggestions = ref<string[]>([])
 
@@ -1692,6 +1743,10 @@ async function toggleUserEnabled(id: string, enabled: boolean) {
 const agentBudgetLoaded = ref(false)
 const agentEnabled = ref(false)
 const agentToggleSaving = ref(false)
+const agentTenantMode = ref<'all' | 'selected'>('all')
+const agentAllowedTenants = ref<string[]>([])
+const agentTenantSaving = ref(false)
+const agentTenantSaved = ref(false)
 const agentMaxToolSteps = ref<string>('')
 const agentMaxLlmCalls = ref<string>('')
 // Two-tier model/thinking policy (admin-defined). `agentModel` is the DEFAULT
@@ -1800,11 +1855,39 @@ const agentBudgetSaving = ref(false)
 const agentBudgetSaved = ref(false)
 const agentBudgetError = ref<string | null>(null)
 
+const enabledAgentTenants = computed(() => tenants.value.filter(tenant => tenant.enabled))
+
+function toggleAgentTenant(tenantName: string) {
+  agentAllowedTenants.value = agentAllowedTenants.value.includes(tenantName)
+    ? agentAllowedTenants.value.filter(name => name !== tenantName)
+    : [...agentAllowedTenants.value, tenantName]
+}
+
+async function saveAgentTenantAccess() {
+  agentTenantSaving.value = true
+  agentTenantSaved.value = false
+  agentBudgetError.value = null
+  try {
+    const saved = await api.setSreAgentTenantAccess(agentTenantMode.value, agentAllowedTenants.value)
+    agentTenantMode.value = saved.tenant_mode
+    agentAllowedTenants.value = saved.allowed_tenants
+    agentTenantSaved.value = true
+    await loadFeatures()
+    setTimeout(() => { agentTenantSaved.value = false }, 2500)
+  } catch (e: any) {
+    agentBudgetError.value = e.message || 'Failed to save tenant access'
+  } finally {
+    agentTenantSaving.value = false
+  }
+}
+
 async function loadAgentBudget() {
   if (!isAdmin.value) return
   try {
     const s = await api.getSreAgentSettings()
     agentEnabled.value = !!s.enabled
+    agentTenantMode.value = s.tenant_mode === 'selected' ? 'selected' : 'all'
+    agentAllowedTenants.value = s.allowed_tenants || []
     agentMaxToolSteps.value = String(s.max_tool_steps)
     agentMaxLlmCalls.value = String(s.max_llm_calls)
     agentModel.value = s.model || ''
@@ -2111,6 +2194,7 @@ onMounted(async () => {
       integrationsExpanded.value = true
       activeIntegration.value = integrationsMeta.some(m => m.key === parsed.sub) ? parsed.sub : ''
     }
+    if (parsed.tab === 'agent') activeAgentSubtab.value = validAgentSubtab(parsed.sub)
   }
 
   window.addEventListener('hashchange', onHashChange)
@@ -2195,11 +2279,14 @@ async function createServiceLink() {
     await api.createServiceLink({
       service_name: linkServiceName.value.trim(),
       github_repo: linkGithubRepo.value.trim(),
-      default_branch: 'main',
+      github_installation_id: Number(linkGithubInstallationId.value) || 0,
+      default_branch: linkDefaultBranch.value.trim() || 'main',
       root_path: linkRootPath.value.trim(),
     })
     linkServiceName.value = ''
     linkGithubRepo.value = ''
+    linkGithubInstallationId.value = ''
+    linkDefaultBranch.value = 'main'
     linkRootPath.value = ''
     showLinkForm.value = false
     await loadServiceLinks()
@@ -2210,6 +2297,8 @@ function closeLinkForm() {
   showLinkForm.value = false
   linkServiceName.value = ''
   linkGithubRepo.value = ''
+  linkGithubInstallationId.value = ''
+  linkDefaultBranch.value = 'main'
   linkRootPath.value = ''
 }
 
@@ -3028,7 +3117,10 @@ function formatDate(ts: string): string {
           <div v-for="l in serviceLinks" :key="l.service_name" class="links-row">
             <div class="col-svc mono">{{ l.service_name }}</div>
             <div class="col-repo mono text-muted">{{ l.github_repo }}</div>
-            <div class="col-path mono text-secondary">{{ l.root_path || '/' }}</div>
+            <div class="col-path mono text-secondary">
+              {{ l.root_path || '/' }}
+              <span class="link-branch">{{ l.default_branch }}</span>
+            </div>
             <div class="col-actions">
               <button class="action-btn action-btn-danger" @click="askDelete('link', l.service_name, l.service_name)">Delete</button>
             </div>
@@ -3057,8 +3149,12 @@ function formatDate(ts: string): string {
               </div>
               <div class="group-drawer-body">
                 <p class="text-secondary fs-11" style="line-height: 1.5; margin: 0 0 var(--sp-2)">
-                  Link a service to a GitHub repository for code-aware root cause analysis.
+                  The SRE agent receives a temporary, read-only source snapshot. Repository code is never executed.
                 </p>
+                <div class="repo-access-note">
+                  <strong>GitHub App access</strong>
+                  Install the app on selected repositories with <span class="mono">Contents: read</span>, then enter its installation ID below.
+                </div>
                 <div class="form-group-inline">
                   <label class="form-label">Service Name</label>
                   <input
@@ -3078,6 +3174,27 @@ function formatDate(ts: string): string {
                     class="form-input mono"
                     placeholder="e.g. org/repo"
                   />
+                </div>
+                <div class="form-row-split mt-3">
+                  <div class="form-group-inline">
+                    <label class="form-label">Installation ID</label>
+                    <input
+                      v-model="linkGithubInstallationId"
+                      class="form-input mono"
+                      inputmode="numeric"
+                      pattern="[0-9]*"
+                      placeholder="e.g. 48151623"
+                    />
+                    <span class="form-hint">Leave blank only when the deployment has a default installation.</span>
+                  </div>
+                  <div class="form-group-inline">
+                    <label class="form-label">Branch or ref</label>
+                    <input
+                      v-model="linkDefaultBranch"
+                      class="form-input mono"
+                      placeholder="main"
+                    />
+                  </div>
                 </div>
                 <div class="form-group-inline mt-3">
                   <label class="form-label">Root Path</label>
@@ -3598,38 +3715,120 @@ function formatDate(ts: string): string {
       class="section"
       role="tabpanel"
     >
-      <!-- SRE agent enable + investigation budget (admin) -->
-      <div v-if="isAdmin" class="section-card card">
+      <div v-if="isAdmin" class="agent-controlbar">
+        <div class="agent-controlbar-copy">
+          <div class="agent-status-line">
+            <span class="agent-status-dot" :class="{ on: agentEnabled }"></span>
+            <span class="agent-status-label">SRE Agent</span>
+            <span class="agent-status-value">{{ agentEnabled ? 'Enabled' : 'Disabled' }}</span>
+          </div>
+          <p>Controls investigations and saved-session access across the workspace.</p>
+        </div>
+        <label class="toggle" :title="agentEnabled ? 'Disable SRE Agent' : 'Enable SRE Agent'">
+          <input type="checkbox" :checked="agentEnabled" :disabled="agentToggleSaving" @change="toggleAgentEnabled" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div
+        class="agent-subnav"
+        :class="{ 'agent-subnav--solo': !isAdmin }"
+        role="tablist"
+        aria-label="AI Agent settings"
+        @keydown="onAgentSubtabKeydown"
+      >
+        <button
+          v-for="subtab in agentSubtabs"
+          v-show="!subtab.adminOnly || isAdmin"
+          :id="`agent-tab-${subtab.id}`"
+          :key="subtab.id"
+          class="agent-subtab"
+          :class="{ active: activeAgentSubtab === subtab.id }"
+          role="tab"
+          :tabindex="activeAgentSubtab === subtab.id ? 0 : -1"
+          :aria-selected="activeAgentSubtab === subtab.id"
+          :aria-controls="`agent-panel-${subtab.id}`"
+          @click="selectAgentSubtab(subtab.id)"
+        >
+          <span class="agent-subtab-eyebrow">{{ subtab.eyebrow }}</span>
+          <span class="agent-subtab-label">{{ subtab.label }}</span>
+          <span class="agent-subtab-meta">{{ agentSubtabMeta(subtab.id) }}</span>
+        </button>
+      </div>
+
+      <p v-if="agentBudgetError && activeAgentSubtab !== 'limits'" class="agent-inline-error" role="alert">
+        {{ agentBudgetError }}
+      </p>
+
+      <div
+        v-if="isAdmin"
+        v-show="activeAgentSubtab === 'access'"
+        id="agent-panel-access"
+        class="section-card card agent-tabpanel"
+        role="tabpanel"
+        aria-labelledby="agent-tab-access"
+      >
         <div class="card-header">
           <div class="card-header-text">
-            <h2 class="card-title">SRE Agent</h2>
-            <p class="card-desc text-secondary">
-              Turning the agent on shows the <strong>SRE Agent</strong> entry in the top bar and the Investigate buttons across the app. Turning it off hides them everywhere.
-            </p>
+            <h2 class="card-title">Tenant access</h2>
+            <p class="card-desc text-secondary">Choose which tenant contexts may start investigations or read saved sessions. This policy is enforced by query-api.</p>
           </div>
-          <label class="toggle" :title="agentEnabled ? 'Agent enabled' : 'Agent disabled'">
-            <input type="checkbox" :checked="agentEnabled" :disabled="agentToggleSaving" @change="toggleAgentEnabled" />
-            <span class="toggle-slider"></span>
-          </label>
+          <span v-if="agentEnabled" class="agent-access-count">
+            {{ agentTenantMode === 'all' ? `${enabledAgentTenants.length} tenants` : `${agentAllowedTenants.length} selected` }}
+          </span>
         </div>
-        <div class="create-form" style="padding-bottom: var(--sp-1)">
-          <p class="card-desc" style="margin: 0 0 4px; font-weight: 600; color: var(--text-primary)">Investigation Budget</p>
-          <p class="card-desc text-secondary" style="margin: 0">
-            Per-investigation cost controls. The agent investigates until it can defend a root cause — these caps bound how much it may spend doing so. Lower = cheaper; too low and reports come back preliminary.
-          </p>
+        <div v-if="agentEnabled" class="agent-access-policy">
+          <div class="agent-access-modes" role="radiogroup" aria-label="SRE agent tenant access">
+            <label class="agent-access-mode" :class="{ active: agentTenantMode === 'all' }">
+              <input v-model="agentTenantMode" type="radio" value="all" />
+              <span><strong>All enabled tenants</strong><small>New tenants receive access automatically.</small></span>
+            </label>
+            <label class="agent-access-mode" :class="{ active: agentTenantMode === 'selected' }">
+              <input v-model="agentTenantMode" type="radio" value="selected" />
+              <span><strong>Selected tenants only</strong><small>Deny every tenant that is not explicitly checked.</small></span>
+            </label>
+          </div>
+          <div v-if="agentTenantMode === 'selected'" class="agent-tenant-list">
+            <label v-for="tenant in enabledAgentTenants" :key="tenant.id" class="agent-tenant-row">
+              <input type="checkbox" :checked="agentAllowedTenants.includes(tenant.name)" @change="toggleAgentTenant(tenant.name)" />
+              <span class="agent-tenant-name">{{ tenant.name }}</span>
+              <span v-if="tenant.name === activeTenantName" class="agent-tenant-current">current</span>
+            </label>
+            <div v-if="enabledAgentTenants.length === 0" class="agent-tenant-empty">No enabled tenants are available.</div>
+            <div v-else-if="agentAllowedTenants.length === 0" class="agent-tenant-warning">No tenants selected. The agent will remain unavailable everywhere.</div>
+          </div>
+          <div class="agent-access-save">
+            <span v-if="agentTenantSaved" class="save-confirmation">Saved</span>
+            <button class="btn btn-primary" :disabled="agentTenantSaving" @click="saveAgentTenantAccess">
+              {{ agentTenantSaving ? 'Saving…' : 'Save tenant access' }}
+            </button>
+          </div>
         </div>
-        <!-- Allowed models policy (admin defines the user-facing menu) -->
-        <div v-if="agentEnabled" class="create-form" style="padding-top: var(--sp-2)">
-          <p class="card-desc" style="margin: 0 0 4px; font-weight: 600; color: var(--text-primary); display:flex; align-items:center; gap:8px">
-            Allowed models
-            <span v-if="agentPolicySaving" class="text-muted" style="font-weight:400; font-size:11px">Saving…</span>
-            <span v-else-if="agentPolicySaved" style="font-weight:400; font-size:11px; color: var(--ok)">Saved ✓</span>
-          </p>
-          <p class="card-desc text-secondary" style="margin: 0 0 8px">
-            Type a model name and press Tab or Enter to add it to the menu users can pick from. For each reasoning model (gpt-5 / o-series), toggle the thinking levels you allow — new models start with all levels enabled. The server enforces this — a hand-crafted request with a disallowed model or level falls back to the default.
-          </p>
+        <div v-else class="agent-disabled-panel">Enable the SRE Agent above to configure tenant access.</div>
+      </div>
+
+      <div
+        v-if="isAdmin"
+        v-show="activeAgentSubtab === 'models'"
+        id="agent-panel-models"
+        class="section-card card agent-tabpanel"
+        role="tabpanel"
+        aria-labelledby="agent-tab-models"
+      >
+        <div class="card-header">
+          <div class="card-header-text">
+            <h2 class="card-title">Model policy</h2>
+            <p class="card-desc text-secondary">Define the models and reasoning levels people can choose for an investigation.</p>
+          </div>
+          <span v-if="agentPolicySaving" class="agent-save-state">Saving…</span>
+          <span v-else-if="agentPolicySaved" class="agent-save-state saved">Saved ✓</span>
+        </div>
+        <div v-if="agentEnabled" class="create-form agent-model-form">
+          <label class="form-label" for="agent-model-input">Allowed models</label>
+          <p class="card-desc text-secondary">Type a model name and press Tab or Enter. Reasoning models can be restricted to specific thinking levels; the server enforces this policy.</p>
           <div class="agent-model-combo">
             <input
+              id="agent-model-input"
               v-model="agentModelInput"
               class="form-input mono"
               type="text"
@@ -3642,13 +3841,7 @@ function formatDate(ts: string): string {
               @blur="onModelBlur"
             />
             <ul v-if="showModelMenu && agentModelMatches.length" class="agent-model-menu">
-              <li
-                v-for="(id, i) in agentModelMatches"
-                :key="id"
-                :class="{ active: i === 0 }"
-                class="mono"
-                @mousedown.prevent="addModel(id)"
-              >{{ id }}</li>
+              <li v-for="(id, i) in agentModelMatches" :key="id" :class="{ active: i === 0 }" class="mono" @mousedown.prevent="addModel(id)">{{ id }}</li>
             </ul>
           </div>
           <div v-if="agentAllowedIds.length" class="agent-model-added">
@@ -3658,61 +3851,69 @@ function formatDate(ts: string): string {
                 <button type="button" class="agent-model-remove" @click="askDelete('model', id, id)">Remove</button>
               </div>
               <div v-if="modelIsReasoning(id)" class="agent-level-list">
-                <span class="text-muted" style="font-size:11px">thinking:</span>
+                <span class="text-muted fs-11">thinking:</span>
                 <label v-for="lvl in agentReasoningLevels" :key="lvl" class="agent-level-pick">
-                  <input
-                    type="checkbox"
-                    :checked="(agentAllowed[id] || []).includes(lvl)"
-                    @change="toggleAllowedLevel(id, lvl)"
-                  />
+                  <input type="checkbox" :checked="(agentAllowed[id] || []).includes(lvl)" @change="toggleAllowedLevel(id, lvl)" />
                   <span>{{ lvl }}</span>
                 </label>
               </div>
             </div>
           </div>
-          <p v-else class="text-muted" style="font-size:12px; margin: 6px 0 0">No models added — users won't see a picker, and investigations use the default model.</p>
-        </div>
-        <div class="create-form" style="display:flex; gap: var(--sp-4); align-items: flex-end; flex-wrap: wrap">
-          <div v-if="agentEnabled" class="form-group-inline" style="max-width: 260px">
-            <label class="form-label">
-              Default model
-              <span class="text-muted" style="font-weight:400; margin-left:6px; font-size:11px">used when a user doesn't pick</span>
-            </label>
+          <p v-else class="text-muted fs-12">No models added — investigations use the provider default.</p>
+          <div class="agent-default-model">
+            <label class="form-label">Default model <span class="text-muted">used when a user doesn't pick</span></label>
             <select v-model="agentModel" class="form-input mono" @change="schedulePolicySave">
               <option value="">(first allowed)</option>
               <option v-for="id in agentAllowedIds" :key="id" :value="id">{{ id }}</option>
             </select>
           </div>
-          <div class="form-group-inline" style="max-width: 220px">
-            <label class="form-label">
-              Max tool calls
-              <span class="text-muted" style="font-weight:400; margin-left:6px; font-size:11px">default {{ agentBudgetDefaults?.max_tool_steps ?? 40 }}</span>
-            </label>
+        </div>
+        <div v-else class="agent-disabled-panel">Enable the SRE Agent above to configure model policy.</div>
+      </div>
+
+      <div
+        v-if="isAdmin"
+        v-show="activeAgentSubtab === 'limits'"
+        id="agent-panel-limits"
+        class="section-card card agent-tabpanel"
+        role="tabpanel"
+        aria-labelledby="agent-tab-limits"
+      >
+        <div class="card-header">
+          <div class="card-header-text">
+            <h2 class="card-title">Investigation limits</h2>
+            <p class="card-desc text-secondary">Bound per-investigation cost. Lower limits are cheaper, but may produce preliminary reports.</p>
+          </div>
+        </div>
+        <div class="create-form agent-budget-form">
+          <div class="form-group-inline">
+            <label class="form-label">Max tool calls <span class="text-muted">default {{ agentBudgetDefaults?.max_tool_steps ?? 40 }}</span></label>
             <input v-model="agentMaxToolSteps" type="number" min="4" max="200" class="form-input mono" placeholder="40" />
           </div>
-          <div class="form-group-inline" style="max-width: 220px">
-            <label class="form-label">
-              Max LLM calls
-              <span class="text-muted" style="font-weight:400; margin-left:6px; font-size:11px">default {{ agentBudgetDefaults?.max_llm_calls ?? 55 }}</span>
-            </label>
+          <div class="form-group-inline">
+            <label class="form-label">Max LLM calls <span class="text-muted">default {{ agentBudgetDefaults?.max_llm_calls ?? 55 }}</span></label>
             <input v-model="agentMaxLlmCalls" type="number" min="6" max="300" class="form-input mono" placeholder="55" />
           </div>
           <div class="form-actions-inline">
-            <button class="btn btn-primary" @click="saveAgentBudget" :disabled="agentBudgetSaving">
-              {{ agentBudgetSaving ? 'Saving…' : agentBudgetSaved ? 'Saved ✓' : 'Save' }}
+            <button class="btn btn-primary" :disabled="agentBudgetSaving" @click="saveAgentBudget">
+              {{ agentBudgetSaving ? 'Saving…' : agentBudgetSaved ? 'Saved ✓' : 'Save limits' }}
             </button>
           </div>
-          <p v-if="agentBudgetError" class="fw-field-err" style="flex-basis:100%">{{ agentBudgetError }}</p>
-          <p v-else class="fw-hint" style="flex-basis:100%; margin:0">
-            Tool calls = investigation actions (log searches, trace queries…). LLM calls = total model invocations, including retries and the self-review pass; must be at least tool calls + 2. Applies to new investigations immediately.
-          </p>
+          <p v-if="agentBudgetError" class="fw-field-err agent-budget-note">{{ agentBudgetError }}</p>
+          <p v-else class="fw-hint agent-budget-note">Tool calls are investigation actions such as log searches and trace queries. LLM calls include retries and self-review, and must be at least tool calls + 2. Changes apply to new investigations immediately.</p>
         </div>
       </div>
 
-      <div class="section-card card">
+      <div
+        v-show="activeAgentSubtab === 'skills'"
+        id="agent-panel-skills"
+        class="section-card card agent-tabpanel"
+        role="tabpanel"
+        aria-labelledby="agent-tab-skills"
+      >
         <div class="card-header">
           <div class="card-header-text">
-            <h2 class="card-title">AI Agent</h2>
+            <h2 class="card-title">Custom skills</h2>
             <p class="card-desc text-secondary">
               Custom skills the investigation agent loads dynamically alongside built-in playbooks.
             </p>

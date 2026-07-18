@@ -13,6 +13,7 @@ import ContextMenu from '../components/ContextMenu.vue'
 import PanelCard from '../components/PanelCard.vue'
 import { useTenant } from '../composables/useTenant'
 import { compareFindingStrength, compareFindingSummary, rankCompareFindings } from '../lib/compareFindings'
+import { authenticatedFetch } from '../composables/authSession'
 
 interface ContextMenuItem {
   label: string
@@ -142,7 +143,9 @@ const expandedTraceSpans = computed(() => {
 
 // ═══ View mode: spans vs logs ═══
 const viewMode = ref<'spans' | 'logs'>('spans')
-const tracesOnly = ref(false)
+// Start Explore at the request/trace level. Users can still switch to all
+// spans with the sidebar toggle (or the "a" keyboard shortcut).
+const tracesOnly = ref(true)
 const apmResultMode = ref<'individual' | 'groups'>('individual')
 const otelLogs = ref<LogRecord[]>([])
 
@@ -2140,6 +2143,12 @@ const compareSelectionLabel = computed(() => bubbleUpSelection.value?.label || '
 
 const compareFindings = computed(() => bubbleUpResult.value ? rankCompareFindings(bubbleUpResult.value) : [])
 
+const compareStrengthHelp = {
+  strong: 'Strong: at least 3× more common in Cohort A, supported by 10 or more selected events.',
+  notable: 'Notable: at least 1.75× more common in Cohort A, supported by 5 or more selected events.',
+  directional: 'Directional: more common in Cohort A, but with lower lift or fewer supporting events. Treat it as a lead to investigate.',
+} as const
+
 function filterToCompareFinding(dimension: string, value: string) {
   addFilterFromBubbleUp(dimension, value)
 }
@@ -3677,7 +3686,7 @@ async function callLlmParse() {
   if (!nlInput.value.trim() || nlLoading.value) return
   nlLoading.value = true
   try {
-    const res = await fetch('/api/v1/parse-query', {
+    const res = await authenticatedFetch('/api/v1/parse-query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: nlInput.value }),
@@ -5839,12 +5848,31 @@ onMounted(async () => {
             <small>Selection vs baseline</small>
           </div>
 
+          <details class="compare-help">
+            <summary>
+              <span class="compare-help-mark" aria-hidden="true">?</span>
+              <span>How to read this</span>
+              <svg viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" /></svg>
+            </summary>
+            <div class="compare-help-body">
+              <div><b class="strong">Strong</b><p>At least <strong>3×</strong> more common in A, with <strong>10+</strong> selected events.</p></div>
+              <div><b class="notable">Notable</b><p>At least <strong>1.75×</strong> more common in A, with <strong>5+</strong> selected events.</p></div>
+              <div><b class="directional">Directional</b><p>A meaningful lean toward A, but with lower lift or fewer supporting events.</p></div>
+              <p class="compare-help-note"><strong>A</strong> is your selected cohort; <strong>B</strong> is everything else. These labels rank investigation leads—they do not indicate statistical significance.</p>
+            </div>
+          </details>
+
           <div v-if="compareFindings.length" class="compare-findings-list">
             <article v-for="(finding, index) in compareFindings" :key="`${finding.dimension}:${finding.rawValue}`" class="compare-finding">
               <div class="compare-finding-topline">
                 <span class="compare-finding-rank mono">{{ String(index + 1).padStart(2, '0') }}</span>
                 <span class="compare-finding-dimension">{{ finding.dimension }}</span>
-                <span class="compare-finding-strength" :class="compareFindingStrength(finding.lift, finding.selectionCount)">
+                <span
+                  class="compare-finding-strength"
+                  :class="compareFindingStrength(finding.lift, finding.selectionCount)"
+                  :title="compareStrengthHelp[compareFindingStrength(finding.lift, finding.selectionCount)]"
+                  :aria-label="compareStrengthHelp[compareFindingStrength(finding.lift, finding.selectionCount)]"
+                >
                   {{ compareFindingStrength(finding.lift, finding.selectionCount) }}
                 </span>
               </div>

@@ -13,7 +13,7 @@ const props = defineProps<{
   buckets: CountBucket[]
   deploys?: DeployMarker[]
   /** Multi-series mode (PromQL/metrics source). When present, takes precedence over buckets. */
-  series?: Array<{ name: string; points: [number, number][] }>
+  series?: Array<{ name: string; points: [number, number][]; color?: string; ref_id?: string; axis?: 'left' | 'right' }>
   /** Optional horizontal reference lines (e.g. monitor alert thresholds). */
   thresholds?: Array<{ value: number; color: string; label: string }>
   /** Optional unit suffix for axis labels, the legend last-value, and the tooltip. */
@@ -22,8 +22,15 @@ const props = defineProps<{
   seriesName?: string
 }>()
 
-// Distinct line colors for multi-series (metrics) mode.
-const SERIES_COLORS = ['var(--amber)', 'var(--ok)', 'var(--error)', '#8b5cf6', '#3b82f6', '#ec4899', '#14b8a6', '#f97316']
+// Distinct line colors for split/grouped series. The palette is intentionally
+// longer than the editor's query palette because a single APM or PromQL query
+// can fan out into many lines. Index-based assignment is shared by paths,
+// legend, and hover details so every series keeps one visual identity.
+const SERIES_COLORS = [
+  '#3b82f6', '#e5584f', '#47b881', '#8b5cf6',
+  '#d97706', '#db2777', '#0891b2', '#65a30d',
+  '#f97316', '#6366f1', '#0f766e', '#be123c',
+]
 const seriesMode = computed(() => !!(props.series && props.series.length))
 
 // Append the unit suffix to a formatted number (axis ticks, legend, tooltip).
@@ -43,7 +50,7 @@ const svgHeight = 140
 const padTop = 12
 const padBottom = 20
 const padLeft = 40
-const padRight = 8
+const padRight = 42
 
 const plotWidth = svgWidth - padLeft - padRight
 const plotHeight = svgHeight - padTop - padBottom
@@ -88,24 +95,31 @@ const xLabels = computed(() => {
 
 // ── Multi-series (metrics) geometry ──
 const seriesBounds = computed(() => {
-  let minT = Infinity, maxT = -Infinity, maxV = 0
+  let minT = Infinity, maxT = -Infinity, maxLeft = 0, maxRight = 0
   for (const s of props.series || []) {
     for (const [t, v] of s.points) {
       if (t < minT) minT = t
       if (t > maxT) maxT = t
-      if (v > maxV) maxV = v
+      if (s.axis === 'right') maxRight = Math.max(maxRight, v)
+      else maxLeft = Math.max(maxLeft, v)
     }
   }
   // Extend the range so threshold lines stay on-chart even above the data peak.
-  for (const th of props.thresholds || []) if (th.value > maxV) maxV = th.value
-  return { minT, maxT: maxT > minT ? maxT : minT + 1, maxV: maxV || 1 }
+  for (const th of props.thresholds || []) if (th.value > maxLeft) maxLeft = th.value
+  return {
+    minT,
+    maxT: maxT > minT ? maxT : minT + 1,
+    maxLeft: maxLeft || 1,
+    maxRight: maxRight || 1,
+    hasRight: (props.series || []).some(series => series.axis === 'right'),
+  }
 })
 
 // Threshold reference lines (mapped to the active Y scale).
 const thresholdLines = computed(() => {
   const ths = props.thresholds || []
   if (!ths.length) return []
-  const maxV = seriesMode.value ? seriesBounds.value.maxV : maxCount.value
+  const maxV = seriesMode.value ? seriesBounds.value.maxLeft : maxCount.value
   return ths.map(th => ({
     y: padTop + plotHeight - (th.value / maxV) * plotHeight,
     color: th.color,
@@ -115,23 +129,34 @@ const thresholdLines = computed(() => {
 
 const seriesPaths = computed(() => {
   if (!seriesMode.value) return []
-  const { minT, maxT, maxV } = seriesBounds.value
+  const { minT, maxT, maxLeft, maxRight } = seriesBounds.value
   const span = maxT - minT || 1
   return (props.series || []).map((s, i) => {
+    const axisMax = s.axis === 'right' ? maxRight : maxLeft
     const pts: Pt[] = s.points.map(([t, v]) => [
       padLeft + ((t - minT) / span) * plotWidth,
-      padTop + plotHeight - (v / maxV) * plotHeight,
+      padTop + plotHeight - (v / axisMax) * plotHeight,
     ] as Pt)
-    return { d: straightLinePath(pts), color: SERIES_COLORS[i % SERIES_COLORS.length]!, name: s.name }
+    return { d: straightLinePath(pts), color: s.color || SERIES_COLORS[i % SERIES_COLORS.length]!, name: s.name, axis: s.axis || 'left' }
   })
 })
 
 const seriesYTicks = computed(() => {
-  const max = seriesBounds.value.maxV
+  const max = seriesBounds.value.maxLeft
   return [0, max / 2, max].map(v => ({
     value: v,
     y: padTop + plotHeight - (v / max) * plotHeight,
     label: fmtAxisU(v),
+  }))
+})
+
+const seriesRightYTicks = computed(() => {
+  if (!seriesBounds.value.hasRight) return []
+  const max = seriesBounds.value.maxRight
+  return [0, max / 2, max].map(v => ({
+    value: v,
+    y: padTop + plotHeight - (v / max) * plotHeight,
+    label: withUnit(fmtAxis(v)),
   }))
 })
 
@@ -180,7 +205,7 @@ const hoverModel = computed<{ minT: number; maxT: number; series: HSeries[] }>((
   if (seriesMode.value) {
     const series: HSeries[] = (props.series || []).map((s, i) => ({
       name: s.name,
-      color: SERIES_COLORS[i % SERIES_COLORS.length]!,
+      color: s.color || SERIES_COLORS[i % SERIES_COLORS.length]!,
       pts: s.points,
     }))
     const { minT, maxT } = seriesBounds.value
@@ -280,6 +305,7 @@ function onLeave() { hover.set(null) }
       <svg v-if="seriesMode" :viewBox="`0 0 ${svgWidth} ${svgHeight}`" preserveAspectRatio="none" class="ch-svg ch-animate ts-svg" @pointermove="onHover" @pointerleave="onLeave">
         <line v-for="tick in seriesYTicks" :key="'sy' + tick.value" :x1="padLeft" :y1="tick.y" :x2="svgWidth - padRight" :y2="tick.y" :class="['ch-grid', { 'ch-grid--baseline': tick.value === 0 }]" />
         <text v-for="tick in seriesYTicks" :key="'syl' + tick.value" :x="padLeft - 6" :y="tick.y + 3" class="ch-axis" text-anchor="end">{{ tick.label }}</text>
+        <text v-for="tick in seriesRightYTicks" :key="'syr' + tick.value" :x="svgWidth - padRight + 6" :y="tick.y + 3" class="ch-axis ts-axis-right" text-anchor="start">{{ tick.label }}</text>
         <line v-for="xl in seriesXLabels" :key="'sv' + xl.x" :x1="xl.x" :y1="padTop" :x2="xl.x" :y2="padTop + plotHeight" class="ch-grid" />
         <text v-for="xl in seriesXLabels" :key="'sx' + xl.x" :x="xl.x" :y="svgHeight - 4" class="ch-axis" text-anchor="middle">{{ xl.label }}</text>
         <path v-for="(sp, i) in seriesPaths" :key="'sp' + i" :d="sp.d" class="ch-line ts-line" :style="{ color: sp.color }" />

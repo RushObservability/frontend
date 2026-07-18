@@ -7,6 +7,7 @@ import { useFeatures } from './composables/useFeatures'
 import { useLicense } from './composables/useLicense'
 import { availableAddons } from './integrations/catalog'
 import { isAddonEnabled } from './composables/useIntegrationEnabled'
+import { onSessionExpired } from './composables/authSession'
 import CommandPalette from './components/CommandPalette.vue'
 import { defaultTheme } from './config'
 
@@ -71,13 +72,28 @@ function onDocumentClick(e: MouseEvent) {
     userMenuOpen.value = false
   }
 }
+
+let stopSessionExpired: (() => void) | undefined
 onMounted(() => {
   document.addEventListener('click', onDocumentClick)
   document.addEventListener('keydown', onGlobalKeydown)
+  stopSessionExpired = onSessionExpired(() => {
+    userMenuOpen.value = false
+    tenantMenuOpen.value = false
+    paletteOpen.value = false
+    if (route.name === 'login') return
+    // Match the route guard's privacy behavior: retain only the path, never a
+    // potentially sensitive observability query string.
+    void router.replace({
+      name: 'login',
+      query: { redirect: route.path, expired: '1' },
+    })
+  })
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocumentClick)
   document.removeEventListener('keydown', onGlobalKeydown)
+  stopSessionExpired?.()
 })
 
 async function handleLogout() {
@@ -103,8 +119,14 @@ onMounted(async () => {
 // Load tenants whenever auth is (re)established — covers both a hard page load
 // with an existing session and an SPA login (router.replace, no full reload),
 // which previously left the tenant switcher empty until a manual refresh.
-watch(isAuthenticated, (authed) => {
-  if (authed) loadTenants()
+watch(isAuthenticated, async (authed) => {
+  if (authed) {
+    await loadTenants()
+    // Tenant validation may replace a stale localStorage value. Refresh the
+    // tenant-aware feature flags after that resolution so SRE entry points do
+    // not briefly reflect the wrong tenant policy.
+    await loadFeatures()
+  }
 }, { immediate: true })
 </script>
 

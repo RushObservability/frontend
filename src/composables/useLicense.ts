@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import type { LicenseStatus } from '../types'
+import { authenticatedFetch } from './authSession'
 
 // Module-level singleton (same pattern as useFeatures): one license status shared
 // across the app so nav gating and the Integrations area react consistently.
@@ -8,7 +9,7 @@ const loaded = ref(false)
 
 async function loadLicense(): Promise<void> {
   try {
-    const res = await fetch('/api/v1/license', { credentials: 'same-origin' })
+    const res = await authenticatedFetch('/api/v1/license', { credentials: 'same-origin' })
     if (res.ok) {
       license.value = await res.json()
       loaded.value = true

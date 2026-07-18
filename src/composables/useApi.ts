@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { useTenant } from './useTenant'
+import { authenticatedFetch } from './authSession'
 import type {
   AuthUser,
   TraceResponse,
@@ -109,10 +110,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const incoming = options.headers as Record<string, string>
     Object.assign(headers, incoming)
   }
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await authenticatedFetch(`${API_BASE}${path}`, {
     ...options,
     credentials: 'same-origin',
     headers,
+  }, {
+    // Invalid credentials and an already-ended manual logout are expected 401s;
+    // neither should be presented as an expired in-app session.
+    ignoreUnauthorized: path === '/auth/login' || path === '/auth/logout',
   })
   if (!res.ok) {
     const text = await res.text()
@@ -249,7 +254,7 @@ export function useApi() {
   // endpoint cannot accidentally omit the active tenant scope.
   async function openInvestigationStream(body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
     const { activeTenant } = useTenant()
-    return await fetch(`${API_BASE}/investigate`, {
+    return await authenticatedFetch(`${API_BASE}/investigate`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
@@ -528,6 +533,7 @@ export function useApi() {
   async function createServiceLink(data: {
     service_name: string
     github_repo: string
+    github_installation_id?: number
     default_branch?: string
     root_path?: string
   }): Promise<ServiceLink> {
@@ -1226,7 +1232,7 @@ export function useApi() {
   async function promQuery(query: string, time?: number): Promise<PromVectorResponse> {
     const params = new URLSearchParams({ query })
     if (time !== undefined) params.set('time', String(time))
-    const res = await fetch(`/prom/api/v1/query?${params}`, { headers: promHeaders() })
+    const res = await authenticatedFetch(`/prom/api/v1/query?${params}`, { headers: promHeaders() })
     if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
     const json = await res.json()
     return json.data as PromVectorResponse
@@ -1241,7 +1247,7 @@ export function useApi() {
       end: String(end),
       step: String(step),
     })
-    const res = await fetch(`/prom/api/v1/query_range?${params}`, { headers: promHeaders() })
+    const res = await authenticatedFetch(`/prom/api/v1/query_range?${params}`, { headers: promHeaders() })
     if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
     const json = await res.json()
     return json.data as PromMatrixResponse
@@ -1249,7 +1255,7 @@ export function useApi() {
 
   async function promLabels(match?: string): Promise<string[]> {
     const qs = match ? `?match[]=${encodeURIComponent(match)}` : ''
-    const res = await fetch(`/prom/api/v1/labels${qs}`, { headers: promHeaders() })
+    const res = await authenticatedFetch(`/prom/api/v1/labels${qs}`, { headers: promHeaders() })
     if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
     const json = await res.json()
     return json.data as string[]
@@ -1257,7 +1263,7 @@ export function useApi() {
 
   async function promLabelValues(label: string, match?: string): Promise<string[]> {
     const qs = match ? `?match[]=${encodeURIComponent(match)}` : ''
-    const res = await fetch(`/prom/api/v1/label/${encodeURIComponent(label)}/values${qs}`, { headers: promHeaders() })
+    const res = await authenticatedFetch(`/prom/api/v1/label/${encodeURIComponent(label)}/values${qs}`, { headers: promHeaders() })
     if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
     const json = await res.json()
     return json.data as string[]
@@ -1419,7 +1425,7 @@ export function useApi() {
 
   // ── SRE agent investigation budget (admin) ──
 
-  async function getSreAgentSettings(): Promise<{ enabled: boolean; model: string; allowed_models: Array<{ id: string; reasoning: string[] }>; model_suggestions: string[]; reasoning_effort: string; reasoning_levels: string[]; model_is_reasoning: boolean; max_tool_steps: number; max_llm_calls: number; defaults: { max_tool_steps: number; max_llm_calls: number } }> {
+  async function getSreAgentSettings(): Promise<{ enabled: boolean; tenant_mode: 'all' | 'selected'; allowed_tenants: string[]; model: string; allowed_models: Array<{ id: string; reasoning: string[] }>; model_suggestions: string[]; reasoning_effort: string; reasoning_levels: string[]; model_is_reasoning: boolean; max_tool_steps: number; max_llm_calls: number; defaults: { max_tool_steps: number; max_llm_calls: number } }> {
     return await request('/settings/sre-agent')
   }
 
@@ -1449,6 +1455,13 @@ export function useApi() {
     return await request('/settings/sre-agent', {
       method: 'PUT',
       body: JSON.stringify({ enabled }),
+    })
+  }
+
+  async function setSreAgentTenantAccess(tenantMode: 'all' | 'selected', allowedTenants: string[]): Promise<{ ok: boolean; tenant_mode: 'all' | 'selected'; allowed_tenants: string[] }> {
+    return await request('/settings/sre-agent', {
+      method: 'PUT',
+      body: JSON.stringify({ tenant_mode: tenantMode, allowed_tenants: allowedTenants }),
     })
   }
 
@@ -1489,7 +1502,7 @@ export function useApi() {
   }): Promise<{ blob: Blob; filename: string }> {
     const { activeTenant } = useTenant()
     const path = opts.signal === 'logs' ? '/logs/export' : '/query/export'
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await authenticatedFetch(`${API_BASE}${path}`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-Rush-Tenant': activeTenant.value },
@@ -1572,7 +1585,7 @@ export function useApi() {
     listInvestigationSessions, getInvestigationSession, deleteInvestigationSession, listInvestigationTemplates,
     bubbleUp,
     listMonitors, getMonitor, createMonitor, updateMonitor, deleteMonitor, listMonitorEvents, previewMonitor, muteMonitor, unmuteMonitor, monitorAutocomplete, monitorSuggest,
-    getFeatures, setExportMaxRows, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
+    getFeatures, setExportMaxRows, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, setSreAgentTenantAccess, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
     listMetricFirewall, createMetricFirewall, updateMetricFirewall, deleteMetricFirewall,
   }
 }

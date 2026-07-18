@@ -1,6 +1,7 @@
 import { ref, computed, readonly } from 'vue'
 import type { AuthUser } from '../types'
 import { useApi } from './useApi'
+import { markSessionActive, onSessionExpired } from './authSession'
 
 const user = ref<AuthUser | null>(null)
 const checked = ref(false)
@@ -12,11 +13,20 @@ const canWrite = computed(() => user.value?.role === 'admin' || user.value?.role
 
 const { login: apiLogin, logout: apiLogout, getMe } = useApi()
 
+// Clear cached identity as soon as any authenticated transport reports a 401.
+// The App shell owns the corresponding route change.
+onSessionExpired(() => {
+  user.value = null
+  checked.value = true
+  loading.value = false
+})
+
 async function checkSession(): Promise<void> {
   if (checked.value) return
   loading.value = true
   try {
     user.value = await getMe()
+    markSessionActive()
   } catch {
     user.value = null
   } finally {
@@ -29,6 +39,7 @@ async function login(username: string, password: string): Promise<void> {
   const res = await apiLogin(username, password)
   user.value = res.user
   checked.value = true
+  markSessionActive()
 }
 
 async function logout(): Promise<void> {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { useApi } from '../composables/useApi'
@@ -13,6 +13,7 @@ const username = ref('')
 const password = ref('')
 const error = ref('')
 const submitting = ref(false)
+const sessionExpired = computed(() => route.query.expired === '1')
 
 // SSO status
 const ssoEnabled = ref(false)
@@ -66,6 +67,10 @@ async function handleSubmit() {
       <div class="login-header">
         <img src="/logo-mark.svg" alt="Rush" class="login-logo" />
         <h1 class="login-title">Rush <span class="login-title-dim">Observability</span></h1>
+      </div>
+
+      <div v-if="sessionExpired" class="login-notice" role="status">
+        Your session expired. Sign in again to continue.
       </div>
 
       <!-- SSO Button -->
@@ -145,6 +150,17 @@ async function handleSubmit() {
   align-items: center;
   gap: var(--sp-3);
   margin-bottom: var(--sp-8);
+}
+
+.login-notice {
+  margin: calc(var(--sp-4) * -1) 0 var(--sp-5);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 32%, transparent);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--warning) 9%, var(--bg-raised));
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .login-logo {

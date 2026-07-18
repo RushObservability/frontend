@@ -1,4 +1,6 @@
 import { ref } from 'vue'
+import { useTenant } from './useTenant'
+import { authenticatedFetch } from './authSession'
 
 export interface Features {
   sre_agent: boolean
@@ -19,7 +21,11 @@ const loaded = ref(false)
 
 async function loadFeatures(): Promise<void> {
   try {
-    const res = await fetch('/api/v1/features', { credentials: 'same-origin' })
+    const { activeTenant } = useTenant()
+    const res = await authenticatedFetch('/api/v1/features', {
+      credentials: 'same-origin',
+      headers: { 'X-Rush-Tenant': activeTenant.value },
+    })
     if (res.ok) {
       features.value = await res.json()
       loaded.value = true

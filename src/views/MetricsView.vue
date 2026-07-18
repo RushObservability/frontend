@@ -8,6 +8,7 @@ import TimePicker from '../components/TimePicker.vue'
 import type { PromVectorResult, PromMatrixResult } from '../types'
 import QueryHistory from '../components/QueryHistory.vue'
 import { useQueryHistory } from '../composables/useQueryHistory'
+import { authenticatedFetch } from '../composables/authSession'
 import type { HistoryEntry } from '../composables/useQueryHistory'
 
 interface MetricsHistoryQuery {
@@ -742,7 +743,7 @@ async function translateNl() {
   nlConfidence.value = 0
 
   try {
-    const res = await fetch('/api/v1/parse-promql', {
+    const res = await authenticatedFetch('/api/v1/parse-promql', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: nlInput.value, metric_names: metricNames.value.slice(0, 100) }),
