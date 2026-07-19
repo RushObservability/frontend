@@ -462,6 +462,12 @@ function fetchLogFields(prefix: string): Promise<string[]> {
   return api.monitorAutocomplete({ type: 'log_field', prefix }).then(r => r.suggestions).catch(() => [])
 }
 
+function fetchApmGroupFields(prefix: string): Promise<string[]> {
+  const fields = ['endpoint', 'http_method', 'http_status_code', 'status', 'span_name', 'kind', 'service_name']
+  const normalized = prefix.trim().toLowerCase()
+  return Promise.resolve(fields.filter(field => !normalized || field.startsWith(normalized)))
+}
+
 // ── Expression autocomplete ──
 // Parses cursor context from the expression to determine what to suggest
 function fetchExpressionSuggestions(text: string): Promise<string[]> {
@@ -895,9 +901,9 @@ onUnmounted(() => {
             <div class="mf-inline-add">
               <AutocompleteInput
                 v-model="groupByInput"
-                :fetch-suggestions="fetchLabelKeys"
+                :fetch-suggestions="fetchApmGroupFields"
                 :mono="true"
-                placeholder="Add label..."
+                placeholder="Add span field..."
                 @select="addGroupBy(apmConfig.group_by)"
               />
             </div>
