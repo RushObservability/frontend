@@ -2,16 +2,30 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { useApi } from '../../../composables/useApi'
 import type { PromVectorResponse } from '../../../types'
+import DataTable, { type DataTableColumn } from '../../../components/DataTable.vue'
 
 const props = defineProps<{ server?: string; host?: string; db?: string }>()
 const api = useApi()
 const loading = ref(false)
 
-interface IdxRow { schema: string; table: string; index: string; scans: number; size: number }
-interface TblRow { schema: string; table: string; seq: number; idx: number; live: number; size: number }
+interface IdxRow extends Record<string, unknown> { schema: string; table: string; index: string; scans: number; size: number }
+interface TblRow extends Record<string, unknown> { schema: string; table: string; seq: number; idx: number; live: number; size: number }
 
 const indexes = ref<IdxRow[]>([])
 const tables = ref<TblRow[]>([])
+const unusedColumns: DataTableColumn[] = [
+  { key: 'index', label: 'Index', sortable: true },
+  { key: 'table', label: 'Table', sortable: true },
+  { key: 'size', label: 'Size', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'suggestion', label: 'Suggestion' },
+]
+const seqColumns: DataTableColumn[] = [
+  { key: 'table', label: 'Table', sortable: true },
+  { key: 'seq', label: 'Seq scans', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'idx', label: 'Index scans', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'live', label: 'Live rows', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'size', label: 'Size', align: 'right', sortable: true, cellClass: 'num' },
+]
 
 function sel(): string {
   const p: string[] = []
@@ -73,7 +87,6 @@ function uSort(k: USort) {
   if (uKey.value === k) uDir.value = uDir.value === 'desc' ? 'asc' : 'desc'
   else { uKey.value = k; uDir.value = k === 'size' ? 'desc' : 'asc' }
 }
-const uArrow = (k: USort) => (uKey.value === k ? (uDir.value === 'desc' ? ' ▾' : ' ▴') : '')
 // Unused = never scanned. Exclude *_pkey (back a constraint; must not be dropped).
 const unused = computed(() => {
   const dir = uDir.value === 'desc' ? -1 : 1
@@ -95,7 +108,6 @@ function sSort(k: SSort) {
   if (sKey.value === k) sDir.value = sDir.value === 'desc' ? 'asc' : 'desc'
   else { sKey.value = k; sDir.value = k === 'table' ? 'asc' : 'desc' }
 }
-const sArrow = (k: SSort) => (sKey.value === k ? (sDir.value === 'desc' ? ' ▾' : ' ▴') : '')
 // Missing-index candidates: meaningful tables read mostly via sequential scans.
 const seqHeavy = computed(() => {
   const dir = sDir.value === 'desc' ? -1 : 1
@@ -109,6 +121,23 @@ const seqHeavy = computed(() => {
     })
     .slice(0, 25)
 })
+
+function indexRow(row: Record<string, unknown>): IdxRow { return row as IdxRow }
+function tableRow(row: Record<string, unknown>): TblRow { return row as TblRow }
+function unusedRowKey(row: Record<string, unknown>): string {
+  const r = indexRow(row)
+  return r.schema + r.table + r.index
+}
+function seqRowKey(row: Record<string, unknown>): string {
+  const r = tableRow(row)
+  return r.schema + r.table
+}
+function onUnusedSort(key: string) {
+  if (key === 'index' || key === 'table' || key === 'size') uSort(key)
+}
+function onSeqSort(key: string) {
+  if (key === 'table' || key === 'seq' || key === 'idx' || key === 'live' || key === 'size') sSort(key)
+}
 
 function fmtBytes(n: number): string {
   const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n
@@ -127,26 +156,25 @@ watch(() => [props.server, props.host, props.db], load)
 
     <h3 style="margin:0 0 8px">Unused indexes</h3>
     <p class="sub" style="color:var(--text-tertiary);font-size:12px;margin:0 0 12px">
-      Never scanned since stats were last reset — candidates to drop (verify they don’t back a
-      primary key or unique constraint, which stay even if unscanned).
+      No scans since statistics were last reset. Treat these as review candidates only; confirm
+      constraint dependencies, workload seasonality, and an adequate observation window before removal.
     </p>
-    <p class="pg-empty" v-if="!unused.length && !loading">No unused indexes 🎉</p>
-    <table v-else-if="unused.length" class="pg-table" style="margin-bottom:28px">
-      <thead><tr>
-        <th @click="uSort('index')">Index{{ uArrow('index') }}</th>
-        <th @click="uSort('table')">Table{{ uArrow('table') }}</th>
-        <th class="num" @click="uSort('size')">Size{{ uArrow('size') }}</th>
-        <th>Suggestion</th>
-      </tr></thead>
-      <tbody>
-        <tr v-for="i in unused" :key="i.schema + i.table + i.index">
-          <td><code>{{ i.index }}</code></td>
-          <td>{{ i.schema }}.{{ i.table }}</td>
-          <td class="num">{{ fmtBytes(i.size) }}</td>
-          <td><code class="pg-sql">DROP INDEX {{ i.schema }}.{{ i.index }};</code></td>
-        </tr>
-      </tbody>
-    </table>
+    <p class="pg-empty" v-if="!unused.length && !loading">No indexes currently need review.</p>
+    <DataTable
+      v-else-if="unused.length"
+      class="index-review-table"
+      :columns="unusedColumns"
+      :rows="unused"
+      :row-key="unusedRowKey"
+      :sort-key="uKey"
+      :sort-direction="uDir"
+      @sort="onUnusedSort"
+    >
+      <template #cell-index="{ row }"><code>{{ indexRow(row).index }}</code></template>
+      <template #cell-table="{ row }">{{ indexRow(row).schema }}.{{ indexRow(row).table }}</template>
+      <template #cell-size="{ row }">{{ fmtBytes(indexRow(row).size) }}</template>
+      <template #cell-suggestion><span class="review-note">Review usage history before changing</span></template>
+    </DataTable>
 
     <h3 style="margin:0 0 8px">Tables with heavy sequential scans</h3>
     <p class="sub" style="color:var(--text-tertiary);font-size:12px;margin:0 0 12px">
@@ -154,23 +182,25 @@ watch(() => [props.server, props.host, props.db], load)
       Queries tab for the predicates being filtered).
     </p>
     <p class="pg-empty" v-if="!seqHeavy.length && !loading">No sequential-scan-heavy tables.</p>
-    <table v-else-if="seqHeavy.length" class="pg-table">
-      <thead><tr>
-        <th @click="sSort('table')">Table{{ sArrow('table') }}</th>
-        <th class="num" @click="sSort('seq')">Seq scans{{ sArrow('seq') }}</th>
-        <th class="num" @click="sSort('idx')">Index scans{{ sArrow('idx') }}</th>
-        <th class="num" @click="sSort('live')">Live rows{{ sArrow('live') }}</th>
-        <th class="num" @click="sSort('size')">Size{{ sArrow('size') }}</th>
-      </tr></thead>
-      <tbody>
-        <tr v-for="t in seqHeavy" :key="t.schema + t.table">
-          <td>{{ t.schema }}.<strong>{{ t.table }}</strong></td>
-          <td class="num">{{ fmt(t.seq) }}</td>
-          <td class="num">{{ fmt(t.idx) }}</td>
-          <td class="num">{{ fmt(t.live) }}</td>
-          <td class="num">{{ fmtBytes(t.size) }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <DataTable
+      v-else-if="seqHeavy.length"
+      :columns="seqColumns"
+      :rows="seqHeavy"
+      :row-key="seqRowKey"
+      :sort-key="sKey"
+      :sort-direction="sDir"
+      @sort="onSeqSort"
+    >
+      <template #cell-table="{ row }">{{ tableRow(row).schema }}.<strong>{{ tableRow(row).table }}</strong></template>
+      <template #cell-seq="{ row }">{{ fmt(tableRow(row).seq) }}</template>
+      <template #cell-idx="{ row }">{{ fmt(tableRow(row).idx) }}</template>
+      <template #cell-live="{ row }">{{ fmt(tableRow(row).live) }}</template>
+      <template #cell-size="{ row }">{{ fmtBytes(tableRow(row).size) }}</template>
+    </DataTable>
   </div>
 </template>
+
+<style scoped>
+.index-review-table { margin-bottom: 28px; }
+.review-note { color: var(--text-tertiary); font-size: 12px; }
+</style>

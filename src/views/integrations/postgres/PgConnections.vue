@@ -2,12 +2,13 @@
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useApi } from '../../../composables/useApi'
 import type { Filter, LogRecord, PromVectorResponse } from '../../../types'
+import DataTable, { type DataTableColumn } from '../../../components/DataTable.vue'
 
 const props = defineProps<{ server?: string }>()
 const api = useApi()
 const loading = ref(false)
 
-interface Session {
+interface Session extends Record<string, unknown> {
   pid: string
   state: string
   db: string
@@ -20,6 +21,16 @@ interface Session {
   query: string
 }
 const sessions = ref<Session[]>([])
+const sessionColumns: DataTableColumn[] = [
+  { key: 'pid', label: 'PID', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'state', label: 'State', sortable: true },
+  { key: 'db', label: 'DB', sortable: true },
+  { key: 'user', label: 'User', sortable: true },
+  { key: 'wait', label: 'Wait', sortable: true },
+  { key: 'duration', label: 'Duration', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'blocked', label: 'Blocked by', sortable: true },
+  { key: 'query', label: 'Query' },
+]
 interface Wait { type: string; event: string; count: number }
 const waits = ref<Wait[]>([])
 const stateCounts = ref<Record<string, number>>({})
@@ -90,7 +101,6 @@ function setSort(k: SortKey) {
   if (sortKey.value === k) sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'
   else { sortKey.value = k; sortDir.value = k === 'duration' ? 'desc' : 'asc' }
 }
-const arrow = (k: SortKey) => (sortKey.value === k ? (sortDir.value === 'desc' ? ' ▾' : ' ▴') : '')
 function sortVal(s: Session, k: SortKey): number | string {
   switch (k) {
     case 'pid': return Number(s.pid) || 0
@@ -113,6 +123,23 @@ const active = computed(() => {
       return ((av as number) - (bv as number)) * dir
     })
 })
+function sessionRowClass(s: Record<string, unknown>): string {
+  const row = s as Session
+  return [row.queryAge > 30 ? 'slow' : '', row.blockedBy.length ? 'blocked' : ''].filter(Boolean).join(' ')
+}
+function sessionFromRow(row: Record<string, unknown>): Session { return row as Session }
+function waitText(row: Record<string, unknown>): string {
+  const s = sessionFromRow(row)
+  return s.waitType ? s.waitType + (s.waitEvent ? ':' + s.waitEvent : '') : '—'
+}
+function blockedText(row: Record<string, unknown>): string { return sessionFromRow(row).blockedBy.join(', ') || '—' }
+function queryText(row: Record<string, unknown>): string {
+  const query = sessionFromRow(row).query
+  return query.length > 80 ? query.slice(0, 80) + '…' : (query || '—')
+}
+function onSessionSort(key: string) {
+  if (key === 'pid' || key === 'state' || key === 'db' || key === 'user' || key === 'wait' || key === 'duration' || key === 'blocked') setSort(key)
+}
 
 // Summary tiles. Active/idle come from the state metric (always present); the
 // waiting/blocked/longest details come from the sampled non-idle sessions.
@@ -163,7 +190,7 @@ watch(() => props.server, load)
 
     <!-- Blocking -->
     <div v-if="blockedEdges.length" class="block-panel">
-      <div class="block-head">🔒 Blocking detected</div>
+      <div class="block-head">Blocking detected</div>
       <div v-for="s in blockedEdges" :key="s.pid" class="block-edge">
         <span class="pid">pid {{ s.pid }}</span>
         <span class="muted">waiting on</span>
@@ -181,32 +208,21 @@ watch(() => props.server, load)
 
     <!-- Running queries -->
     <p class="pg-empty" v-if="!active.length && !loading">No active sessions right now.</p>
-    <table v-else-if="active.length" class="pg-table">
-      <thead>
-        <tr>
-          <th class="num" @click="setSort('pid')">PID{{ arrow('pid') }}</th>
-          <th @click="setSort('state')">State{{ arrow('state') }}</th>
-          <th @click="setSort('db')">DB{{ arrow('db') }}</th>
-          <th @click="setSort('user')">User{{ arrow('user') }}</th>
-          <th @click="setSort('wait')">Wait{{ arrow('wait') }}</th>
-          <th class="num" @click="setSort('duration')">Duration{{ arrow('duration') }}</th>
-          <th @click="setSort('blocked')">Blocked by{{ arrow('blocked') }}</th>
-          <th>Query</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="s in active" :key="s.pid" :class="{ slow: s.queryAge > 30, blocked: s.blockedBy.length }">
-          <td class="num">{{ s.pid }}</td>
-          <td>{{ s.state }}</td>
-          <td>{{ s.db }}</td>
-          <td>{{ s.user }}</td>
-          <td>{{ s.waitType ? s.waitType + (s.waitEvent ? ':' + s.waitEvent : '') : '—' }}</td>
-          <td class="num">{{ fmtAge(s.queryAge) }}</td>
-          <td>{{ s.blockedBy.join(', ') || '—' }}</td>
-          <td><code class="pg-sql">{{ s.query.length > 80 ? s.query.slice(0, 80) + '…' : (s.query || '—') }}</code></td>
-        </tr>
-      </tbody>
-    </table>
+    <DataTable
+      v-else-if="active.length"
+      :columns="sessionColumns"
+      :rows="active"
+      row-key="pid"
+      :sort-key="sortKey"
+      :sort-direction="sortDir"
+      :row-class="sessionRowClass"
+      @sort="onSessionSort"
+    >
+      <template #cell-wait="{ row }">{{ waitText(row) }}</template>
+      <template #cell-duration="{ row }">{{ fmtAge(sessionFromRow(row).queryAge) }}</template>
+      <template #cell-blocked="{ row }">{{ blockedText(row) }}</template>
+      <template #cell-query="{ row }"><code class="pg-sql">{{ queryText(row) }}</code></template>
+    </DataTable>
     <p class="auto-note">Auto-refreshes every 7s.</p>
   </div>
 </template>
@@ -234,7 +250,5 @@ watch(() => props.server, load)
 }
 .pg-stat .value.warn { color: var(--amber, #f59e0b); }
 .pg-stat .value.crit { color: var(--error, #ef4444); }
-.pg-table tr.slow td { color: var(--amber, #f59e0b); }
-.pg-table tr.blocked td:first-child { box-shadow: inset 2px 0 0 var(--error, #ef4444); }
 .auto-note { font-size: 11px; color: var(--text-tertiary); margin-top: 10px; }
 </style>

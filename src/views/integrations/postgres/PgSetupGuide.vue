@@ -7,8 +7,8 @@
     <h2>Connect a PostgreSQL instance</h2>
     <p>
       Your license includes the <strong>PostgreSQL</strong> add-on, but no collector is reporting
-      yet. Run the <code>postgres-collector</code> next to your database — it ships metrics, query
-      stats, and schema into Rush over OTLP and self-gates on this license.
+      yet. Run the <code>postgres-collector</code> next to your database. The control room will show
+      freshness, capabilities, query workload, locks, schema, and maintenance findings once data lands.
     </p>
 
     <h3>1. Monitoring role</h3>

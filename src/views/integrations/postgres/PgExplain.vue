@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { useApi } from '../../../composables/useApi'
 import PgPlanTree from './PgPlanTree.vue'
 
-const props = defineProps<{ server?: string }>()
+const props = defineProps<{ server?: string; db?: string }>()
 const api = useApi()
 const route = useRoute()
 
@@ -28,7 +28,7 @@ const insights = computed<string[]>(() => {
   walk(plan.value, nodes)
   const out: string[] = []
   const seqScans = nodes.filter((n) => n['Node Type'] === 'Seq Scan' && (n['Plan Rows'] ?? 0) > 1000)
-  for (const s of seqScans) out.push(`Sequential scan on ${s['Relation Name']} (~${(s['Plan Rows'] ?? 0).toLocaleString()} rows) — consider an index.`)
+  for (const s of seqScans) out.push(`Sequential scan on ${s['Relation Name']} (~${(s['Plan Rows'] ?? 0).toLocaleString()} estimated rows). Check whether the filter is selective before adding an index.`)
   const top = nodes.reduce((m, n) => ((n['Total Cost'] ?? 0) > (m?.['Total Cost'] ?? -1) ? n : m), null as any)
   if (top) out.push(`Most expensive node: ${top['Node Type']}${top['Relation Name'] ? ' on ' + top['Relation Name'] : ''} (cost ${(top['Total Cost'] ?? 0).toLocaleString()}).`)
   const nl = nodes.filter((n) => n['Node Type'] === 'Nested Loop').length
@@ -45,7 +45,7 @@ async function run() {
   plan.value = null
   rawJson.value = ''
   try {
-    const { id } = await api.submitExplain(props.server || '', query.value)
+    const { id } = await api.submitExplain(props.server || '', query.value, props.db || '')
     status.value = 'queued'
     // Poll until the collector runs it (or it errors).
     for (let i = 0; i < 60; i++) {
@@ -58,7 +58,7 @@ async function run() {
         plan.value = Array.isArray(parsed) ? parsed[0]?.Plan : parsed?.Plan
         break
       }
-      if (job.status === 'error') {
+      if (job.status === 'error' || job.status === 'expired') {
         error.value = job.error || 'EXPLAIN failed'
         break
       }
@@ -93,7 +93,7 @@ onMounted(() => {
       <button class="btn btn-primary" :disabled="running || !query.trim()" @click="run">
         {{ running ? 'Running…' : 'Run EXPLAIN' }}
       </button>
-      <span v-if="running" class="status">{{ status }}…</span>
+      <span v-if="running" class="status">{{ status }}<template v-if="props.db"> · {{ props.db }}</template>…</span>
       <span v-if="showRaw !== undefined && plan" class="raw-toggle" @click="showRaw = !showRaw">
         {{ showRaw ? 'Hide' : 'Show' }} raw JSON
       </span>

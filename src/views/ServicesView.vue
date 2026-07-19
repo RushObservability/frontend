@@ -6,6 +6,7 @@ import { useAuth } from '../composables/useAuth'
 import { useTenant } from '../composables/useTenant'
 import type { ServiceEntry, GraphNode, GraphEdge, Funnel, FunnelResult, FunnelStep } from '../types'
 import TimePicker from '../components/TimePicker.vue'
+import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 
 const router = useRouter()
 const route  = useRoute()
@@ -78,7 +79,18 @@ async function loadCatalogMetrics() {
 const statsLoaded = computed(() => graphNodes.value.length > 0)
 
 // Catalog table rows — renders service names immediately, stats fill in when ready
-const catalogRows = computed(() => {
+interface CatalogRow extends Record<string, unknown> {
+  service_name: string
+  request_count: number
+  error_count: number
+  error_rate: number
+  avg_duration_ms: number
+  p50_ms: number
+  p95_ms: number
+  p99_ms: number
+  health: string
+}
+const catalogRows = computed<CatalogRow[]>(() => {
   const nodeMap = new Map<string, GraphNode>()
   for (const n of graphNodes.value) nodeMap.set(n.service_name, n)
 
@@ -115,6 +127,16 @@ const catalogRows = computed(() => {
 type CatSortKey = 'service_name' | 'request_count' | 'error_count' | 'error_rate' | 'p50_ms' | 'p95_ms' | 'p99_ms'
 const catSortKey = ref<CatSortKey>('request_count')
 const catSortDir = ref<'asc' | 'desc'>('desc')
+const catalogColumns: DataTableColumn[] = [
+  { key: 'service_name', label: 'Service Name', sortable: true, headerClass: 'col-name', cellClass: 'col-name' },
+  { key: 'health', label: 'Health', cellClass: 'col-health' },
+  { key: 'request_count', label: 'Requests', align: 'right', sortable: true, cellClass: 'col-num' },
+  { key: 'error_count', label: 'Errors', align: 'right', sortable: true, cellClass: 'col-num' },
+  { key: 'error_rate', label: 'Error %', align: 'right', sortable: true, cellClass: 'col-num' },
+  { key: 'p50_ms', label: 'P50', align: 'right', sortable: true, cellClass: 'col-num' },
+  { key: 'p95_ms', label: 'P95', align: 'right', sortable: true, cellClass: 'col-num' },
+  { key: 'p99_ms', label: 'P99', align: 'right', sortable: true, cellClass: 'col-num' },
+]
 const sortedCatalogRows = computed(() => {
   const rows = [...catalogRows.value]
   const k = catSortKey.value
@@ -135,9 +157,22 @@ function setCatSort(k: CatSortKey) {
     catSortDir.value = k === 'service_name' ? 'asc' : 'desc'
   }
 }
-function catSortInd(k: CatSortKey): string {
-  if (catSortKey.value !== k) return ''
-  return catSortDir.value === 'asc' ? ' ▲' : ' ▼'
+function onCatalogSort(key: string) {
+  if (key === 'service_name' || key === 'request_count' || key === 'error_count' || key === 'error_rate' || key === 'p50_ms' || key === 'p95_ms' || key === 'p99_ms') {
+    setCatSort(key)
+  }
+}
+function openService(row: Record<string, unknown>) {
+  const name = String(row.service_name ?? '')
+  if (name) router.push({ path: `/services/${encodeURIComponent(name)}`, query: { t: String(catalogMinutes.value) } })
+}
+
+function rowNumber(value: unknown): number {
+  return typeof value === 'number' && isFinite(value) ? value : Number(value) || 0
+}
+
+function rowHealth(value: unknown): string {
+  return typeof value === 'string' ? value : 'healthy'
 }
 
 function formatCount(n: number): string {
@@ -599,53 +634,50 @@ function sfBarColor(p: number) {
         <div class="text-muted" style="font-size: 11px">Services appear here once they start emitting trace data</div>
       </div>
 
-      <div v-else class="catalog-table-wrap card">
-        <table class="catalog-table">
-          <thead>
-            <tr>
-              <th class="col-name sortable" @click="setCatSort('service_name')">Service Name<span class="cat-sort">{{ catSortInd('service_name') }}</span></th>
-              <th class="col-health">Health</th>
-              <th class="col-num sortable" @click="setCatSort('request_count')">Requests<span class="cat-sort">{{ catSortInd('request_count') }}</span></th>
-              <th class="col-num sortable" @click="setCatSort('error_count')">Errors<span class="cat-sort">{{ catSortInd('error_count') }}</span></th>
-              <th class="col-num sortable" @click="setCatSort('error_rate')">Error %<span class="cat-sort">{{ catSortInd('error_rate') }}</span></th>
-              <th class="col-num sortable" @click="setCatSort('p50_ms')">P50<span class="cat-sort">{{ catSortInd('p50_ms') }}</span></th>
-              <th class="col-num sortable" @click="setCatSort('p95_ms')">P95<span class="cat-sort">{{ catSortInd('p95_ms') }}</span></th>
-              <th class="col-num sortable" @click="setCatSort('p99_ms')">P99<span class="cat-sort">{{ catSortInd('p99_ms') }}</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="row in sortedCatalogRows"
-              :key="row.service_name"
-              @click="router.push({ path: `/services/${encodeURIComponent(row.service_name)}`, query: { t: String(catalogMinutes) } })"
-              style="cursor: pointer"
-            >
-              <td class="col-name">
-                <span class="svc-dot" :class="statsLoaded ? row.health : 'loading'" />
-                <span class="svc-name mono">{{ row.service_name }}</span>
-              </td>
-              <template v-if="statsLoaded">
-                <td class="col-health"><span class="health-badge" :class="row.health">{{ row.health }}</span></td>
-                <td class="col-num mono">{{ formatCount(row.request_count) }}</td>
-                <td class="col-num mono" :class="{ 'status-error': row.error_count > 0 }">{{ formatCount(row.error_count) }}</td>
-                <td class="col-num mono" :class="{ 'status-error': row.error_rate > 0.05, 'status-warn': row.error_rate > 0.01 && row.error_rate <= 0.05 }">{{ formatPercent(row.error_rate) }}</td>
-                <td class="col-num mono" :class="latencyClass(row.p50_ms)">{{ formatMs(row.p50_ms) }}</td>
-                <td class="col-num mono" :class="latencyClass(row.p95_ms)">{{ formatMs(row.p95_ms) }}</td>
-                <td class="col-num mono" :class="latencyClass(row.p99_ms)">{{ formatMs(row.p99_ms) }}</td>
-              </template>
-              <template v-else>
-                <td class="col-health"><span class="stat-placeholder"></span></td>
-                <td class="col-num"><span class="stat-placeholder"></span></td>
-                <td class="col-num"><span class="stat-placeholder"></span></td>
-                <td class="col-num"><span class="stat-placeholder"></span></td>
-                <td class="col-num"><span class="stat-placeholder"></span></td>
-                <td class="col-num"><span class="stat-placeholder"></span></td>
-                <td class="col-num"><span class="stat-placeholder"></span></td>
-              </template>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        v-else
+        :columns="catalogColumns"
+        :rows="sortedCatalogRows"
+        row-key="service_name"
+        :sort-key="catSortKey"
+        :sort-direction="catSortDir"
+        clickable-rows
+        @sort="onCatalogSort"
+        @row-click="openService"
+      >
+        <template #cell-service_name="{ row }">
+          <span class="svc-dot" :class="statsLoaded ? rowHealth(row.health) : 'loading'" />
+          <span class="svc-name mono">{{ row.service_name }}</span>
+        </template>
+        <template #cell-health="{ row }">
+          <span v-if="statsLoaded" class="health-badge" :class="rowHealth(row.health)">{{ rowHealth(row.health) }}</span>
+          <span v-else class="stat-placeholder"></span>
+        </template>
+        <template #cell-request_count="{ row }">
+          <template v-if="statsLoaded">{{ formatCount(rowNumber(row.request_count)) }}</template>
+          <span v-else class="stat-placeholder"></span>
+        </template>
+        <template #cell-error_count="{ row }">
+          <template v-if="statsLoaded"><span :class="{ 'status-error': rowNumber(row.error_count) > 0 }">{{ formatCount(rowNumber(row.error_count)) }}</span></template>
+          <span v-else class="stat-placeholder"></span>
+        </template>
+        <template #cell-error_rate="{ row }">
+          <template v-if="statsLoaded"><span :class="{ 'status-error': rowNumber(row.error_rate) > 0.05, 'status-warn': rowNumber(row.error_rate) > 0.01 && rowNumber(row.error_rate) <= 0.05 }">{{ formatPercent(rowNumber(row.error_rate)) }}</span></template>
+          <span v-else class="stat-placeholder"></span>
+        </template>
+        <template #cell-p50_ms="{ row }">
+          <template v-if="statsLoaded"><span :class="latencyClass(rowNumber(row.p50_ms))">{{ formatMs(rowNumber(row.p50_ms)) }}</span></template>
+          <span v-else class="stat-placeholder"></span>
+        </template>
+        <template #cell-p95_ms="{ row }">
+          <template v-if="statsLoaded"><span :class="latencyClass(rowNumber(row.p95_ms))">{{ formatMs(rowNumber(row.p95_ms)) }}</span></template>
+          <span v-else class="stat-placeholder"></span>
+        </template>
+        <template #cell-p99_ms="{ row }">
+          <template v-if="statsLoaded"><span :class="latencyClass(rowNumber(row.p99_ms))">{{ formatMs(rowNumber(row.p99_ms)) }}</span></template>
+          <span v-else class="stat-placeholder"></span>
+        </template>
+      </DataTable>
     </template>
 
     <!-- Graph View -->

@@ -2,12 +2,13 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { useApi } from '../../../composables/useApi'
 import type { PromVectorResponse } from '../../../types'
+import DataTable, { type DataTableColumn } from '../../../components/DataTable.vue'
 
 const props = defineProps<{ server?: string; host?: string; db?: string }>()
 const api = useApi()
 const loading = ref(false)
 
-interface Row {
+interface Row extends Record<string, unknown> {
   schema: string
   table: string
   live: number
@@ -18,6 +19,15 @@ interface Row {
   modSinceAnalyze: number
 }
 const rows = ref<Row[]>([])
+const vacuumColumns: DataTableColumn[] = [
+  { key: 'table', label: 'Table', sortable: true },
+  { key: 'dead', label: 'Dead %', align: 'right', sortable: true, cellClass: (row) => `num${deadPct(row as Row) >= 20 ? ' warn' : ''}` },
+  { key: 'deadrows', label: 'Dead rows', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'autovac', label: 'Last autovacuum', align: 'right', sortable: true, cellClass: (row) => `num${!isFinite((row as Row).sinceAutovac) || (row as Row).sinceAutovac > 86400 ? ' warn' : ''}` },
+  { key: 'avcount', label: 'Autovacuums', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'mod', label: 'Mods since analyze', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'xid', label: 'XID age', align: 'right', sortable: true, cellClass: (row) => `num${(row as Row).xidAge >= 1_500_000_000 ? ' crit' : (row as Row).xidAge >= 1_000_000_000 ? ' warn' : ''}` },
+]
 const dbXidAge = ref<number>(NaN)
 
 function sel(): string {
@@ -93,7 +103,6 @@ function setSort(k: SortKey) {
   if (sortKey.value === k) sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'
   else { sortKey.value = k; sortDir.value = k === 'table' ? 'asc' : 'desc' }
 }
-const arrow = (k: SortKey) => (sortKey.value === k ? (sortDir.value === 'desc' ? ' ▾' : ' ▴') : '')
 function sortVal(r: Row, k: SortKey): number | string {
   switch (k) {
     case 'table': return `${r.schema}.${r.table}`
@@ -114,6 +123,14 @@ const sorted = computed(() => {
     return ((av as number) - (bv as number)) * dir
   })
 })
+function onVacuumSort(key: string) {
+  if (key === 'table' || key === 'dead' || key === 'deadrows' || key === 'autovac' || key === 'avcount' || key === 'mod' || key === 'xid') setSort(key)
+}
+function vacuumRowKey(row: Record<string, unknown>): string {
+  const r = row as Row
+  return `${r.schema}.${r.table}`
+}
+function vacuumRow(row: Record<string, unknown>): Row { return row as Row }
 
 const WRAP_DANGER = 2_100_000_000
 const wrapSeverity = computed(() => {
@@ -159,30 +176,23 @@ watch(() => [props.server, props.host, props.db], load)
 
     <p class="pg-loading" v-if="loading && !rows.length">Loading…</p>
     <p class="pg-empty" v-else-if="!rows.length">No table statistics yet.</p>
-    <table v-else class="pg-table">
-      <thead>
-        <tr>
-          <th @click="setSort('table')">Table{{ arrow('table') }}</th>
-          <th class="num" @click="setSort('dead')">Dead %{{ arrow('dead') }}</th>
-          <th class="num" @click="setSort('deadrows')">Dead rows{{ arrow('deadrows') }}</th>
-          <th class="num" @click="setSort('autovac')">Last autovacuum{{ arrow('autovac') }}</th>
-          <th class="num" @click="setSort('avcount')">Autovacuums{{ arrow('avcount') }}</th>
-          <th class="num" @click="setSort('mod')">Mods since analyze{{ arrow('mod') }}</th>
-          <th class="num" @click="setSort('xid')">XID age{{ arrow('xid') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="r in sorted" :key="r.schema + r.table">
-          <td>{{ r.schema }}.<strong>{{ r.table }}</strong></td>
-          <td class="num" :class="{ warn: deadPct(r) >= 20 }">{{ deadPct(r).toFixed(1) }}%</td>
-          <td class="num">{{ fmtNum(r.dead) }}</td>
-          <td class="num" :class="{ warn: !isFinite(r.sinceAutovac) || r.sinceAutovac > 86400 }">{{ fmtAge(r.sinceAutovac) }}</td>
-          <td class="num">{{ fmtNum(r.autovacCount) }}</td>
-          <td class="num">{{ fmtNum(r.modSinceAnalyze) }}</td>
-          <td class="num" :class="{ warn: r.xidAge >= 1_000_000_000, crit: r.xidAge >= 1_500_000_000 }">{{ fmtNum(r.xidAge) }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <DataTable
+      v-else
+      :columns="vacuumColumns"
+      :rows="sorted"
+      :row-key="vacuumRowKey"
+      :sort-key="sortKey"
+      :sort-direction="sortDir"
+      @sort="onVacuumSort"
+    >
+      <template #cell-table="{ row }">{{ vacuumRow(row).schema }}.<strong>{{ vacuumRow(row).table }}</strong></template>
+      <template #cell-dead="{ row }">{{ deadPct(vacuumRow(row)).toFixed(1) }}%</template>
+      <template #cell-deadrows="{ row }">{{ fmtNum(vacuumRow(row).dead) }}</template>
+      <template #cell-autovac="{ row }">{{ fmtAge(vacuumRow(row).sinceAutovac) }}</template>
+      <template #cell-avcount="{ row }">{{ fmtNum(vacuumRow(row).autovacCount) }}</template>
+      <template #cell-mod="{ row }">{{ fmtNum(vacuumRow(row).modSinceAnalyze) }}</template>
+      <template #cell-xid="{ row }">{{ fmtNum(vacuumRow(row).xidAge) }}</template>
+    </DataTable>
   </div>
 </template>
 
@@ -200,7 +210,5 @@ watch(() => [props.server, props.host, props.db], load)
 .wrap-banner.critical { border-left-color: var(--error, #ef4444); background: color-mix(in srgb, var(--error, #ef4444) 8%, transparent); }
 .wrap-title { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-weight: 600; margin-bottom: 4px; }
 .wrap-body { font-size: 13px; color: var(--text-secondary); }
-.pg-table td.warn { color: var(--amber, #f59e0b); }
-.pg-table td.crit { color: var(--error, #ef4444); font-weight: 600; }
 .pg-stat .value.warn { color: var(--amber, #f59e0b); }
 </style>

@@ -36,7 +36,7 @@ export const catalog: AddonDef[] = [
   {
     key: 'postgresql',
     label: 'PostgreSQL',
-    icon: '🐘',
+    icon: 'DB',
     entitlement: 'postgres',
     serverDiscoveryMetric: 'postgresql_backends',
     dbDiscoveryMetric: 'postgresql_table_size',

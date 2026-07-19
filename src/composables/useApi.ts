@@ -478,14 +478,14 @@ export function useApi() {
     return await request('/license')
   }
 
-  async function submitExplain(server: string, query: string): Promise<{ id: string }> {
+  async function submitExplain(server: string, query: string, db = ''): Promise<{ id: string }> {
     return await request('/integrations/postgres/explain', {
       method: 'POST',
-      body: JSON.stringify({ server, query }),
+      body: JSON.stringify({ server, db, query }),
     })
   }
 
-  async function getExplainJob(id: string): Promise<{ status: string; plan_json: string; error: string }> {
+  async function getExplainJob(id: string): Promise<{ status: string; db: string; plan_json: string; error: string }> {
     return await request(`/integrations/postgres/explain/${id}`)
   }
 

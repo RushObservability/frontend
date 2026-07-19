@@ -62,9 +62,9 @@ async function load() {
     id: 'unused-indexes',
     title: 'Unused indexes',
     severity: unused.length ? 'warn' : 'ok',
-    summary: unused.length
-      ? `${unused.length} index(es) never scanned, ${fmtBytes(unusedBytes)} of wasted space.`
-      : 'No unused indexes.',
+      summary: unused.length
+      ? `${unused.length} index(es) have no scans since the last reset, using ${fmtBytes(unusedBytes)}. Review before changing.`
+      : 'No indexes are currently candidates for review.',
     items: unused.slice(0, 15).map((k) => { const [s, t, i] = k.split('|'); return `${i} on ${s}.${t} (${fmtBytes(idxSize[k] ?? 0)})` }),
   })
 

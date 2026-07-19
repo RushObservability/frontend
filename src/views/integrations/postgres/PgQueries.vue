@@ -3,6 +3,7 @@ import { ref, watch, onMounted, computed } from 'vue'
 import { useApi } from '../../../composables/useApi'
 import TimeseriesWidget from '../../../components/widgets/TimeseriesWidget.vue'
 import type { Filter, LogRecord } from '../../../types'
+import DataTable, { type DataTableColumn } from '../../../components/DataTable.vue'
 
 const props = defineProps<{ server?: string; host?: string; db?: string }>()
 const api = useApi()
@@ -28,23 +29,36 @@ async function loadTrend(queryid: string) {
   } catch { /* leave trend absent */ }
 }
 
-interface QueryRow {
+interface QueryRow extends Record<string, unknown> {
   queryid: string
   db: string
   user: string
   mean_ms: number
+  total_ms: number
   calls: number
   rows: number
+  rows_per_call: number
   blks_hit: number
   blks_read: number
+  temp_blocks: number
+  io_ms: number
   sql: string
   ts: number
 }
 
 const rows = ref<QueryRow[]>([])
 const expanded = ref<string | null>(null)
-type SortKey = 'mean_ms' | 'calls' | 'rows'
+type SortKey = 'mean_ms' | 'total_ms' | 'calls' | 'rows'
 const sortKey = ref<SortKey>('mean_ms')
+const queryColumns: DataTableColumn[] = [
+  { key: 'sql', label: 'Query' },
+  { key: 'total_ms', label: 'DB time', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'mean_ms', label: 'Mean ms', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'calls', label: 'Calls', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'rows', label: 'Rows', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'cache', label: 'Cache %', align: 'right', cellClass: 'num' },
+  { key: 'db', label: 'DB' },
+]
 
 const sorted = computed(() =>
   [...rows.value].sort((a, b) => b[sortKey.value] - a[sortKey.value]).slice(0, 100),
@@ -80,10 +94,14 @@ async function load() {
         db: a['db'] || '',
         user: a['user'] || '',
         mean_ms: num(a['mean_ms']),
+        total_ms: num(a['total_ms']),
         calls: num(a['calls']),
         rows: num(a['rows']),
+        rows_per_call: num(a['rows_per_call']) || (num(a['calls']) > 0 ? num(a['rows']) / num(a['calls']) : 0),
         blks_hit: num(a['shared_blks_hit']),
         blks_read: num(a['shared_blks_read']),
+        temp_blocks: num(a['temp_blks_read']) + num(a['temp_blks_written']),
+        io_ms: num(a['blk_read_ms']) + num(a['blk_write_ms']),
         sql: r.Body,
         ts: r.Timestamp,
       }
@@ -95,6 +113,11 @@ async function load() {
 function toggle(id: string) {
   expanded.value = expanded.value === id ? null : id
   if (expanded.value === id) loadTrend(id)
+}
+function queryRow(row: Record<string, unknown>): QueryRow { return row as QueryRow }
+function toggleQueryRow(row: Record<string, unknown>) { toggle(queryRow(row).queryid) }
+function onQuerySort(key: string) {
+  if (key === 'mean_ms' || key === 'total_ms' || key === 'calls' || key === 'rows') sortKey.value = key
 }
 
 const copiedId = ref<string | null>(null)
@@ -121,51 +144,59 @@ watch(() => [props.server, props.host, props.db], load)
       No query statistics yet. The collector emits these from <code>pg_stat_statements</code>
       every interval (deltas; the first interval only primes a baseline).
     </p>
-    <table v-else class="pg-table">
-      <thead>
-        <tr>
-          <th>Query</th>
-          <th class="num" @click="sortKey = 'mean_ms'">Mean ms{{ sortKey === 'mean_ms' ? ' ▾' : '' }}</th>
-          <th class="num" @click="sortKey = 'calls'">Calls{{ sortKey === 'calls' ? ' ▾' : '' }}</th>
-          <th class="num" @click="sortKey = 'rows'">Rows{{ sortKey === 'rows' ? ' ▾' : '' }}</th>
-          <th class="num">Cache %</th>
-          <th>DB</th>
-        </tr>
-      </thead>
-      <tbody>
-        <template v-for="r in sorted" :key="r.queryid">
-          <tr @click="toggle(r.queryid)">
-            <td><code class="pg-sql">{{ r.sql.length > 90 ? r.sql.slice(0, 90) + '…' : r.sql }}</code></td>
-            <td class="num">{{ r.mean_ms.toFixed(2) }}</td>
-            <td class="num">{{ Math.round(r.calls).toLocaleString() }}</td>
-            <td class="num">{{ Math.round(r.rows).toLocaleString() }}</td>
-            <td class="num">{{ r.blks_hit + r.blks_read > 0 ? ((r.blks_hit / (r.blks_hit + r.blks_read)) * 100).toFixed(0) + '%' : '—' }}</td>
-            <td>{{ r.db }}</td>
-          </tr>
-          <tr v-if="expanded === r.queryid" class="q-detail-row">
-            <td colspan="6">
+    <DataTable
+      v-else
+      :columns="queryColumns"
+      :rows="sorted"
+      row-key="queryid"
+      :sort-key="sortKey"
+      sort-direction="desc"
+      clickable-rows
+      :expanded-row-key="expanded"
+      @sort="onQuerySort"
+      @row-click="toggleQueryRow"
+    >
+      <template #cell-sql="{ row }"><code class="pg-sql">{{ queryRow(row).sql.length > 90 ? queryRow(row).sql.slice(0, 90) + '…' : queryRow(row).sql }}</code></template>
+      <template #cell-total_ms="{ row }">{{ queryRow(row).total_ms.toFixed(0) }} ms</template>
+      <template #cell-mean_ms="{ row }">{{ queryRow(row).mean_ms.toFixed(2) }}</template>
+      <template #cell-calls="{ row }">{{ Math.round(queryRow(row).calls).toLocaleString() }}</template>
+      <template #cell-rows="{ row }">{{ Math.round(queryRow(row).rows).toLocaleString() }}</template>
+      <template #cell-cache="{ row }">{{ cacheHit(queryRow(row)) }}</template>
+      <template #row-detail="{ row }">
               <div class="q-panel">
                 <!-- Stat tiles (per-interval deltas) -->
                 <div class="q-stats">
                   <div class="q-stat">
+                    <div class="q-lbl">DB time</div>
+                    <div class="q-val">{{ queryRow(row).total_ms.toFixed(0) }}<span class="q-unit">ms</span></div>
+                  </div>
+                  <div class="q-stat">
                     <div class="q-lbl">Mean latency</div>
-                    <div class="q-val accent">{{ r.mean_ms.toFixed(2) }}<span class="q-unit">ms</span></div>
+                    <div class="q-val accent">{{ queryRow(row).mean_ms.toFixed(2) }}<span class="q-unit">ms</span></div>
                   </div>
                   <div class="q-stat">
                     <div class="q-lbl">Calls</div>
-                    <div class="q-val">{{ Math.round(r.calls).toLocaleString() }}</div>
+                    <div class="q-val">{{ Math.round(queryRow(row).calls).toLocaleString() }}</div>
                   </div>
                   <div class="q-stat">
                     <div class="q-lbl">Rows</div>
-                    <div class="q-val">{{ Math.round(r.rows).toLocaleString() }}</div>
+                    <div class="q-val">{{ Math.round(queryRow(row).rows).toLocaleString() }}<span class="q-unit"> · {{ queryRow(row).rows_per_call.toFixed(1) }}/call</span></div>
                   </div>
                   <div class="q-stat">
                     <div class="q-lbl">Cache hit</div>
-                    <div class="q-val">{{ cacheHit(r) }}</div>
+                    <div class="q-val">{{ cacheHit(queryRow(row)) }}</div>
                   </div>
                   <div class="q-stat">
                     <div class="q-lbl">Blocks hit / read</div>
-                    <div class="q-val small">{{ Math.round(r.blks_hit).toLocaleString() }} / {{ Math.round(r.blks_read).toLocaleString() }}</div>
+                    <div class="q-val small">{{ Math.round(queryRow(row).blks_hit).toLocaleString() }} / {{ Math.round(queryRow(row).blks_read).toLocaleString() }}</div>
+                  </div>
+                  <div class="q-stat">
+                    <div class="q-lbl">Temp blocks</div>
+                    <div class="q-val small">{{ Math.round(queryRow(row).temp_blocks).toLocaleString() }}</div>
+                  </div>
+                  <div class="q-stat">
+                    <div class="q-lbl">IO time</div>
+                    <div class="q-val small">{{ queryRow(row).io_ms.toFixed(1) }} ms</div>
                   </div>
                 </div>
 
@@ -173,36 +204,32 @@ watch(() => [props.server, props.host, props.db], load)
                 <div class="q-sql-block">
                   <div class="q-sql-head">
                     <span class="q-sql-title">Normalized query</span>
-                    <span class="q-meta">queryid {{ r.queryid }}<template v-if="r.user"> · {{ r.user }}</template></span>
+                    <span class="q-meta">queryid {{ queryRow(row).queryid }}<template v-if="queryRow(row).user"> · {{ queryRow(row).user }}</template></span>
                     <router-link
                       class="q-copy"
-                      :to="{ name: 'integration-page', params: { addon: 'postgresql', page: 'explain' }, query: { server: props.server, q: r.sql } }"
+                      :to="{ name: 'integration-page', params: { addon: 'postgresql', page: 'explain' }, query: { server: props.server, q: queryRow(row).sql } }"
                       @click.stop
                     >Explain →</router-link>
-                    <button class="q-copy" @click.stop="copySql(r.queryid, r.sql)">
-                      {{ copiedId === r.queryid ? '✓ Copied' : 'Copy' }}
+                    <button class="q-copy" @click.stop="copySql(queryRow(row).queryid, queryRow(row).sql)">
+                      {{ copiedId === queryRow(row).queryid ? '✓ Copied' : 'Copy' }}
                     </button>
                   </div>
-                  <pre class="q-sql">{{ r.sql }}</pre>
+                  <pre class="q-sql">{{ queryRow(row).sql }}</pre>
                 </div>
 
                 <!-- Trend -->
-                <div v-if="trends[r.queryid]" class="q-trend">
+                <div v-if="trends[queryRow(row).queryid]" class="q-trend">
                   <div class="q-sub-label">Mean latency (ms) · last 6h</div>
-                  <TimeseriesWidget :buckets="[]" :series="trends[r.queryid]" />
+                  <TimeseriesWidget :buckets="[]" :series="trends[queryRow(row).queryid]" />
                 </div>
               </div>
-            </td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
+      </template>
+    </DataTable>
   </div>
 </template>
 
 <style scoped>
 /* Query inspector — the expanded row: recessed panel, stat tiles, copyable SQL, trend. */
-.q-detail-row > td { padding: 0; border-bottom: 1px solid var(--border-subtle); }
 .q-panel {
   margin: 4px 0 12px;
   padding: var(--sp-5, 20px);

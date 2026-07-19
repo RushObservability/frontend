@@ -83,7 +83,7 @@ interface TabDef {
 const tabs: TabDef[] = [
   { id: 'general',      label: 'General',       group: 'Workspace',         hint: 'Workspace-wide preferences and defaults.' },
   { id: 'license',      label: 'License',       group: 'Workspace',         hint: 'License status and entitled add-ons. Set RUSH_LICENSE_KEY to license this instance.' },
-  { id: 'integrations', label: 'Integrations',  group: 'Workspace',         hint: 'Connect external tools — ArgoCD, more coming.' },
+  { id: 'integrations', label: 'Integrations',  group: 'Workspace',         hint: 'Connect external tools and observability add-ons.' },
   { id: 'agent',        label: 'AI Agent',      group: 'Workspace',         hint: 'Custom investigation playbooks the SRE agent loads on demand.' },
   { id: 'users',        label: 'Users',         group: 'Access & Identity', hint: 'Manage local user accounts for authentication and access control.' },
   { id: 'groups',       label: 'Groups',        group: 'Access & Identity', hint: 'Manage permission groups that bundle scopes, permissions, and tenant bindings.' },
@@ -107,6 +107,7 @@ const orderedTabs = computed(() => groupedTabs.value.flatMap(g => g.items))
 // integration's own page. The rail's "Integrations" item expands into the same
 // list as a second-level menu.
 const integrationsMeta = [
+  { key: 'postgresql', label: 'PostgreSQL', desc: 'Database health, query workload, schema, and maintenance.' },
   { key: 'argocd', label: 'ArgoCD', desc: 'Application health & sync status from ArgoCD.' },
   { key: 'fluxcd', label: 'FluxCD', desc: 'Flux v2 Kustomizations, HelmReleases, and Sources.' },
   { key: 'kubernetes', label: 'Kubernetes', desc: 'Read-only browser for cluster workloads & resources.' },
@@ -116,11 +117,16 @@ const integrationsMeta = [
 const integrationSubItems = integrationsMeta
 const integrationsExpanded = ref(false)
 const activeIntegration = ref<string>('') // '' = overview table
+const license = ref<LicenseStatus | null>(null)
+const licenseLoading = ref(false)
 
 // Status per integration: helm-gated ones (argocd/fluxcd/kubernetes) are
-// "unavailable" unless their Helm feature flag is on; cloudwatch is always
-// available (setting-based).
+// "unavailable" unless their Helm feature flag is on; licensed add-ons are
+// enabled when the server reports the required entitlement.
 function integrationStatus(key: string): 'enabled' | 'disabled' | 'unavailable' {
+  if (key === 'postgresql') {
+    return license.value?.valid && license.value.entitlements.includes('postgres') ? 'enabled' : 'unavailable'
+  }
   if (key === 'cloudwatch') return cloudwatchEnabled.value ? 'enabled' : 'disabled'
   if (!featureOn(key)) return 'unavailable'
   const en = key === 'argocd' ? argocdEnabled.value
@@ -152,8 +158,6 @@ function selectIntegration(key: string) {
 }
 
 // ── License ──
-const license = ref<LicenseStatus | null>(null)
-const licenseLoading = ref(false)
 async function loadLicense() {
   licenseLoading.value = true
   try { license.value = await api.getLicense() } catch { /* api.error */ } finally { licenseLoading.value = false }
@@ -3244,7 +3248,40 @@ function formatDate(ts: string): string {
       <template v-else>
         <button class="int-back" @click="selectIntegrations">‹ All integrations</button>
 
-      <div v-if="activeIntegration === 'argocd'" id="integration-argocd" class="set-card">
+      <div v-if="activeIntegration === 'postgresql'" id="integration-postgresql" class="set-card">
+        <div class="set-card-head">
+          <h2 class="card-title">PostgreSQL</h2>
+          <p class="card-desc">Monitor PostgreSQL health, query workload, schema, connections, and maintenance from the control room.</p>
+        </div>
+        <div v-if="licenseLoading" class="set-row">
+          <div class="set-row-text text-muted">Checking PostgreSQL entitlement…</div>
+        </div>
+        <template v-else-if="license?.valid && license.entitlements.includes('postgres')">
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-row-label">PostgreSQL add-on enabled</div>
+              <div class="set-row-desc">The license includes the PostgreSQL collector entitlement.</div>
+            </div>
+            <div class="set-row-control">
+              <span class="lic-badge" style="color: var(--ok); border-color: var(--ok)">Entitled</span>
+            </div>
+          </div>
+          <div class="set-row">
+            <div class="set-row-text">
+              <div class="set-row-label">Open control room</div>
+              <div class="set-row-desc">View collector freshness, database health, queries, locks, schema, indexes, and vacuum signals.</div>
+            </div>
+            <div class="set-row-control">
+              <router-link class="btn btn-primary" to="/integrations/postgresql/overview">Open PostgreSQL</router-link>
+            </div>
+          </div>
+        </template>
+        <div v-else class="set-helm-note">
+          PostgreSQL is not included in the active license. Add the <code>postgres</code> entitlement to <code>RUSH_LICENSE_KEY</code> and restart query-api.
+        </div>
+      </div>
+
+      <div v-else-if="activeIntegration === 'argocd'" id="integration-argocd" class="set-card">
         <div class="set-card-head">
           <h2 class="card-title">ArgoCD</h2>
           <p class="card-desc">Import Application health and sync status from ArgoCD into Rush. When enabled it appears in the <router-link to="/integrations">Integrations</router-link> area.</p>

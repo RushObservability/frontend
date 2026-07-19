@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { useApi } from '../../../composables/useApi'
 import type { Filter, LogRecord, PromVectorResponse } from '../../../types'
+import DataTable, { type DataTableColumn } from '../../../components/DataTable.vue'
 
 const props = defineProps<{ server?: string; host?: string; db?: string }>()
 const api = useApi()
@@ -9,7 +10,7 @@ const loading = ref(false)
 
 interface Col { name: string; type: string; nullable: boolean }
 interface Idx { name: string; def: string }
-interface TableRow {
+interface TableRow extends Record<string, unknown> {
   host: string
   db: string
   schema: string
@@ -26,6 +27,18 @@ const expanded = ref<string | null>(null)
 type SortKey = 'table' | 'size' | 'columns' | 'indexes' | 'live' | 'dead'
 const sortKey = ref<SortKey>('size')
 const sortDir = ref<'asc' | 'desc'>('desc')
+const tableColumns = computed<DataTableColumn[]>(() => [
+  ...(!props.db ? [
+    { key: 'host', label: 'Host' },
+    { key: 'db', label: 'DB' },
+  ] : []),
+  { key: 'table', label: 'Table', sortable: true },
+  { key: 'size', label: 'Size', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'columns', label: 'Columns', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'indexes', label: 'Indexes', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'live', label: 'Live rows', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'dead', label: 'Dead %', align: 'right', sortable: true, cellClass: 'num' },
+])
 
 function deadRatio(r: TableRow): number {
   const total = r.live + r.dead
@@ -45,10 +58,6 @@ function setSort(k: SortKey) {
   if (sortKey.value === k) sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'
   else { sortKey.value = k; sortDir.value = k === 'table' ? 'asc' : 'desc' }
 }
-function arrow(k: SortKey): string {
-  return sortKey.value === k ? (sortDir.value === 'desc' ? ' ▾' : ' ▴') : ''
-}
-
 const sorted = computed(() => {
   const dir = sortDir.value === 'desc' ? -1 : 1
   return [...rows.value].sort((a, b) => {
@@ -141,6 +150,12 @@ function deadPct(r: TableRow): string {
 }
 function toggle(k: string) { expanded.value = expanded.value === k ? null : k }
 const keyOf = (r: TableRow) => `${r.host}.${r.db}.${r.schema}.${r.table}`
+function tableRow(row: Record<string, unknown>): TableRow { return row as TableRow }
+function tableRowKey(row: Record<string, unknown>): string { return keyOf(tableRow(row)) }
+function toggleTableRow(row: Record<string, unknown>) { toggle(tableRowKey(row)) }
+function onTableSort(key: string) {
+  if (key === 'table' || key === 'size' || key === 'columns' || key === 'indexes' || key === 'live' || key === 'dead') setSort(key)
+}
 
 // ── Schema-inspector parsing (for the expanded detail) ──
 interface ParsedIndex { name: string; primary: boolean; unique: boolean; method: string; cols: string[] }
@@ -179,46 +194,40 @@ watch(() => [props.server, props.host, props.db], load)
       No schema snapshot yet. The collector emits one every
       <code>COLLECTOR_SCHEMA_INTERVAL_SECS</code> (default 600s).
     </p>
-    <table v-else class="pg-table">
-      <thead>
-        <tr>
-          <th v-if="!props.db">Host</th>
-          <th v-if="!props.db">DB</th>
-          <th @click="setSort('table')">Table{{ arrow('table') }}</th>
-          <th class="num" @click="setSort('size')">Size{{ arrow('size') }}</th>
-          <th class="num" @click="setSort('columns')">Columns{{ arrow('columns') }}</th>
-          <th class="num" @click="setSort('indexes')">Indexes{{ arrow('indexes') }}</th>
-          <th class="num" @click="setSort('live')">Live rows{{ arrow('live') }}</th>
-          <th class="num" @click="setSort('dead')">Dead %{{ arrow('dead') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <template v-for="r in sorted" :key="keyOf(r)">
-          <tr @click="toggle(keyOf(r))">
-            <td v-if="!props.db" class="db-cell">{{ r.host }}</td>
-            <td v-if="!props.db" class="db-cell">{{ r.db }}</td>
-            <td>{{ r.schema }}.<strong>{{ r.table }}</strong></td>
-            <td class="num">{{ fmtBytes(r.size_bytes) }}</td>
-            <td class="num">{{ r.columns.length }}</td>
-            <td class="num">{{ r.indexes.length }}</td>
-            <td class="num">{{ isFinite(r.live) ? Math.round(r.live).toLocaleString() : '—' }}</td>
-            <td class="num">{{ deadPct(r) }}</td>
-          </tr>
-          <tr v-if="expanded === keyOf(r)" class="schema-row">
-            <td :colspan="props.db ? 6 : 8">
+    <DataTable
+      v-else
+      :columns="tableColumns"
+      :rows="sorted"
+      :row-key="tableRowKey"
+      :sort-key="sortKey"
+      :sort-direction="sortDir"
+      clickable-rows
+      :expanded-row-key="expanded"
+      @sort="onTableSort"
+      @row-click="toggleTableRow"
+    >
+      <template #cell-host="{ row }"><span class="db-cell">{{ tableRow(row).host }}</span></template>
+      <template #cell-db="{ row }"><span class="db-cell">{{ tableRow(row).db }}</span></template>
+      <template #cell-table="{ row }">{{ tableRow(row).schema }}.<strong>{{ tableRow(row).table }}</strong></template>
+      <template #cell-size="{ row }">{{ fmtBytes(tableRow(row).size_bytes) }}</template>
+      <template #cell-columns="{ row }">{{ tableRow(row).columns.length }}</template>
+      <template #cell-indexes="{ row }">{{ tableRow(row).indexes.length }}</template>
+      <template #cell-live="{ row }">{{ isFinite(tableRow(row).live) ? Math.round(tableRow(row).live).toLocaleString() : '—' }}</template>
+      <template #cell-dead="{ row }">{{ deadPct(tableRow(row)) }}</template>
+      <template #row-detail="{ row }">
               <div class="schema-panel">
                 <!-- Columns -->
                 <section class="schema-section">
                   <header class="schema-head">
                     <span class="sh-title">Columns</span>
-                    <span class="sh-count">{{ r.columns.length }}</span>
+                    <span class="sh-count">{{ tableRow(row).columns.length }}</span>
                   </header>
                   <ul class="col-list">
-                    <li v-for="c in r.columns" :key="c.name" class="col-item">
+                    <li v-for="c in tableRow(row).columns" :key="c.name" class="col-item">
                       <span class="col-name">{{ c.name }}</span>
                       <span class="col-meta">
                         <span class="col-type">{{ c.type }}</span>
-                        <span v-if="pkSet(r).has(c.name)" class="tag tag-pk">PK</span>
+                        <span v-if="pkSet(tableRow(row)).has(c.name)" class="tag tag-pk">PK</span>
                         <span v-if="!c.nullable" class="tag tag-notnull">NOT NULL</span>
                       </span>
                     </li>
@@ -229,11 +238,11 @@ watch(() => [props.server, props.host, props.db], load)
                 <section class="schema-section">
                   <header class="schema-head">
                     <span class="sh-title">Indexes</span>
-                    <span class="sh-count">{{ r.indexes.length }}</span>
+                    <span class="sh-count">{{ tableRow(row).indexes.length }}</span>
                   </header>
-                  <div v-if="!r.indexes.length" class="idx-empty">No indexes</div>
+                  <div v-if="!tableRow(row).indexes.length" class="idx-empty">No indexes</div>
                   <ul v-else class="idx-list">
-                    <li v-for="ix in r.indexes.map(parseIndex)" :key="ix.name" class="idx-item">
+                    <li v-for="ix in tableRow(row).indexes.map(parseIndex)" :key="ix.name" class="idx-item">
                       <div class="idx-top">
                         <span class="idx-name">{{ ix.name }}</span>
                         <span v-if="ix.primary" class="tag tag-pk">PRIMARY</span>
@@ -247,21 +256,14 @@ watch(() => [props.server, props.host, props.db], load)
                   </ul>
                 </section>
               </div>
-            </td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
+      </template>
+    </DataTable>
   </div>
 </template>
 
 <style scoped>
 /* Schema inspector — the expanded table detail. A recessed blueprint panel:
    monospace identifiers, type as the amber accent, structural tags, reveal animation. */
-.schema-row > td {
-  padding: 0;
-  border-bottom: 1px solid var(--border-subtle);
-}
 .db-cell { font-family: var(--font-mono, monospace); font-size: 12px; color: var(--text-tertiary); }
 .schema-panel {
   display: grid;

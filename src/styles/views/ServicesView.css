@@ -20,19 +20,6 @@
 .refresh-btn:hover { border-color: var(--amber); color: var(--amber); }
 .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Catalog Table */
-.catalog-table-wrap { overflow-x: auto; padding: 0; }
-.catalog-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.catalog-table thead { position: sticky; top: 0; z-index: 1; }
-.catalog-table th { padding: var(--sp-3) var(--sp-4); text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); background: var(--bg-raised); border-bottom: 1px solid var(--border-default); white-space: nowrap; }
-.catalog-table th.col-num { text-align: right; }
-.catalog-table th.sortable { cursor: pointer; user-select: none; transition: color 0.12s; }
-.catalog-table th.sortable:hover { color: var(--text-secondary); }
-.catalog-table th .cat-sort { color: var(--amber); font-size: 9px; }
-.catalog-table td { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border-subtle); white-space: nowrap; }
-.catalog-table tr:hover td { background: var(--bg-hover); }
-.catalog-table tr:last-child td { border-bottom: none; }
-
 .col-name { display: flex; align-items: center; gap: var(--sp-2); }
 td.col-name { font-weight: 500; }
 .col-num { text-align: right; }
@@ -51,19 +38,8 @@ td.col-name { font-weight: 500; }
 
 .svc-dot.loading { background: var(--text-muted); opacity: 0.3; }
 
-.stat-placeholder {
-  display: inline-block;
-  width: 48px;
-  height: 12px;
-  border-radius: 3px;
-  background: var(--border-subtle);
-  animation: stat-shimmer 1.2s ease-in-out infinite;
-}
-
-@keyframes stat-shimmer {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.15; }
-}
+.stat-placeholder { display: inline-block; width: 48px; height: 12px; border-radius: 3px; background: var(--border-subtle); animation: stat-shimmer 1.2s ease-in-out infinite; }
+@keyframes stat-shimmer { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.15; } }
 
 .status-error { color: var(--error); }
 .status-warn { color: var(--amber); }
