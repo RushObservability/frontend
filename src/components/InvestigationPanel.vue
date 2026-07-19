@@ -180,6 +180,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
     const reader = resp.body!.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    let receivedTerminalEvent = false
 
     while (true) {
       const { done: streamDone, value } = await reader.read()
@@ -197,11 +198,24 @@ async function streamInvestigation(body: Record<string, unknown>) {
 
         try {
           const event: AgentEvent = JSON.parse(json)
+          if (event.type === 'done' || event.type === 'error') {
+            receivedTerminalEvent = true
+          }
           handleEvent(event)
         } catch {
           // skip malformed
         }
       }
+    }
+
+    // A dropped proxy/browser connection can end the body without an agent
+    // terminal event. Surface that state instead of leaving the turn looking
+    // permanently active with no explanation or retry action.
+    if (!receivedTerminalEvent && !controller.signal.aborted) {
+      thinking.value = ''
+      const turn = currentTurn()
+      if (turn) turn.done = true
+      errorMsg.value = 'The evidence stream was interrupted before the investigation completed.'
     }
   } catch (e: any) {
     if (e.name !== 'AbortError') {
