@@ -988,7 +988,6 @@ const serviceLinks = ref<ServiceLink[]>([])
 const showLinkForm = ref(false)
 const linkServiceName = ref('')
 const linkGithubRepo = ref('')
-const linkGithubInstallationId = ref('')
 const linkDefaultBranch = ref('main')
 const linkRootPath = ref('')
 const serviceSuggestions = ref<string[]>([])
@@ -2279,13 +2278,11 @@ async function createServiceLink() {
     await api.createServiceLink({
       service_name: linkServiceName.value.trim(),
       github_repo: linkGithubRepo.value.trim(),
-      github_installation_id: Number(linkGithubInstallationId.value) || 0,
       default_branch: linkDefaultBranch.value.trim() || 'main',
       root_path: linkRootPath.value.trim(),
     })
     linkServiceName.value = ''
     linkGithubRepo.value = ''
-    linkGithubInstallationId.value = ''
     linkDefaultBranch.value = 'main'
     linkRootPath.value = ''
     showLinkForm.value = false
@@ -2297,7 +2294,6 @@ function closeLinkForm() {
   showLinkForm.value = false
   linkServiceName.value = ''
   linkGithubRepo.value = ''
-  linkGithubInstallationId.value = ''
   linkDefaultBranch.value = 'main'
   linkRootPath.value = ''
 }
@@ -3103,7 +3099,11 @@ function formatDate(ts: string): string {
               Link services to GitHub repositories for code-aware root cause analysis.
             </p>
           </div>
-          <button class="btn-create" @click="showLinkForm = true">+ Link Service</button>
+          <button v-if="isAdmin" class="btn-create" @click="showLinkForm = true">+ Link Service</button>
+        </div>
+
+        <div v-if="!isAdmin" class="repo-access-note">
+          Only tenant admins can add or remove repository links.
         </div>
 
         <!-- Links Table -->
@@ -3122,7 +3122,7 @@ function formatDate(ts: string): string {
               <span class="link-branch">{{ l.default_branch }}</span>
             </div>
             <div class="col-actions">
-              <button class="action-btn action-btn-danger" @click="askDelete('link', l.service_name, l.service_name)">Delete</button>
+              <button v-if="isAdmin" class="action-btn action-btn-danger" @click="askDelete('link', l.service_name, l.service_name)">Delete</button>
             </div>
           </div>
         </div>
@@ -3137,7 +3137,7 @@ function formatDate(ts: string): string {
       <!-- Link Service Drawer (right slide-out) -->
       <Teleport to="body">
         <Transition name="group-drawer">
-          <div v-if="showLinkForm" class="group-drawer-overlay" @click.self="closeLinkForm">
+          <div v-if="showLinkForm && isAdmin" class="group-drawer-overlay" @click.self="closeLinkForm">
             <div class="group-drawer" role="dialog" aria-label="Link service">
               <div class="group-drawer-header">
                 <span class="group-drawer-title">Link Service</span>
@@ -3153,7 +3153,7 @@ function formatDate(ts: string): string {
                 </p>
                 <div class="repo-access-note">
                   <strong>GitHub App access</strong>
-                  Install the app on selected repositories with <span class="mono">Contents: read</span>, then enter its installation ID below.
+                  This repository must be approved for the current tenant in the deployment's GitHub repository policy. Rush derives the installation and repository IDs; they cannot be supplied from the browser.
                 </div>
                 <div class="form-group-inline">
                   <label class="form-label">Service Name</label>
@@ -3175,26 +3175,13 @@ function formatDate(ts: string): string {
                     placeholder="e.g. org/repo"
                   />
                 </div>
-                <div class="form-row-split mt-3">
-                  <div class="form-group-inline">
-                    <label class="form-label">Installation ID</label>
-                    <input
-                      v-model="linkGithubInstallationId"
-                      class="form-input mono"
-                      inputmode="numeric"
-                      pattern="[0-9]*"
-                      placeholder="e.g. 48151623"
-                    />
-                    <span class="form-hint">Leave blank only when the deployment has a default installation.</span>
-                  </div>
-                  <div class="form-group-inline">
-                    <label class="form-label">Branch or ref</label>
-                    <input
-                      v-model="linkDefaultBranch"
-                      class="form-input mono"
-                      placeholder="main"
-                    />
-                  </div>
+                <div class="form-group-inline mt-3">
+                  <label class="form-label">Branch or ref</label>
+                  <input
+                    v-model="linkDefaultBranch"
+                    class="form-input mono"
+                    placeholder="main"
+                  />
                 </div>
                 <div class="form-group-inline mt-3">
                   <label class="form-label">Root Path</label>

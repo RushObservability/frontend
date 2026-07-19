@@ -569,6 +569,7 @@ export interface ServiceLink {
   service_name: string
   github_repo: string
   github_installation_id: number
+  github_repository_id: number
   default_branch: string
   root_path: string
   updated_at: string

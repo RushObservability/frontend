@@ -604,13 +604,13 @@ onMounted(() => {
             <template v-for="(event, ei) in turn.events" :key="ei">
               <!-- Thinking -->
               <div v-if="event.type === 'thinking_delta'" class="stream-thinking">
-                <div class="stream-icon">🤔</div>
+                <div class="stream-icon stream-icon--thinking" aria-hidden="true"><span></span></div>
                 <div class="stream-content thinking-text">{{ event.text }}</div>
               </div>
 
               <!-- Tool Call -->
               <div v-else-if="event.type === 'tool_call'" class="stream-tool-call">
-                <div class="stream-icon">🔧</div>
+                <div class="stream-icon stream-icon--tool" aria-hidden="true">RUN</div>
                 <div class="stream-content">
                   <span class="tool-badge">{{ event.name }}</span>
                   <pre class="tool-args">{{ JSON.stringify(event.args, null, 2) }}</pre>
@@ -619,7 +619,7 @@ onMounted(() => {
 
               <!-- Tool Result -->
               <div v-else-if="event.type === 'tool_result'" class="stream-tool-result">
-                <div class="stream-icon">📊</div>
+                <div class="stream-icon stream-icon--result" aria-hidden="true">DATA</div>
                 <div class="stream-content">
                   <div class="result-header" @click="toggleResult(tIdx, ei)">
                     <span>{{ event.name }} result</span>
@@ -634,15 +634,15 @@ onMounted(() => {
 
               <!-- Summary -->
               <div v-else-if="event.type === 'summary'" class="stream-summary">
-                <div class="stream-icon">{{ event.kind === 'question' ? '❓' : '📋' }}</div>
+                <div class="stream-icon stream-icon--summary" aria-hidden="true">{{ event.kind === 'question' ? '?' : 'REPORT' }}</div>
                 <div class="stream-content">
                   <div v-if="event.kind === 'question'" class="summary-kind question">
-                    ? Agent needs input
+                    Input requested
                   </div>
                   <div v-else-if="event.kind === 'preliminary'" class="summary-kind preliminary">
-                    ⚡ Preliminary findings
+                    Preliminary findings
                   </div>
-                  <div v-else class="summary-kind final">✓ Final report</div>
+                  <div v-else class="summary-kind final">Final report</div>
                   <div class="summary-text" v-html="renderMarkdown(event.text || '')"></div>
                 </div>
               </div>
@@ -661,16 +661,17 @@ onMounted(() => {
                   <div class="stream-setup-title">The SRE agent isn't connected to an LLM yet</div>
                   <div class="stream-setup-text">
                     Investigations need a model to reason with. An admin can enable them by setting
-                    <code class="mono">LLM_API_KEY</code> on the sre-agent service — plus
-                    <code class="mono">LLM_MODEL</code> / <code class="mono">LLM_BASE_URL</code> for
-                    non-OpenAI providers — and restarting it. Everything else in Rush works without it.
+                    <code class="mono">OPENAI_API_KEY</code> on the sre-agent service — optionally
+                    <code class="mono">OPENAI_BASE_URL</code> for an OpenAI-compatible provider —
+                    and restarting it. Choose the model in SRE Agent settings. Everything else in
+                    Rush works without it.
                   </div>
                 </div>
               </div>
 
               <!-- Error -->
               <div v-else-if="event.type === 'error'" class="stream-error">
-                <div class="stream-icon">❌</div>
+                <div class="stream-icon stream-icon--error" aria-hidden="true">!</div>
                 <div class="stream-content">{{ event.message }}</div>
               </div>
 
@@ -698,7 +699,7 @@ onMounted(() => {
 
         <!-- Live thinking indicator (for the current turn) -->
         <div v-if="thinking" class="stream-thinking live">
-          <div class="stream-icon">🤔</div>
+          <div class="stream-icon stream-icon--thinking" aria-hidden="true"><span></span></div>
           <div class="stream-content thinking-text">{{ thinking }}<span class="cursor">▍</span></div>
         </div>
 
@@ -736,10 +737,10 @@ onMounted(() => {
           >
             {{
               turns[turns.length - 1]?.reportKind === 'question'
-                ? '❓ The agent is asking for your input'
+                ? 'The agent is asking for your input'
                 : turns[turns.length - 1]?.reportKind === 'preliminary'
-                  ? '⚡ Preliminary findings — ask a follow-up to continue'
-                  : '✓ Investigation complete — ask a follow-up to refine'
+                  ? 'Preliminary findings — ask a follow-up to continue'
+                  : 'Investigation complete — ask a follow-up to refine'
             }}
           </span>
         </div>
@@ -1401,4 +1402,40 @@ function renderMarkdown(md: string): string {
 .btn-ghost { background: none; color: var(--text-secondary); font-size: 18px; padding: 0 6px; }
 .btn-ghost:hover { color: var(--text-primary); }
 .btn-primary { background: var(--amber); color: var(--text-inverse); }
+
+/* Evidence stream refinements for the control-room workspace. */
+.investigation-panel { border-radius: 3px; border-color: color-mix(in srgb, var(--text-primary) 12%, transparent); box-shadow: 0 20px 50px color-mix(in srgb, #101828 9%, transparent); }
+.session-sidebar { background: color-mix(in srgb, var(--bg-raised) 86%, #101828); border-right-color: color-mix(in srgb, var(--text-primary) 11%, transparent); }
+.sidebar-header, .investigation-header { border-bottom-color: color-mix(in srgb, var(--text-primary) 11%, transparent); }
+.investigation-header { min-height: 56px; background: color-mix(in srgb, var(--bg-raised) 88%, transparent); }
+.investigation-title { gap: 9px; }
+.investigation-title > svg { color: var(--amber); }
+.investigation-status { border-radius: 3px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.stream-icon { width: 38px; padding-top: 3px; color: var(--text-muted); font-family: var(--font-mono); font-size: 8px; font-weight: 700; letter-spacing: .07em; }
+.stream-icon--thinking { position: relative; height: 18px; }
+.stream-icon--thinking span, .stream-icon--thinking::before, .stream-icon--thinking::after { position: absolute; top: 7px; width: 4px; height: 4px; border-radius: 50%; background: var(--amber); content: ''; }
+.stream-icon--thinking span { left: 9px; opacity: .9; }
+.stream-icon--thinking::before { left: 2px; opacity: .35; }
+.stream-icon--thinking::after { left: 16px; opacity: .6; }
+.stream-icon--tool { color: var(--amber); }
+.stream-icon--result { color: #2563eb; }
+.stream-icon--summary { color: var(--ok); }
+.stream-icon--error { width: 18px; height: 18px; border: 1px solid var(--error); border-radius: 50%; color: var(--error); text-align: center; font-size: 11px; }
+.thinking-text { font-size: 12px; }
+.tool-badge { border-radius: 3px; font-size: 11px; }
+.tool-args, .tool-result-data { border: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent); border-radius: 3px; font-family: var(--font-mono); font-size: 10px; }
+.stream-summary { border-top-color: color-mix(in srgb, var(--text-primary) 12%, transparent); }
+.summary-kind { border-radius: 3px; letter-spacing: .1em; }
+.summary-kind.final { border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
+.summary-text { font-size: 13px; line-height: 1.72; }
+.stream-done { border-top-color: color-mix(in srgb, var(--text-primary) 10%, transparent); font-family: var(--font-mono); font-size: 9px; letter-spacing: .02em; }
+.done-model, .cost-model { font-family: var(--font-mono); }
+.followup-section { border-top-color: color-mix(in srgb, var(--text-primary) 11%, transparent); background: color-mix(in srgb, var(--bg-raised) 92%, transparent); }
+.followup-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+.followup-input textarea { border-radius: 3px; }
+.followup-input .btn-primary { border-radius: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .investigation-panel *, .investigation-panel *::before, .investigation-panel *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
 </style>

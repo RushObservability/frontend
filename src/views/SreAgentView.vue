@@ -152,7 +152,7 @@ function formatDate(iso: string): string {
     <transition name="sre-fade" mode="out-in">
 
       <!-- ── Agent down ── -->
-      <div v-if="!agentChecking && agentDown" key="down" class="sre-idle">
+      <div v-if="!agentChecking && agentDown" key="down" class="sre-idle sre-idle--down">
         <div class="grid-backdrop" aria-hidden="true">
           <div v-for="n in 8" :key="n" class="grid-col"></div>
         </div>
@@ -166,10 +166,11 @@ function formatDate(iso: string): string {
               </svg>
             </div>
             <div class="agent-error-body">
-              <p class="agent-error-title">SRE Agent unavailable</p>
-              <p class="agent-error-desc">The SRE Agent service is not responding. Check that the agent pod is running and healthy.</p>
+              <p class="agent-error-eyebrow">SERVICE CONNECTION</p>
+              <p class="agent-error-title">Investigation service is offline</p>
+              <p class="agent-error-desc">The control room cannot reach the SRE Agent. Check the service health and try again when it is ready.</p>
               <button class="agent-retry-btn" :disabled="agentChecking" @click="checkAgent">
-                {{ agentChecking ? 'Checking…' : 'Retry' }}
+                {{ agentChecking ? 'Checking…' : 'Check connection' }}
               </button>
             </div>
           </div>
@@ -184,20 +185,22 @@ function formatDate(iso: string): string {
         </div>
 
         <div class="sre-center">
-
-          <!-- Hero -->
-          <div class="sre-hero">
-            <h1 class="sre-title">SRE Agent</h1>
-            <p class="sre-tagline">Ask a question about your system</p>
+          <div class="room-signal-strip" aria-label="Available investigation signals">
+            <span class="signal-strip-label">USE THE SIGNALS YOU HAVE</span>
+            <span>Logs</span><i></i><span>Metrics</span><i></i><span>Traces</span><i></i><span>Deploys</span><i></i><span>Services</span>
           </div>
 
           <!-- Input -->
           <div class="sre-input-wrap">
+            <div class="input-label-row">
+              <span class="input-label">Start an investigation</span>
+              <span class="input-context">Natural language · evidence-backed answers</span>
+            </div>
             <div class="sre-input-box">
               <textarea
                 v-model="question"
                 class="sre-textarea"
-                placeholder="Describe the problem or ask a question about your infrastructure…"
+                placeholder="What is happening, where, and when did it start?"
                 rows="4"
                 @keydown="onKeydown"
                 @input="autoResize"
@@ -205,15 +208,15 @@ function formatDate(iso: string): string {
               <div class="sre-input-footer">
                 <div class="footer-left">
                   <div class="help-wrap" ref="helpWrapEl">
-                    <button class="help-btn" :class="{ active: helpOpen }" @click="helpOpen = !helpOpen" title="Example queries">
+                    <button class="help-btn" :class="{ active: helpOpen }" @click="helpOpen = !helpOpen" title="Show investigation patterns">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17" stroke-width="2.5"/>
                       </svg>
-                      Examples
+                      Patterns
                     </button>
                     <Teleport to="body">
                       <div v-if="helpOpen" class="help-popover" :style="popoverStyle">
-                        <p class="help-popover-label">Example queries</p>
+                        <p class="help-popover-label">Investigation patterns</p>
                         <button
                           v-for="ex in EXAMPLES"
                           :key="ex"
@@ -223,7 +226,7 @@ function formatDate(iso: string): string {
                       </div>
                     </Teleport>
                   </div>
-                  <span class="sre-hint">Press <kbd>⌘↵</kbd> to run</span>
+                  <span class="sre-hint">Run with <kbd>⌘↵</kbd></span>
                   <template v-if="showModelPicker">
                     <select v-model="selectedModel" class="sre-picker" title="Model">
                       <option v-for="m in agentModels" :key="m.id" :value="m.id">{{ m.id }}</option>
@@ -248,15 +251,32 @@ function formatDate(iso: string): string {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
                   </svg>
-                  Investigate
+                  Run investigation
                 </button>
               </div>
             </div>
           </div>
 
+          <div class="quick-starts">
+            <div class="section-heading">
+              <div><p class="section-label">Quick starts</p><p class="section-caption">Start with a familiar incident question.</p></div>
+              <span class="section-index">01 — 03</span>
+            </div>
+            <div class="quick-grid">
+              <button v-for="(ex, idx) in EXAMPLES.slice(0, 3)" :key="ex" class="quick-card" @click="launch(ex)">
+                <span class="quick-card-index">0{{ idx + 1 }}</span>
+                <span class="quick-card-copy">{{ ex }}</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+              </button>
+            </div>
+          </div>
+
           <!-- History -->
-          <div class="sre-section" style="animation-delay: 0.15s">
-            <p class="section-label">Recent</p>
+          <div class="sre-section" style="animation-delay: 0.2s">
+            <div class="section-heading">
+              <div><p class="section-label">Recent investigations</p><p class="section-caption">Pick up where your team left off.</p></div>
+              <span class="section-index">{{ String(recentSessions.length).padStart(2, '0') }} SESSIONS</span>
+            </div>
             <div v-if="recentSessions.length" class="history-list">
               <button
                 v-for="s in recentSessions"
@@ -264,14 +284,12 @@ function formatDate(iso: string): string {
                 class="history-row"
                 @click="launch(s.title)"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="history-icon">
-                  <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                </svg>
+                <span class="history-marker" aria-hidden="true"></span>
                 <span class="history-title">{{ s.title }}</span>
                 <span class="history-time">{{ formatDate(s.updated_at) }}</span>
               </button>
             </div>
-            <p v-else class="history-empty">No sessions yet</p>
+            <p v-else class="history-empty">No investigations yet. Your first one will appear here.</p>
           </div>
         </div>
       </div>
@@ -280,15 +298,17 @@ function formatDate(iso: string): string {
       <div v-else-if="!agentChecking && started" key="active" class="sre-active">
         <div class="active-topbar">
           <div class="active-identity">
+            <span class="active-kicker">LIVE INVESTIGATION</span>
             <span class="active-label">SRE Agent</span>
-            <span class="active-sep">·</span>
+            <span class="active-sep">/</span>
             <span class="active-query">{{ question }}</span>
           </div>
+          <div class="active-meta"><span class="status-pulse"></span>Evidence stream</div>
           <button class="new-btn" @click="reset">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
-            New
+            New investigation
           </button>
         </div>
         <div class="panel-wrap">
@@ -777,5 +797,96 @@ function formatDate(iso: string): string {
 }
 .sre-fade-enter-from { opacity: 0; transform: translateY(8px); }
 .sre-fade-leave-to   { opacity: 0; transform: translateY(-4px); }
+
+/* Control-room direction: restrained, evidence-first, and deliberately flat. */
+.sre-page {
+  --room-ink: color-mix(in srgb, var(--text-primary) 92%, #15233a);
+  --room-line: color-mix(in srgb, var(--text-primary) 11%, transparent);
+  --room-blue: #2563eb;
+  background: var(--bg-root);
+}
+
+.sre-page::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .07;
+  background-image: linear-gradient(var(--room-line) 1px, transparent 1px);
+  background-size: 100% 120px;
+  mask-image: linear-gradient(to bottom, black, transparent 68%);
+}
+
+.grid-backdrop { display: none; }
+.sre-idle { align-items: stretch; padding: clamp(28px, 4vh, 52px) clamp(22px, 5vw, 84px) 72px; }
+.sre-idle::before { display: none; }
+.sre-center { max-width: 1180px; align-items: stretch; margin: 0 auto; }
+.room-signal-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 0; padding: 10px 0; border-top: 1px solid var(--room-line); border-bottom: 1px solid var(--room-line); color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; animation: rise .55s .04s cubic-bezier(.16,1,.3,1) both; }
+.signal-strip-label { margin-right: 8px; color: var(--text-muted); font-size: 9px; letter-spacing: .12em; }
+.room-signal-strip i { width: 3px; height: 3px; border-radius: 50%; background: var(--room-blue); opacity: .75; }
+.sre-input-wrap { margin-top: 28px; animation-delay: .08s; }
+.input-label-row { display: flex; justify-content: space-between; align-items: baseline; gap: 18px; margin-bottom: 10px; }
+.input-label { color: var(--text-primary); font-size: 13px; font-weight: 650; }
+.input-context { color: var(--text-muted); font-size: 11px; }
+.sre-input-box { border-color: var(--room-line); border-radius: 4px; background: var(--bg-surface); box-shadow: 0 10px 24px color-mix(in srgb, #101828 5%, transparent); }
+.sre-input-box:focus-within { border-color: color-mix(in srgb, var(--room-blue) 58%, var(--room-line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--room-blue) 10%, transparent), 0 18px 44px color-mix(in srgb, #101828 10%, transparent); }
+.sre-textarea { min-height: 126px; padding: 20px 22px 16px; font-size: 16px; line-height: 1.55; }
+.sre-input-footer { padding: 10px 12px; border-top-color: var(--room-line); }
+.sre-send-btn { border-radius: 3px; padding: 10px 15px; border-color: var(--room-blue); background: var(--room-blue); color: white; font-size: 12px; font-weight: 650; letter-spacing: .01em; cursor: pointer; }
+.sre-send-btn:not(.ready) { border-color: var(--room-line); background: var(--bg-raised); color: var(--text-muted); cursor: not-allowed; }
+.sre-send-btn.ready:hover { background: #1d4ed8; box-shadow: none; }
+.sre-hint { font-size: 11px; }
+.sre-hint kbd { border-radius: 3px; }
+.help-btn { border-radius: 3px; }
+.sre-picker { border-radius: 3px; }
+.quick-starts, .sre-section { margin-top: 42px; animation: rise .55s .12s cubic-bezier(.16,1,.3,1) both; }
+.section-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+.section-label { margin: 0; color: var(--text-primary); font-size: 11px; letter-spacing: .12em; }
+.section-caption { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; }
+.section-index { color: var(--text-muted); font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; }
+.quick-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 15px; }
+.quick-card { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: start; min-height: 94px; padding: 15px; text-align: left; border: 1px solid var(--room-line); border-radius: 3px; background: var(--bg-surface); color: var(--text-secondary); cursor: pointer; transition: border-color .16s, background .16s, transform .16s; }
+.quick-card:hover { border-color: color-mix(in srgb, var(--room-blue) 52%, var(--room-line)); background: var(--bg-surface); transform: translateY(-2px); }
+.quick-card-index { color: var(--room-blue); font-family: var(--font-mono); font-size: 10px; }
+.quick-card-copy { font-size: 12px; line-height: 1.45; }
+.quick-card svg { color: var(--text-muted); }
+.history-list { gap: 0; margin-top: 15px; border-top: 1px solid var(--room-line); }
+.history-row { min-height: 45px; padding: 9px 4px; border: 0; border-bottom: 1px solid var(--room-line); border-radius: 0; background: transparent; }
+.history-row:hover { border-color: var(--room-line); background: color-mix(in srgb, var(--room-blue) 5%, transparent); }
+.history-marker { width: 5px; height: 5px; flex: 0 0 auto; border: 1px solid var(--room-blue); border-radius: 50%; }
+.history-title { color: var(--text-secondary); font-size: 12px; }
+.history-time { font-size: 10px; }
+.history-empty { padding: 15px 0; font-size: 12px; }
+.sre-active { height: calc(100vh - 52px); background: var(--bg-root); }
+.active-topbar { min-height: 58px; padding: 10px clamp(18px, 3vw, 42px); border-bottom-color: var(--room-line); background: color-mix(in srgb, var(--bg-surface) 78%, transparent); }
+.active-identity { gap: 10px; }
+.active-kicker { color: var(--text-muted); font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em; }
+.active-label { color: var(--text-primary); font-size: 12px; }
+.active-sep { color: var(--room-blue); }
+.active-query { max-width: 52vw; font-size: 12px; }
+.active-meta { display: flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 18px; color: var(--text-muted); font-family: var(--font-mono); font-size: 9px; letter-spacing: .05em; }
+.new-btn { border-radius: 3px; padding: 8px 12px; border-color: var(--room-line); }
+.panel-wrap { padding: 18px clamp(14px, 3vw, 42px) 28px; }
+.agent-error-box { max-width: 590px; border-radius: 3px; border-color: color-mix(in srgb, #dc2626 24%, var(--room-line)); background: color-mix(in srgb, #dc2626 6%, var(--bg-surface)); box-shadow: 0 18px 44px color-mix(in srgb, #101828 8%, transparent); }
+.agent-error-eyebrow { margin: 0 0 2px; color: #dc2626; font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: .12em; }
+.agent-error-title { color: var(--text-primary); }
+.agent-retry-btn { border-radius: 3px; }
+
+@media (max-width: 760px) {
+  .sre-idle { padding: 34px 18px 48px; }
+  .quick-grid { grid-template-columns: 1fr; }
+  .input-label-row { display: block; }
+  .input-context { display: block; margin-top: 4px; }
+  .sre-input-footer { align-items: flex-end; }
+  .footer-left { gap: 8px; }
+  .sre-hint { display: none; }
+  .active-kicker, .active-meta, .active-sep { display: none; }
+  .active-query { max-width: 62vw; }
+  .panel-wrap { padding: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sre-page *, .sre-page *::before, .sre-page *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
 
 </style>

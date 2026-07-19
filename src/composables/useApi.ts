@@ -533,7 +533,6 @@ export function useApi() {
   async function createServiceLink(data: {
     service_name: string
     github_repo: string
-    github_installation_id?: number
     default_branch?: string
     root_path?: string
   }): Promise<ServiceLink> {
