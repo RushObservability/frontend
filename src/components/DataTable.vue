@@ -123,27 +123,27 @@ function rowClassFor(row: DataTableRow, index: number): string | undefined {
           </tr>
         </template>
         <template v-else-if="rows.length">
-          <tr
-            v-for="(row, index) in rows"
-            :key="rowId(row, index)"
-            :class="[rowClassFor(row, index), { 'data-table-row-clickable': clickableRows }]"
-            :tabindex="clickableRows ? 0 : undefined"
-            :aria-expanded="clickableRows && expandedRowKey !== null ? isExpanded(row, index) : undefined"
-            @click="clickableRows && emit('rowClick', row, index)"
-            @keydown.enter="clickableRows && emit('rowClick', row, index)"
-            @keydown.space.prevent="clickableRows && emit('rowClick', row, index)"
-          >
-            <td v-for="column in columns" :key="column.key" :class="[cellClassFor(column, row), column.align ? `data-table-col-${column.align}` : '']">
-              <slot :name="`cell-${column.key}`" :row="row" :value="valueFor(row, column)" :column="column">
-                {{ defaultValue(valueFor(row, column)) }}
-              </slot>
-            </td>
-          </tr>
-          <tr v-if="isExpanded(row, index)" class="data-table-detail-row">
-            <td :colspan="columns.length">
-              <slot name="row-detail" :row="row" :index="index" />
-            </td>
-          </tr>
+          <template v-for="(row, index) in rows" :key="rowId(row, index)">
+            <tr
+              :class="[rowClassFor(row, index), { 'data-table-row-clickable': clickableRows }]"
+              :tabindex="clickableRows ? 0 : undefined"
+              :aria-expanded="clickableRows && expandedRowKey !== null ? isExpanded(row, index) : undefined"
+              @click="clickableRows && emit('rowClick', row, index)"
+              @keydown.enter="clickableRows && emit('rowClick', row, index)"
+              @keydown.space.prevent="clickableRows && emit('rowClick', row, index)"
+            >
+              <td v-for="column in columns" :key="column.key" :class="[cellClassFor(column, row), column.align ? `data-table-col-${column.align}` : '']">
+                <slot :name="`cell-${column.key}`" :row="row" :value="valueFor(row, column)" :column="column">
+                  {{ defaultValue(valueFor(row, column)) }}
+                </slot>
+              </td>
+            </tr>
+            <tr v-if="isExpanded(row, index)" class="data-table-detail-row">
+              <td :colspan="columns.length">
+                <slot name="row-detail" :row="row" :index="index" />
+              </td>
+            </tr>
+          </template>
         </template>
         <tr v-else>
           <td :colspan="columns.length" class="data-table-empty">

@@ -48,21 +48,51 @@ interface QueryRow extends Record<string, unknown> {
 
 const rows = ref<QueryRow[]>([])
 const expanded = ref<string | null>(null)
-type SortKey = 'mean_ms' | 'total_ms' | 'calls' | 'rows'
+type SortKey = 'sql' | 'total_ms' | 'mean_ms' | 'calls' | 'rows' | 'cache' | 'db'
 const sortKey = ref<SortKey>('mean_ms')
+const sortDir = ref<'asc' | 'desc'>('desc')
 const queryColumns: DataTableColumn[] = [
-  { key: 'sql', label: 'Query' },
+  { key: 'sql', label: 'Query', sortable: true },
   { key: 'total_ms', label: 'DB time', align: 'right', sortable: true, cellClass: 'num' },
   { key: 'mean_ms', label: 'Mean ms', align: 'right', sortable: true, cellClass: 'num' },
   { key: 'calls', label: 'Calls', align: 'right', sortable: true, cellClass: 'num' },
   { key: 'rows', label: 'Rows', align: 'right', sortable: true, cellClass: 'num' },
-  { key: 'cache', label: 'Cache %', align: 'right', cellClass: 'num' },
-  { key: 'db', label: 'DB' },
+  { key: 'cache', label: 'Cache %', align: 'right', sortable: true, cellClass: 'num' },
+  { key: 'db', label: 'DB', sortable: true },
 ]
 
-const sorted = computed(() =>
-  [...rows.value].sort((a, b) => b[sortKey.value] - a[sortKey.value]).slice(0, 100),
-)
+function sortVal(row: QueryRow, key: SortKey): number | string {
+  switch (key) {
+    case 'sql': return row.sql
+    case 'db': return row.db
+    case 'cache': return row.blks_hit / Math.max(row.blks_hit + row.blks_read, 1)
+    case 'total_ms': return row.total_ms
+    case 'mean_ms': return row.mean_ms
+    case 'calls': return row.calls
+    case 'rows': return row.rows
+  }
+}
+
+function setSort(key: SortKey) {
+  if (sortKey.value === key) {
+    sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc'
+  } else {
+    sortKey.value = key
+    sortDir.value = key === 'sql' || key === 'db' ? 'asc' : 'desc'
+  }
+}
+
+const sorted = computed(() => {
+  const direction = sortDir.value === 'desc' ? -1 : 1
+  return [...rows.value]
+    .sort((a, b) => {
+      const av = sortVal(a, sortKey.value)
+      const bv = sortVal(b, sortKey.value)
+      if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * direction
+      return ((av as number) - (bv as number)) * direction
+    })
+    .slice(0, 100)
+})
 
 const num = (s: string | undefined) => parseFloat(s ?? '0') || 0
 
@@ -117,7 +147,7 @@ function toggle(id: string) {
 function queryRow(row: Record<string, unknown>): QueryRow { return row as QueryRow }
 function toggleQueryRow(row: Record<string, unknown>) { toggle(queryRow(row).queryid) }
 function onQuerySort(key: string) {
-  if (key === 'mean_ms' || key === 'total_ms' || key === 'calls' || key === 'rows') sortKey.value = key
+  if (key === 'sql' || key === 'total_ms' || key === 'mean_ms' || key === 'calls' || key === 'rows' || key === 'cache' || key === 'db') setSort(key)
 }
 
 const copiedId = ref<string | null>(null)
@@ -150,7 +180,7 @@ watch(() => [props.server, props.host, props.db], load)
       :rows="sorted"
       row-key="queryid"
       :sort-key="sortKey"
-      sort-direction="desc"
+      :sort-direction="sortDir"
       clickable-rows
       :expanded-row-key="expanded"
       @sort="onQuerySort"
