@@ -7,7 +7,8 @@ import { useTenant } from '../composables/useTenant'
 import SpanLogTable from '../components/SpanLogTable.vue'
 import TimePicker from '../components/TimePicker.vue'
 import PanelCard from '../components/PanelCard.vue'
-import type { GraphNode, GraphEdge, TimeseriesBucket, RushEvent, Filter, Funnel, FunnelResult, FunnelStep, DeployMarker, Monitor, Slo, AnomalyRule, LatencyHistogram, EndpointRow, ErrorGroup } from '../types'
+import TimeseriesWidget from '../components/widgets/TimeseriesWidget.vue'
+import type { GraphNode, GraphEdge, TimeseriesBucket, RushEvent, Filter, Funnel, FunnelResult, FunnelStep, DeployMarker, Monitor, Slo, AnomalyRule, LatencyHistogram, EndpointRow, ErrorGroup, ServiceTimeBreakdown, ServiceTimeBreakdownTimeseries } from '../types'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,6 +31,9 @@ const compareEnabled = ref(true)
 // Full latency distribution (log2-ms buckets) for this service — the shape the
 // percentile timeseries can't show. Fetched per window alongside the charts.
 const latencyHist = ref<LatencyHistogram | null>(null)
+const timeBreakdown = ref<ServiceTimeBreakdown | null>(null)
+const timeBreakdownSeries = ref<ServiceTimeBreakdownTimeseries | null>(null)
+const timeBreakdownLoading = ref(false)
 
 // Per-endpoint RED breakdown. `mode` toggles between the service's HTTP entry
 // points (server) and its downstream operations (db/cache/etc.). Lazy-loaded.
@@ -282,19 +286,29 @@ async function loadSecondaryCharts() {
   const prevTo = from
   const prevFrom = new Date(fromDate.getTime() - minutes.value * 60 * 1000).toISOString()
   const filters = svcFilters()
-  try {
-    const [tsPrevRes, histRes] = await Promise.all([
-      api.queryTimeseries({
-        time_range: { from: prevFrom, to: prevTo },
-        filters,
-        interval: detailInterval(),
-      }),
-      api.serviceLatencyHistogram(serviceName.value, minutes.value),
-    ])
-    timeseriesPrev.value = tsPrevRes.buckets as TimeseriesBucket[]
-    latencyHist.value = histRes
-  } catch {
-    // silent — overlay/histogram simply stay empty
+  const requestService = serviceName.value
+  const requestMinutes = minutes.value
+  timeBreakdownLoading.value = true
+  const [tsPrevRes, histRes, breakdownRes, breakdownSeriesRes] = await Promise.allSettled([
+    api.queryTimeseries({
+      time_range: { from: prevFrom, to: prevTo },
+      filters,
+      interval: detailInterval(),
+    }),
+    api.serviceLatencyHistogram(requestService, requestMinutes),
+    api.serviceTimeBreakdown(requestService, requestMinutes),
+    api.serviceTimeBreakdownTimeseries(requestService, requestMinutes, detailInterval()),
+  ])
+
+  // A slow response from a previous service/window must not paint stale data
+  // over the newly selected service. Each secondary panel is independent so a
+  // failing breakdown query cannot blank the latency comparison.
+  if (serviceName.value === requestService && minutes.value === requestMinutes) {
+    if (tsPrevRes.status === 'fulfilled') timeseriesPrev.value = tsPrevRes.value.buckets as TimeseriesBucket[]
+    if (histRes.status === 'fulfilled') latencyHist.value = histRes.value
+    timeBreakdown.value = breakdownRes.status === 'fulfilled' ? breakdownRes.value : null
+    timeBreakdownSeries.value = breakdownSeriesRes.status === 'fulfilled' ? breakdownSeriesRes.value : null
+    timeBreakdownLoading.value = false
   }
 }
 
@@ -430,12 +444,22 @@ async function initializeService() {
   serviceStatus.value = 'checking'
   loading.value = true
   try {
-    const { services } = await api.getServices()
-    serviceStatus.value = services.some((service) => service.service_name === serviceName.value)
-      ? 'found'
-      : 'missing'
+    // Match the Services catalog's fast service-name lookup. The full
+    // `/services` catalog also returns endpoint rows and can be slow or stall
+    // independently of the trace queries needed by this detail page.
+    const names = await api.suggestValues('service_name')
+    serviceStatus.value = names.includes(serviceName.value) ? 'found' : 'missing'
   } catch {
-    serviceStatus.value = 'error'
+    // Keep the older catalog endpoint as a compatibility fallback for tenants
+    // where suggestions are unavailable.
+    try {
+      const { services } = await api.getServices()
+      serviceStatus.value = services.some((service) => service.service_name === serviceName.value)
+        ? 'found'
+        : 'missing'
+    } catch {
+      serviceStatus.value = 'error'
+    }
   }
 
   if (serviceStatus.value !== 'found') {
@@ -462,6 +486,9 @@ watch(serviceName, () => {
   timeseries.value = []
   timeseriesPrev.value = []
   latencyHist.value = null
+  timeBreakdown.value = null
+  timeBreakdownSeries.value = null
+  timeBreakdownLoading.value = false
   endpoints.value = []
   errorGroups.value = []
   briefingEndpoints.value = []
@@ -719,6 +746,23 @@ function summarizeBuckets(buckets: TimeseriesBucket[]): ServiceSummary {
 // aggregation identical makes briefing deltas consistent with the cards.
 const summary = computed(() => summarizeBuckets(timeseries.value))
 const previousSummary = computed(() => summarizeBuckets(timeseriesPrev.value))
+
+const timeBreakdownBuckets = computed(() => timeBreakdownSeries.value?.buckets ?? [])
+const timeBreakdownDatabases = computed(() => timeBreakdown.value?.databases ?? [])
+const timeBreakdownChartSeries = computed(() => {
+  const requestCount = timeBreakdown.value?.request_count ?? 0
+  const windowAverage = (field: 'application_time_ms' | 'database_time_ms') => {
+    if (requestCount <= 0 || !timeBreakdown.value) return undefined
+    return timeBreakdown.value[field] / requestCount
+  }
+  const toPoints = (field: 'application_time_ms' | 'database_time_ms') => timeBreakdownBuckets.value
+    .map((bucket) => [parseTs(bucket.bucket) / 1000, bucket[field]] as [number, number])
+    .filter(([timestamp]) => Number.isFinite(timestamp))
+  return [
+    { name: 'Application average', points: toPoints('application_time_ms'), color: 'var(--amber)', legendValue: windowAverage('application_time_ms') },
+    { name: 'Database average', points: toPoints('database_time_ms'), color: 'var(--purple, #8b5cf6)', legendValue: windowAverage('database_time_ms') },
+  ]
+})
 
 // Service map edges
 const svcEdges = computed(() => {
@@ -1012,7 +1056,11 @@ function hoverLeft(count: number): string {
 function fmtBucketTime(idx: number): string {
   const b = timeseries.value[idx]
   if (!b) return ''
-  const d = new Date(b.bucket.replace(' ', 'T') + (b.bucket.includes('Z') ? '' : 'Z'))
+  return formatTimeBucket(b.bucket)
+}
+
+function formatTimeBucket(bucket: string): string {
+  const d = new Date(bucket.replace(' ', 'T') + (bucket.includes('Z') ? '' : 'Z'))
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
 }
 
@@ -1635,6 +1683,44 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
 
       <!-- Topology: who calls this service and what it depends on -->
       <div class="svc-overview-grid">
+        <PanelCard
+          class="svc-chart-card svc-time-series-card"
+          title="Application vs database time"
+          description="Average time per request in each interval. Database time is capped per transaction to represent wall-clock impact."
+        >
+          <div v-if="timeBreakdownLoading && !timeBreakdownSeries" class="svc-map-empty text-muted">Loading time series…</div>
+          <div v-else-if="!timeBreakdownSeries || timeBreakdownBuckets.length === 0" class="svc-map-empty text-muted">No transaction breakdown in this window</div>
+          <div v-else class="svc-time-series">
+            <div class="svc-time-series-chart">
+              <TimeseriesWidget :buckets="[]" :series="timeBreakdownChartSeries" unit="ms" />
+            </div>
+            <div class="svc-time-series-meta">
+              <span><b>{{ timeBreakdown ? fmtDur(timeBreakdown.application_time_ms) : '-' }}</b> total application time</span>
+              <span><b>{{ timeBreakdown ? fmtDur(timeBreakdown.database_time_ms) : '-' }}</b> total database impact</span>
+              <span><b>{{ timeBreakdown ? fmtDur(timeBreakdown.wall_time_ms) : '-' }}</b> total wall time</span>
+              <span><b>{{ timeBreakdown ? formatCount(timeBreakdown.database_calls) : '-' }}</b> database calls</span>
+              <span><b>{{ timeBreakdown ? fmtDur(timeBreakdown.database_call_time_ms) : '-' }}</b> raw DB call time</span>
+            </div>
+            <div v-if="timeBreakdownDatabases.length" class="svc-time-databases">
+              <div class="svc-time-database-head">
+                <span>Database targets</span>
+                <span>Calls</span>
+                <span>Raw time</span>
+                <span>P95</span>
+              </div>
+              <div v-for="database in timeBreakdownDatabases.slice(0, 5)" :key="`${database.system}:${database.target}`" class="svc-time-database-row">
+                <span class="svc-time-database-name">
+                  <b>{{ database.target }}</b>
+                  <small>{{ database.system }}</small>
+                </span>
+                <span class="mono">{{ formatCount(database.calls) }}</span>
+                <span class="mono">{{ fmtDur(database.total_ms) }}</span>
+                <span class="mono">{{ formatMs(database.p95_ms) }}</span>
+              </div>
+            </div>
+            <p class="svc-time-note">Application time is server-span time minus database child spans. Raw database call time can be higher when calls run in parallel.</p>
+          </div>
+        </PanelCard>
         <PanelCard
           class="svc-chart-card chart-clickable svc-map-card"
           title="Service Map"

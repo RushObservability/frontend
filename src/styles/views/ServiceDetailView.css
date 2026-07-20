@@ -946,3 +946,27 @@ button.dep-red-row:hover { background: var(--bg-hover, rgba(255,255,255,0.04)); 
    height-capped diagram so it doesn't blow up on wide viewports. */
 .svc-overview-grid { display: grid; grid-template-columns: 1fr; gap: var(--sp-4); }
 .svc-map-card .svc-map-svg { width: 100%; max-height: 200px; }
+
+/* Transaction time series: an operational line chart keeps traffic volume
+   separate from latency composition by plotting average time per request. */
+.svc-time-series-card :deep(.panel-body) { gap: var(--sp-4); }
+.svc-time-series { display: flex; flex-direction: column; gap: var(--sp-3); }
+.svc-time-series-chart { height: 216px; min-height: 0; }
+.svc-time-series-chart :deep(.ts-widget) { height: 100%; }
+.svc-time-series-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--text-muted); font-size: 10px; }
+.svc-time-series-meta b { color: var(--text-secondary); font-family: var(--font-mono); font-weight: 600; }
+.svc-time-databases { border-top: 1px solid var(--border-subtle); padding-top: var(--sp-3); }
+.svc-time-database-head, .svc-time-database-row { display: grid; grid-template-columns: minmax(0, 1fr) 70px 90px 70px; gap: 10px; align-items: center; }
+.svc-time-database-head { padding: 0 8px 5px; color: var(--text-muted); font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; }
+.svc-time-database-head span:not(:first-child), .svc-time-database-row > span:not(:first-child) { text-align: right; }
+.svc-time-database-row { padding: 7px 8px; border-radius: var(--r-sm); color: var(--text-secondary); font-size: 11px; }
+.svc-time-database-row:nth-child(even) { background: color-mix(in srgb, var(--bg-raised) 55%, transparent); }
+.svc-time-database-name { display: flex; flex-direction: column; min-width: 0; text-align: left !important; }
+.svc-time-database-name b { overflow: hidden; color: var(--text-primary); font-family: var(--font-mono); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.svc-time-database-name small { color: var(--text-muted); font-size: 9px; }
+.svc-time-note { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.45; }
+@media (max-width: 600px) {
+  .svc-time-series-meta { gap: 5px 12px; }
+  .svc-time-database-head, .svc-time-database-row { grid-template-columns: minmax(0, 1fr) 54px 70px; }
+  .svc-time-database-head span:last-child, .svc-time-database-row > span:last-child { display: none; }
+}

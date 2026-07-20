@@ -453,6 +453,42 @@ export interface ServiceGraph {
   edges: GraphEdge[]
 }
 
+export interface DatabaseTimeBreakdown {
+  system: string
+  target: string
+  calls: number
+  total_ms: number
+  p95_ms: number
+}
+
+export interface ServiceTimeBreakdown {
+  service_name: string
+  minutes: number
+  request_count: number
+  wall_time_ms: number
+  application_time_ms: number
+  database_time_ms: number
+  database_call_time_ms: number
+  database_calls: number
+  databases: DatabaseTimeBreakdown[]
+}
+
+export interface ServiceTimeBreakdownBucket {
+  bucket: string
+  request_count: number
+  wall_time_ms: number
+  application_time_ms: number
+  database_time_ms: number
+  database_calls: number
+}
+
+export interface ServiceTimeBreakdownTimeseries {
+  service_name: string
+  minutes: number
+  interval: string
+  buckets: ServiceTimeBreakdownBucket[]
+}
+
 // Latency distribution for a single service. `exp` is a log2(ms) bucket
 // exponent: the bucket covers [2^exp, 2^(exp+1)) ms.
 export interface LatencyHistBucket {

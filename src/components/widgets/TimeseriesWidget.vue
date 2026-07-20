@@ -13,7 +13,7 @@ const props = defineProps<{
   buckets: CountBucket[]
   deploys?: DeployMarker[]
   /** Multi-series mode (PromQL/metrics source). When present, takes precedence over buckets. */
-  series?: Array<{ name: string; points: [number, number][]; color?: string; ref_id?: string; axis?: 'left' | 'right' }>
+  series?: Array<{ name: string; points: [number, number][]; color?: string; ref_id?: string; axis?: 'left' | 'right'; legendValue?: number }>
   /** Optional horizontal reference lines (e.g. monitor alert thresholds). */
   thresholds?: Array<{ value: number; color: string; label: string }>
   /** Optional unit suffix for axis labels, the legend last-value, and the tooltip. */
@@ -199,7 +199,7 @@ const hover = useChartHover()
 // (the crosshair still draws on every chart at the shared time).
 const chartId = `ts-${++chartIdSeq}`
 
-interface HSeries { name: string; color: string; pts: [number, number][] }
+interface HSeries { name: string; color: string; pts: [number, number][]; legendValue?: number }
 // Unified [time, value] model so hover works the same in both render modes.
 const hoverModel = computed<{ minT: number; maxT: number; series: HSeries[] }>(() => {
   if (seriesMode.value) {
@@ -207,6 +207,7 @@ const hoverModel = computed<{ minT: number; maxT: number; series: HSeries[] }>((
       name: s.name,
       color: s.color || SERIES_COLORS[i % SERIES_COLORS.length]!,
       pts: s.points,
+      legendValue: s.legendValue,
     }))
     const { minT, maxT } = seriesBounds.value
     return { minT, maxT, series }
@@ -229,7 +230,7 @@ const hoverModel = computed<{ minT: number; maxT: number; series: HSeries[] }>((
 // Each entry: ● name  lastValue<unit>, using the same colors as the lines.
 const legendItems = computed(() => {
   return hoverModel.value.series.slice(0, 6).map((s) => {
-    const last = s.pts.length ? s.pts[s.pts.length - 1]![1] : null
+    const last = s.legendValue ?? (s.pts.length ? s.pts[s.pts.length - 1]![1] : null)
     return {
       name: s.name,
       color: s.color,

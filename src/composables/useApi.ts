@@ -23,6 +23,8 @@ import type {
   DeployMarker,
   Filter,
   ServiceGraph,
+  ServiceTimeBreakdown,
+  ServiceTimeBreakdownTimeseries,
   LatencyHistogram,
   EndpointsResponse,
   ServiceErrorsResponse,
@@ -130,7 +132,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     } catch {
       userMessage = `Request failed (${res.status})`
     }
-    console.debug('[API] error response:', res.status, text)
+    console.debug('[API] error response:', path, res.status, text)
     throw new Error(userMessage)
   }
   // Tolerate empty bodies (e.g. 204 No Content from DELETE endpoints) — res.json()
@@ -451,6 +453,19 @@ export function useApi() {
   async function serviceGraph(minutes?: number): Promise<ServiceGraph> {
     const qs = minutes ? `?minutes=${minutes}` : ''
     return await request(`/services/graph${qs}`)
+  }
+
+  async function serviceTimeBreakdown(service: string, minutes?: number): Promise<ServiceTimeBreakdown> {
+    const qs = new URLSearchParams({ service })
+    if (minutes) qs.set('minutes', String(minutes))
+    return await request(`/services/time-breakdown?${qs.toString()}`)
+  }
+
+  async function serviceTimeBreakdownTimeseries(service: string, minutes?: number, interval?: string): Promise<ServiceTimeBreakdownTimeseries> {
+    const qs = new URLSearchParams({ service })
+    if (minutes) qs.set('minutes', String(minutes))
+    if (interval) qs.set('interval', interval)
+    return await request(`/services/time-breakdown/timeseries?${qs.toString()}`)
   }
 
   async function serviceLatencyHistogram(service: string, minutes?: number): Promise<LatencyHistogram> {
@@ -1552,7 +1567,7 @@ export function useApi() {
     loading, error,
     login, logout, getMe,
     getAuditEvents, verifyAuditChain,
-    getTrace, queryEvents, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceLatencyHistogram, serviceEndpoints, serviceErrors, getLicense, submitExplain, getExplainJob, suggestValues, queryGroup,
+    getTrace, queryEvents, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceTimeBreakdown, serviceTimeBreakdownTimeseries, serviceLatencyHistogram, serviceEndpoints, serviceErrors, getLicense, submitExplain, getExplainJob, suggestValues, queryGroup,
     queryLogs, getLogDetail, countLogs, groupLogs, getLogHistogram,
     listDashboards, getDashboard, createDashboard, updateDashboard, deleteDashboard,
     exportDashboard, importDashboard, listDashboardTemplates, createFromTemplate,
