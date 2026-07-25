@@ -78,6 +78,15 @@ const channelTypes = [
   { value: 'opsgenie',     label: 'OpsGenie',      icon: 'OG', desc: 'Create alerts via OpsGenie API', comingSoon: true },
 ]
 
+function selectChannelType(type: ChannelType) {
+  channelType.value = type
+  // Give a new channel an editable name as soon as its destination is known.
+  // Never overwrite a name the user entered or an existing channel's name.
+  if (!props.channel && !name.value.trim()) {
+    name.value = channelTypes.find(ct => ct.value === type)?.label || ''
+  }
+}
+
 const isValid = computed(() => {
   if (!name.value.trim()) return false
   switch (channelType.value) {
@@ -191,7 +200,7 @@ function save() {
             class="channel-type-card"
             :class="{ selected: channelType === ct.value, 'coming-soon': ct.comingSoon }"
             :disabled="ct.comingSoon"
-            @click="ct.comingSoon || (channelType = ct.value as ChannelType)"
+            @click="ct.comingSoon || selectChannelType(ct.value as ChannelType)"
             type="button"
           >
             <span v-if="ct.comingSoon" class="ct-soon-badge">Coming soon</span>
