@@ -3738,7 +3738,7 @@ function formatDate(ts: string): string {
       <div class="set-card">
         <div class="set-card-head">
           <h2 class="card-title">Real User Monitoring</h2>
-          <p class="card-desc">Browser monitoring (page views, web vitals, JS errors, session replay).</p>
+          <p class="card-desc">Browser monitoring (page views, web vitals, and JavaScript errors).</p>
         </div>
         <div class="set-row">
           <div class="set-row-text">

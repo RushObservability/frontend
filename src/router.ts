@@ -149,10 +149,9 @@ const router = createRouter({
       props: true,
     },
     {
+      // Replay is temporarily disabled; keep old links from opening a blank view.
       path: '/rum/:appName/replay/:sessionId',
-      name: 'rum-replay',
-      component: () => import('./views/RumReplayView.vue'),
-      props: true,
+      redirect: to => `/rum/${encodeURIComponent(String(to.params.appName))}`,
     },
     {
       path: '/integrations',

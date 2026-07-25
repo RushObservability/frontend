@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useApi } from '../composables/useApi'
 import type { InvestigationSession } from '../types'
 import InvestigationPanel from '../components/InvestigationPanel.vue'
+import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 
 const { listInvestigationSessions, getSreAgentOptions } = useApi()
 
@@ -42,6 +43,36 @@ const agentDown = ref(false)
 const recentSessions = ref<InvestigationSession[]>([])
 const helpOpen = ref(false)
 const helpWrapEl = ref<HTMLElement | null>(null)
+
+const historyColumns: DataTableColumn[] = [
+  { key: 'title', label: 'Investigation', sortable: true },
+  { key: 'status', label: 'Status', sortable: true },
+  { key: 'updated_at', label: 'Last activity', sortable: true, align: 'right' },
+]
+const historySortKey = ref('updated_at')
+const historySortDirection = ref<'asc' | 'desc'>('desc')
+
+const historyRows = computed(() => {
+  const rows = recentSessions.value.map((session) => ({
+    id: session.id,
+    question: session.title,
+    title: session.title || 'Untitled investigation',
+    status: session.status || 'unknown',
+    updated_at: session.updated_at,
+    updated_label: formatDate(session.updated_at),
+  }))
+
+  return rows.sort((a, b) => {
+    const left = historySortKey.value === 'updated_at'
+      ? new Date(a.updated_at).getTime()
+      : String(a[historySortKey.value as 'title' | 'status']).toLowerCase()
+    const right = historySortKey.value === 'updated_at'
+      ? new Date(b.updated_at).getTime()
+      : String(b[historySortKey.value as 'title' | 'status']).toLowerCase()
+    const comparison = left < right ? -1 : left > right ? 1 : 0
+    return historySortDirection.value === 'asc' ? comparison : -comparison
+  })
+})
 
 const popoverStyle = computed(() => {
   if (!helpWrapEl.value) return {}
@@ -145,6 +176,26 @@ function formatDate(iso: string): string {
   if (hrs < 24) return `${hrs}h ago`
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
+
+function onHistorySort(key: string) {
+  if (historySortKey.value === key) {
+    historySortDirection.value = historySortDirection.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    historySortKey.value = key
+    historySortDirection.value = key === 'updated_at' ? 'desc' : 'asc'
+  }
+}
+
+function historyStatusClass(status: unknown): string {
+  const value = String(status || 'unknown').toLowerCase()
+  return ['active', 'completed', 'paused', 'failed'].includes(value)
+    ? `history-status--${value}`
+    : 'history-status--unknown'
+}
+
+function onHistoryRowClick(row: Record<string, unknown>) {
+  launch(String(row.question || row.title || ''))
+}
 </script>
 
 <template>
@@ -185,9 +236,12 @@ function formatDate(iso: string): string {
         </div>
 
         <div class="sre-center">
-          <div class="room-signal-strip" aria-label="Available investigation signals">
-            <span class="signal-strip-label">USE THE SIGNALS YOU HAVE</span>
-            <span>Logs</span><i></i><span>Metrics</span><i></i><span>Traces</span><i></i><span>Deploys</span><i></i><span>Services</span>
+          <div class="sre-page-header">
+            <div class="sre-page-heading">
+              <h1 class="sre-page-title">SRE Agent</h1>
+              <p class="sre-page-description">Investigate issues across logs, metrics, traces, deploys, and services.</p>
+            </div>
+            <div class="sre-agent-state"><span class="sre-agent-state-dot"></span>Agent ready</div>
           </div>
 
           <!-- Input -->
@@ -277,19 +331,31 @@ function formatDate(iso: string): string {
               <div><p class="section-label">Recent investigations</p><p class="section-caption">Pick up where your team left off.</p></div>
               <span class="section-index">{{ String(recentSessions.length).padStart(2, '0') }} SESSIONS</span>
             </div>
-            <div v-if="recentSessions.length" class="history-list">
-              <button
-                v-for="s in recentSessions"
-                :key="s.id"
-                class="history-row"
-                @click="launch(s.title)"
-              >
-                <span class="history-marker" aria-hidden="true"></span>
-                <span class="history-title">{{ s.title }}</span>
-                <span class="history-time">{{ formatDate(s.updated_at) }}</span>
-              </button>
-            </div>
-            <p v-else class="history-empty">No investigations yet. Your first one will appear here.</p>
+            <DataTable
+              class="history-table"
+              :columns="historyColumns"
+              :rows="historyRows"
+              row-key="id"
+              :sort-key="historySortKey"
+              :sort-direction="historySortDirection"
+              :clickable-rows="true"
+              empty-label="No investigations yet. Your first one will appear here."
+              @sort="onHistorySort"
+              @row-click="onHistoryRowClick"
+            >
+              <template #cell-title="{ row }">
+                <div class="history-title-cell">
+                  <span class="history-marker" aria-hidden="true"></span>
+                  <span class="history-title">{{ row.title }}</span>
+                </div>
+              </template>
+              <template #cell-status="{ row }">
+                <span class="history-status" :class="historyStatusClass(row.status)">{{ row.status }}</span>
+              </template>
+              <template #cell-updated_at="{ row }">
+                <span class="history-time">{{ row.updated_label }}</span>
+              </template>
+            </DataTable>
           </div>
         </div>
       </div>
@@ -607,64 +673,66 @@ function formatDate(iso: string): string {
   color: var(--text-primary);
 }
 
-/* History */
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+/* History table content; the table shell comes from the shared DataTable. */
+.history-table {
+  margin-top: 15px;
 }
 
-.history-row {
+.history-table :deep(.data-table) {
+  min-width: 560px;
+}
+
+.history-title-cell {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 9px 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--bg-overlay);
-  border-radius: 9px;
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
-  font-family: 'Figtree', sans-serif;
-  font-size: 13px;
-  transition: all 0.14s;
-}
-
-.history-row:hover {
-  border-color: rgba(59, 130, 246, 0.28);
-  background: var(--bg-raised);
-}
-
-.history-icon {
-  flex-shrink: 0;
-  color: var(--text-muted);
-}
-
-.history-title {
-  flex: 1;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  gap: 10px;
   min-width: 0;
 }
 
-.history-row:hover .history-title {
-  color: var(--text-primary);
+.history-marker {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border: 1px solid var(--room-blue);
+  border-radius: 50%;
 }
+
+.history-title {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .08em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.history-status--active {
+  border-color: var(--amber-muted);
+  background: var(--amber-dim);
+  color: var(--amber);
+}
+
+.history-status--completed { border-color: var(--ok-dim); background: var(--ok-dim); color: var(--ok); }
+.history-status--paused { border-color: var(--amber-muted); background: var(--amber-dim); color: var(--amber); }
+.history-status--failed { border-color: var(--error-dim); background: var(--error-dim); color: var(--error); }
 
 .history-time {
-  flex-shrink: 0;
-  font-size: 11px;
   color: var(--text-muted);
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.history-empty {
-  font-size: 13px;
-  color: var(--text-muted);
-  padding: 9px 0;
-  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 /* Active state */
@@ -800,46 +868,41 @@ function formatDate(iso: string): string {
 
 /* Control-room direction: restrained, evidence-first, and deliberately flat. */
 .sre-page {
-  --room-ink: color-mix(in srgb, var(--text-primary) 92%, #15233a);
   --room-line: color-mix(in srgb, var(--text-primary) 11%, transparent);
-  --room-blue: #2563eb;
+  --room-blue: var(--amber);
   background: var(--bg-root);
 }
 
 .sre-page::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: .07;
-  background-image: linear-gradient(var(--room-line) 1px, transparent 1px);
-  background-size: 100% 120px;
-  mask-image: linear-gradient(to bottom, black, transparent 68%);
+  display: none;
 }
 
 .grid-backdrop { display: none; }
-.sre-idle { align-items: stretch; padding: clamp(28px, 4vh, 52px) clamp(22px, 5vw, 84px) 72px; }
+.sre-idle { align-items: stretch; padding: 0 0 var(--sp-8); min-height: auto; }
 .sre-idle::before { display: none; }
-.sre-center { max-width: 1180px; align-items: stretch; margin: 0 auto; }
-.room-signal-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 0; padding: 10px 0; border-top: 1px solid var(--room-line); border-bottom: 1px solid var(--room-line); color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; animation: rise .55s .04s cubic-bezier(.16,1,.3,1) both; }
-.signal-strip-label { margin-right: 8px; color: var(--text-muted); font-size: 9px; letter-spacing: .12em; }
-.room-signal-strip i { width: 3px; height: 3px; border-radius: 50%; background: var(--room-blue); opacity: .75; }
-.sre-input-wrap { margin-top: 28px; animation-delay: .08s; }
+.sre-center { max-width: none; align-items: stretch; margin: 0; }
+.sre-page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-6); margin-bottom: var(--sp-6); padding: var(--sp-1) 0 var(--sp-2); }
+.sre-page-heading { min-width: 0; }
+.sre-page-title { margin: 0; color: var(--text-primary); font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
+.sre-page-description { margin: 6px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.4; }
+.sre-agent-state { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; padding: 5px 8px; color: var(--text-muted); background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--r-pill); font: 9px var(--font-mono); letter-spacing: .04em; text-transform: uppercase; }
+.sre-agent-state-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-dim); }
+.sre-input-wrap { margin-top: 0; animation-delay: .08s; }
 .input-label-row { display: flex; justify-content: space-between; align-items: baseline; gap: 18px; margin-bottom: 10px; }
 .input-label { color: var(--text-primary); font-size: 13px; font-weight: 650; }
 .input-context { color: var(--text-muted); font-size: 11px; }
-.sre-input-box { border-color: var(--room-line); border-radius: 4px; background: var(--bg-surface); box-shadow: 0 10px 24px color-mix(in srgb, #101828 5%, transparent); }
-.sre-input-box:focus-within { border-color: color-mix(in srgb, var(--room-blue) 58%, var(--room-line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--room-blue) 10%, transparent), 0 18px 44px color-mix(in srgb, #101828 10%, transparent); }
+.sre-input-box { border-color: var(--border-default); border-radius: var(--r-md); background: var(--bg-surface); box-shadow: none; }
+.sre-input-box:focus-within { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber-dim); }
 .sre-textarea { min-height: 126px; padding: 20px 22px 16px; font-size: 16px; line-height: 1.55; }
 .sre-input-footer { padding: 10px 12px; border-top-color: var(--room-line); }
-.sre-send-btn { border-radius: 3px; padding: 10px 15px; border-color: var(--room-blue); background: var(--room-blue); color: white; font-size: 12px; font-weight: 650; letter-spacing: .01em; cursor: pointer; }
+.sre-send-btn { border-radius: var(--r-md); padding: 10px 15px; border-color: var(--amber); background: var(--amber); color: var(--text-inverse); font-size: 12px; font-weight: 650; letter-spacing: .01em; cursor: pointer; }
 .sre-send-btn:not(.ready) { border-color: var(--room-line); background: var(--bg-raised); color: var(--text-muted); cursor: not-allowed; }
-.sre-send-btn.ready:hover { background: #1d4ed8; box-shadow: none; }
+.sre-send-btn.ready:hover { background: var(--amber-hover); box-shadow: none; }
 .sre-hint { font-size: 11px; }
 .sre-hint kbd { border-radius: 3px; }
 .help-btn { border-radius: 3px; }
 .sre-picker { border-radius: 3px; }
-.quick-starts, .sre-section { margin-top: 42px; animation: rise .55s .12s cubic-bezier(.16,1,.3,1) both; }
+.quick-starts, .sre-section { margin-top: var(--sp-6); animation: rise .55s .12s cubic-bezier(.16,1,.3,1) both; }
 .section-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
 .section-label { margin: 0; color: var(--text-primary); font-size: 11px; letter-spacing: .12em; }
 .section-caption { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; }
@@ -850,13 +913,6 @@ function formatDate(iso: string): string {
 .quick-card-index { color: var(--room-blue); font-family: var(--font-mono); font-size: 10px; }
 .quick-card-copy { font-size: 12px; line-height: 1.45; }
 .quick-card svg { color: var(--text-muted); }
-.history-list { gap: 0; margin-top: 15px; border-top: 1px solid var(--room-line); }
-.history-row { min-height: 45px; padding: 9px 4px; border: 0; border-bottom: 1px solid var(--room-line); border-radius: 0; background: transparent; }
-.history-row:hover { border-color: var(--room-line); background: color-mix(in srgb, var(--room-blue) 5%, transparent); }
-.history-marker { width: 5px; height: 5px; flex: 0 0 auto; border: 1px solid var(--room-blue); border-radius: 50%; }
-.history-title { color: var(--text-secondary); font-size: 12px; }
-.history-time { font-size: 10px; }
-.history-empty { padding: 15px 0; font-size: 12px; }
 .sre-active { height: calc(100vh - 52px); background: var(--bg-root); }
 .active-topbar { min-height: 58px; padding: 10px clamp(18px, 3vw, 42px); border-bottom-color: var(--room-line); background: color-mix(in srgb, var(--bg-surface) 78%, transparent); }
 .active-identity { gap: 10px; }
@@ -867,13 +923,14 @@ function formatDate(iso: string): string {
 .active-meta { display: flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 18px; color: var(--text-muted); font-family: var(--font-mono); font-size: 9px; letter-spacing: .05em; }
 .new-btn { border-radius: 3px; padding: 8px 12px; border-color: var(--room-line); }
 .panel-wrap { padding: 18px clamp(14px, 3vw, 42px) 28px; }
-.agent-error-box { max-width: 590px; border-radius: 3px; border-color: color-mix(in srgb, #dc2626 24%, var(--room-line)); background: color-mix(in srgb, #dc2626 6%, var(--bg-surface)); box-shadow: 0 18px 44px color-mix(in srgb, #101828 8%, transparent); }
-.agent-error-eyebrow { margin: 0 0 2px; color: #dc2626; font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: .12em; }
+.agent-error-box { max-width: 590px; border-radius: var(--r-md); border-color: color-mix(in srgb, var(--error) 24%, var(--border-default)); background: color-mix(in srgb, var(--error) 6%, var(--bg-surface)); box-shadow: none; }
+.agent-error-eyebrow { margin: 0 0 2px; color: var(--error); font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: .12em; }
 .agent-error-title { color: var(--text-primary); }
 .agent-retry-btn { border-radius: 3px; }
 
 @media (max-width: 760px) {
-  .sre-idle { padding: 34px 18px 48px; }
+  .sre-idle { padding: 0 0 var(--sp-6); }
+  .sre-page-header { align-items: flex-start; flex-direction: column; gap: var(--sp-3); }
   .quick-grid { grid-template-columns: 1fr; }
   .input-label-row { display: block; }
   .input-context { display: block; margin-top: 4px; }

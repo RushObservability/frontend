@@ -35,16 +35,6 @@ const totalSessions = ref(0)
 const totalErrors = ref(0)
 const avgLoadTime = ref(0)
 
-// ═══ Replay availability ═══
-const replaySessionIds = ref<Set<string>>(new Set())
-
-async function loadReplayAvailability() {
-  try {
-    const ids = await api.rumReplayAvailable(props.appName)
-    replaySessionIds.value = new Set(ids)
-  } catch { /* non-critical */ }
-}
-
 // ═══ Session Detail ═══
 const sessionDetailOpen = ref(false)
 const sessionDetailId = ref('')
@@ -70,6 +60,13 @@ function formatCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return n.toString()
+}
+
+function rangeLabel(minutes: number): string {
+  if (minutes >= 10080) return '7d'
+  if (minutes >= 1440) return '24h'
+  if (minutes >= 360) return '6h'
+  return '1h'
 }
 
 function formatDuration(ms: number | null | undefined): string {
@@ -389,7 +386,6 @@ onMounted(() => {
   }
 
   fetchData()
-  loadReplayAvailability()
   initializing = false
 
   // Restore session from URL
@@ -415,9 +411,15 @@ watch(selectedPreset, () => {
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 3L5 7l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           RUM
         </button>
-        <h2 class="page-title">{{ appName }}</h2>
+        <div class="rum-title-block">
+          <span class="rum-kicker">Real user monitoring</span>
+          <h2 class="page-title">{{ appName }}</h2>
+        </div>
       </div>
-      <TimePicker v-model="selectedPreset" />
+      <div class="rum-header-controls">
+        <span class="rum-window">Last {{ rangeLabel(selectedPreset) }}</span>
+        <TimePicker v-model="selectedPreset" />
+      </div>
     </div>
 
     <!-- ═══ Loading indicator ═══ -->
@@ -469,6 +471,7 @@ watch(selectedPreset, () => {
     <!-- ═══ Web Vitals + Pages/Errors Layout ═══ -->
     <div class="section-header-row">
       <div class="section-title">Web Vitals</div>
+      <span class="section-context">p75 performance and rating distribution · last {{ rangeLabel(selectedPreset) }}</span>
     </div>
 
     <div class="main-layout" :class="{ dimmed: loadingData }">
@@ -513,7 +516,13 @@ watch(selectedPreset, () => {
 
         <!-- Sessions -->
         <div class="stacked-panel">
-          <div class="section-title">Sessions</div>
+          <div class="panel-head">
+            <div>
+              <div class="section-title">Sessions</div>
+              <div class="panel-subtitle">Recent browser activity with trace context</div>
+            </div>
+            <span class="panel-count">{{ sessions.length }} shown</span>
+          </div>
           <table class="rum-table" v-if="sessions.length">
             <thead>
               <tr>
@@ -523,7 +532,6 @@ watch(selectedPreset, () => {
                 <th class="num">Pages</th>
                 <th class="num">Errors</th>
                 <th class="num">Duration</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -539,14 +547,6 @@ watch(selectedPreset, () => {
                 <td class="num">{{ s.page_count }}</td>
                 <td class="num" :class="{ 'has-errors': s.error_count > 0 }">{{ s.error_count }}</td>
                 <td class="num">{{ s.duration_s.toFixed(1) }}s</td>
-                <td class="td-replay" @click.stop>
-                  <router-link
-                    v-if="replaySessionIds.has(s.SessionId)"
-                    :to="`/rum/${encodeURIComponent(props.appName)}/replay/${encodeURIComponent(s.SessionId)}`"
-                    class="btn-replay"
-                  >▶ Replay</router-link>
-                  <span v-else class="btn-replay btn-replay--unavailable" title="No recording available">▶ Replay</span>
-                </td>
               </tr>
             </tbody>
           </table>
@@ -558,7 +558,13 @@ watch(selectedPreset, () => {
       <div class="main-col">
         <!-- Top Pages -->
         <div class="stacked-panel">
-          <div class="section-title">Top Pages</div>
+          <div class="panel-head">
+            <div>
+              <div class="section-title">Top pages</div>
+              <div class="panel-subtitle">Where users are spending time in the app</div>
+            </div>
+            <span class="panel-count">{{ pages.length }} routes</span>
+          </div>
           <table class="rum-table" v-if="pages.length">
             <thead>
               <tr>
@@ -584,7 +590,13 @@ watch(selectedPreset, () => {
 
         <!-- Errors -->
         <div class="stacked-panel">
-          <div class="section-title">Errors</div>
+          <div class="panel-head">
+            <div>
+              <div class="section-title">Errors</div>
+              <div class="panel-subtitle">Client-side failures grouped by message</div>
+            </div>
+            <span class="panel-count panel-count-error">{{ totalErrors }} total</span>
+          </div>
           <table class="rum-table" v-if="errors.length">
             <thead>
               <tr>
@@ -616,11 +628,15 @@ watch(selectedPreset, () => {
             <div class="detail-panel-inner">
               <!-- Header -->
               <div class="sp-header">
-                <div class="sp-header-left">
-                  <span class="sp-title">Session {{ sessionDetailId }}</span>
-                  <span class="sp-app-badge">{{ appName }}</span>
+                <div class="sp-header-copy">
+                  <span class="sp-kicker">RUM / SESSION INSPECTION</span>
+                  <div class="sp-header-left">
+                    <span class="sp-title">Session <span class="mono">{{ sessionDetailId }}</span></span>
+                    <span class="sp-app-badge">{{ appName }}</span>
+                  </div>
+                  <span class="sp-subtitle">Browser context, visited routes, and event evidence for this session.</span>
                 </div>
-                <button class="dp-close" @click="closeSessionDetail()">&times;</button>
+                <button class="dp-close" aria-label="Close session details" @click="closeSessionDetail()">&times;</button>
               </div>
 
               <!-- Meta row -->
@@ -648,6 +664,13 @@ watch(selectedPreset, () => {
               <div v-else class="sp-body">
                 <!-- Overview -->
                 <div v-if="sessionInfo" class="sp-overview">
+                  <div class="sp-section-head">
+                    <div>
+                      <span class="sp-section-kicker">SESSION SIGNALS</span>
+                      <strong>Activity summary</strong>
+                    </div>
+                    <span class="sp-section-note">{{ sessionEvents.length }} collected events</span>
+                  </div>
                   <div class="sp-stats-row">
                     <div class="sp-stat">
                       <div class="sp-stat-val">{{ sessionMeta?.page_count ?? sessionPages.length }}</div>
@@ -704,7 +727,11 @@ watch(selectedPreset, () => {
 
                 <!-- Events table -->
                 <div v-if="sessionEvents.length" class="sp-events-header">
-                  {{ sessionEvents.length }} events
+                  <div>
+                    <span class="sp-section-kicker">EVENT STREAM</span>
+                    <strong>Session timeline</strong>
+                  </div>
+                  <span class="sp-events-count">{{ filteredSessionEvents.length }} shown<span v-if="sessionErrorCount"> · {{ sessionErrorCount }} errors</span></span>
                 </div>
 
                 <table v-if="filteredSessionEvents.length" class="sp-table">

@@ -858,15 +858,6 @@ export function useApi() {
     return await request(`/rum/session/${encodeURIComponent(id)}`)
   }
 
-  async function rumReplay(sessionId: string): Promise<{ events: unknown[] }> {
-    return await request(`/rum/replay/${encodeURIComponent(sessionId)}`)
-  }
-
-  async function rumReplayAvailable(appName: string): Promise<string[]> {
-    const res = await request<{ session_ids: string[] }>(`/rum/replay/available/${encodeURIComponent(appName)}`)
-    return res.session_ids || []
-  }
-
   // ── ArgoCD API ──
 
   async function getArgoApps(): Promise<ArgoApp[]> {
@@ -1594,7 +1585,7 @@ export function useApi() {
     getIngestBuffer,
     getUsage, getLabelBreakdown,
     getUsageMeteringSummary, getUsageMeteringBreakdown, getUsageMeteringTenants,
-    rumApps, queryRumEvents, rumVitals, rumPages, rumErrors, rumSessions, rumSession, rumReplay, rumReplayAvailable,
+    rumApps, queryRumEvents, rumVitals, rumPages, rumErrors, rumSessions, rumSession,
     promQuery, promQueryRange, promLabels, promLabelValues,
     getArgoApps, getArgoApp, getArgoAppSets,
     getFluxResources, getFluxSources, getFluxResource,
