@@ -2995,7 +2995,148 @@
   margin-top: var(--sp-2);
 }
 
+/* ── Runtime configuration ─────────────────────────────────────────────── */
+.config-loading,
+.config-error {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.config-error { color: var(--error); }
+.config-error-title { color: var(--text-primary); font-size: 14px; font-weight: 600; }
+.config-error .btn { justify-self: start; margin-top: var(--sp-1); }
+
+.config-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--border-subtle);
+}
+.config-summary-item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: var(--sp-4);
+  background: var(--bg-surface);
+}
+.config-summary-label {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.config-summary-value {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.config-summary-status { color: var(--text-muted); text-transform: uppercase; }
+.config-summary-status.is-active { color: var(--ok); }
+.config-summary-status.is-expired,
+.config-summary-status.is-invalid { color: var(--warning); }
+
+.config-card { margin-top: var(--sp-4); }
+.config-integrations { display: grid; }
+.config-integration {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.config-integration:last-child { border-bottom: 0; }
+.config-integration-mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: .6;
+}
+.config-integration-mark.is-loaded { background: var(--ok); opacity: 1; }
+.config-integration-copy { min-width: 0; }
+.config-integration-name { color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.config-integration-id {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.config-integration-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.config-pill,
+.config-target-count {
+  padding: 3px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.config-pill.is-on { border-color: color-mix(in srgb, var(--ok) 42%, var(--border-subtle)); color: var(--ok); }
+.config-pill.is-off { background: var(--bg-void); }
+.config-target-count { border-color: var(--border-default); color: var(--text-secondary); }
+
+.config-table { overflow-x: auto; }
+.config-table-row {
+  display: grid;
+  grid-template-columns: minmax(210px, .8fr) minmax(180px, 1fr) 110px;
+  gap: var(--sp-4);
+  align-items: center;
+  min-width: 560px;
+  padding: 10px var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.config-table-row:last-child { border-bottom: 0; }
+.config-table-head {
+  background: var(--bg-void);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.config-key { color: var(--text-primary); font-size: 11px; }
+.config-value {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.config-value.is-secret { color: var(--amber); letter-spacing: .03em; }
+.config-source {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: right;
+}
+
 @media (max-width: 720px) {
+  .config-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .config-integration { grid-template-columns: 8px minmax(0, 1fr); align-items: start; }
+  .config-integration-meta { grid-column: 2; justify-content: flex-start; }
   .agent-controlbar { align-items: flex-start; }
   .agent-subnav {
     display: flex;

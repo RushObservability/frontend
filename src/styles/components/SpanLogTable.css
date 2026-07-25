@@ -1,7 +1,7 @@
 /* ═══ Container ═══ */
 .slt-root {
   background: var(--bg-surface);
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--r-md, 6px);
   overflow: hidden;
 }
@@ -196,59 +196,19 @@
   white-space: nowrap;
 }
 
-/* ═══ Table head ═══ */
-.slt-head {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 0 12px;
-  height: 28px;
-  background: var(--bg-raised);
-  border-bottom: 1px solid var(--border-default);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  user-select: none;
-}
-
-/* ═══ Columns ═══ */
-.slt-col {
-  flex-shrink: 0;
-  padding: 0 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.slt-col-time   { width: 90px; }
-.slt-col-svc    { width: 110px; }
-.slt-col-method { width: 56px; }
-.slt-col-path   { flex: 1; min-width: 0; }
-.slt-col-status { width: 48px; text-align: center; }
-.slt-col-dur    { width: 130px; display: flex; align-items: center; gap: 4px; }
-.slt-col-trace  { width: 68px; text-align: right; }
-.slt-col-level  { width: 60px; }
-.slt-col-msg    { flex: 1; min-width: 0; color: var(--text-secondary); }
-
-/* ═══ Rows ═══ */
-.slt-row {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 0 12px;
-  height: 30px;
-  border-bottom: 1px solid var(--border-subtle);
-  cursor: pointer;
-  font-size: 11px;
-  transition: background 0.08s;
-}
-.slt-row:hover { background: var(--bg-hover); }
-.slt-row:last-child { border-bottom: none; }
-.slt-row.slt-error {
-  border-left: 2px solid var(--error);
-  padding-left: 10px;
-}
+/* ═══ Shared service table surface ═══
+   Span and log bodies use the same DataTable shell as Endpoints/Top Errors.
+   The slots below keep their domain-specific method, duration, level, and
+   trace affordances without reintroducing a second row system. */
+.slt-data-table :deep(.data-table) { min-width: 720px; }
+.slt-data-table :deep(.data-table th) { font-size: 10px; letter-spacing: 0.06em; }
+.slt-data-table :deep(.data-table td) { color: var(--text-secondary); }
+.slt-data-table :deep(.data-table tbody tr.slt-error td:first-child) { box-shadow: inset 2px 0 0 var(--error); }
+.slt-data-table :deep(.data-table tbody tr[aria-expanded='true'] td) { background: var(--bg-hover); }
+.slt-data-table :deep(.data-table-detail-row > td) { background: transparent; }
+.slt-data-table :deep(.data-table-detail-row:hover td) { background: transparent; }
+.slt-data-table :deep(.data-table td.slt-message-cell) { max-width: 0; }
+.slt-log-message { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ═══ Service name ═══ */
 .slt-svc-name {
@@ -262,12 +222,13 @@
 
 /* ═══ Duration bar ═══ */
 .slt-dur-bar {
-  flex: 1;
+  width: 68px;
   height: 3px;
   background: var(--bg-overlay);
   border-radius: 2px;
   overflow: hidden;
 }
+.slt-dur-cell { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .slt-dur-fill {
   height: 100%;
   border-radius: 2px;
@@ -336,7 +297,7 @@
 .slt-logs-mode .slt-header {
   min-height: 48px;
   padding: 9px 14px;
-  background: color-mix(in srgb, var(--bg-raised) 82%, var(--amber) 18%);
+  background: var(--bg-raised);
 }
 .slt-log-heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .slt-log-mark {
@@ -372,25 +333,9 @@
 .dist-info { background: var(--method-post); }
 .dist-debug { background: var(--text-muted); }
 
-.slt-logs-mode .slt-head { height: 30px; padding-inline: 14px; background: var(--bg-raised); }
-.slt-logs-mode .slt-col-time { width: 108px; }
-.slt-log-group { border-bottom: 1px solid var(--border-subtle); }
-.slt-log-group:last-child { border-bottom: 0; }
-.slt-log-group.expanded { background: color-mix(in srgb, var(--bg-raised) 92%, var(--amber) 8%); }
-.slt-log-row {
-  height: 38px;
-  padding-inline: 14px;
-  border-bottom: 0;
-  outline: none;
-}
-.slt-log-row:focus-visible { box-shadow: inset 0 0 0 1px var(--amber); }
-.slt-log-group.expanded .slt-log-row { background: var(--bg-hover); }
-.slt-log-row .slt-col-msg {
-  color: var(--text-primary);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  letter-spacing: 0.005em;
-}
+.slt-logs-mode .slt-data-table :deep(.data-table) { min-width: 640px; }
+.slt-logs-mode .slt-data-table :deep(.data-table td.slt-message-cell) { color: var(--text-primary); }
+.slt-logs-mode .slt-data-table :deep(.data-table tbody tr.slt-error td:first-child) { box-shadow: inset 2px 0 0 var(--error); }
 .slt-open-log {
   color: var(--text-muted);
   font-size: 9px;
@@ -398,12 +343,12 @@
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
-.slt-log-row:hover .slt-open-log,
-.slt-log-group.expanded .slt-open-log { color: var(--amber); }
+.slt-logs-mode .slt-data-table :deep(.data-table tbody tr:hover) .slt-open-log,
+.slt-logs-mode .slt-data-table :deep(.data-table tbody tr[aria-expanded='true']) .slt-open-log { color: var(--amber); }
 .slt-logs-mode .lvl-warn { background: var(--warning-dim); color: var(--warning); }
 
 .slt-log-detail {
-  margin: 0 14px 14px 112px;
+  margin: 0 14px 14px;
   border: 1px solid var(--border-default);
   background: var(--bg-root);
   animation: sltDetailIn 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;

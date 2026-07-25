@@ -28,6 +28,8 @@ const props = withDefaults(defineProps<{
   clickableRows?: boolean
   expandedRowKey?: string | number | null
   rowClass?: string | ((row: DataTableRow, index: number) => string | undefined)
+  /** Render without the default card shell when embedded in another panel. */
+  bare?: boolean
 }>(), {
   rowKey: 'id',
   loading: false,
@@ -38,6 +40,7 @@ const props = withDefaults(defineProps<{
   clickableRows: false,
   expandedRowKey: null,
   rowClass: '',
+  bare: false,
 })
 
 const emit = defineEmits<{
@@ -87,7 +90,7 @@ function rowClassFor(row: DataTableRow, index: number): string | undefined {
 </script>
 
 <template>
-  <div class="data-table-wrap card">
+  <div :class="['data-table-wrap', { card: !bare }]">
     <table class="data-table">
       <thead>
         <tr>

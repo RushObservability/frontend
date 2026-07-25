@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onBeforeUnmount } from 'vue'
 import { useApi } from '../composables/useApi'
+import DataTable, { type DataTableColumn } from './DataTable.vue'
 import type { RushEvent, Filter } from '../types'
 
 const props = withDefaults(defineProps<{
@@ -321,6 +322,67 @@ const logs = computed<LogEntry[]>(() => {
   return entries
 })
 
+const spanTableColumns = computed<DataTableColumn[]>(() => {
+  const columns: DataTableColumn[] = [
+    { key: 'timestamp', label: 'Time' },
+  ]
+  if (props.showService) columns.push({ key: 'service_name', label: 'Service' })
+  columns.push(
+    { key: 'http_method', label: 'Method' },
+    { key: 'http_path', label: 'Resource' },
+    { key: 'http_status_code', label: 'Status', align: 'center' },
+    { key: 'duration_ns', label: 'Duration', align: 'right' },
+    { key: 'trace_id', label: 'Trace', align: 'right' },
+  )
+  return columns
+})
+
+const spanTableRows = computed(() => displaySpans.value.map((row, index) => ({
+  ...row,
+  rowKey: row.span_id || `${row.trace_id}:${row.timestamp}:${index}`,
+})))
+
+const logTableColumns = computed<DataTableColumn[]>(() => {
+  const columns: DataTableColumn[] = [
+    { key: 'timestamp', label: 'Time' },
+    { key: 'level', label: 'Level' },
+  ]
+  if (props.showService) columns.push({ key: 'serviceName', label: 'Service' })
+  columns.push(
+    { key: 'message', label: 'Message', cellClass: 'slt-message-cell' },
+    { key: 'id', label: 'Detail', align: 'right' },
+  )
+  return columns
+})
+
+const logTableRows = computed(() => logs.value.map((log) => ({ ...log })))
+
+function spanRow(row: Record<string, unknown>): RushEvent {
+  return row as unknown as RushEvent
+}
+
+function logRow(row: Record<string, unknown>): LogEntry {
+  return row as unknown as LogEntry
+}
+
+function spanTableRowClass(row: Record<string, unknown>): string {
+  const span = spanRow(row)
+  return span.status === 'ERROR' || span.http_status_code >= 500 ? 'slt-error' : ''
+}
+
+function logTableRowClass(row: Record<string, unknown>): string {
+  const log = logRow(row)
+  return log.level === 'error' || log.level === 'fatal' ? 'slt-error' : ''
+}
+
+function onSpanTableRowClick(row: Record<string, unknown>) {
+  emit('click-span', spanRow(row))
+}
+
+function onLogTableRowClick(row: Record<string, unknown>) {
+  toggleLog(logRow(row))
+}
+
 // ═══ Formatters ═══
 function formatTimestamp(ns: number): string {
   const d = new Date(ns / 1_000_000)
@@ -501,53 +563,33 @@ onBeforeUnmount(() => loadMoreObserver?.disconnect())
 
     <!-- ═══ Spans table ═══ -->
     <template v-if="mode === 'spans'">
-      <div class="slt-head">
-        <div class="slt-col slt-col-time">Time</div>
-        <div v-if="showService" class="slt-col slt-col-svc">Service</div>
-        <div class="slt-col slt-col-method">Method</div>
-        <div class="slt-col slt-col-path">Resource</div>
-        <div class="slt-col slt-col-status">Status</div>
-        <div class="slt-col slt-col-dur">Duration</div>
-        <div class="slt-col slt-col-trace">Trace</div>
-      </div>
-
-      <div v-if="isLoading" class="slt-empty">Loading spans...</div>
-      <div v-else-if="displaySpans.length === 0" class="slt-empty">{{ searchActive ? 'No spans match your search' : 'No spans found in this time range' }}</div>
-      <template v-else>
-        <div
-          v-for="(row, i) in displaySpans"
-          :key="row.span_id || i"
-          class="slt-row"
-          :class="{ 'slt-error': row.status === 'ERROR' || row.http_status_code >= 500 }"
-          @click="emit('click-span', row)"
-        >
-          <div class="slt-col slt-col-time mono">{{ formatTimestamp(row.timestamp) }}</div>
-          <div v-if="showService" class="slt-col slt-col-svc">
-            <span class="slt-svc-name">{{ row.service_name }}</span>
+      <DataTable
+        class="slt-data-table"
+        bare
+        :columns="spanTableColumns"
+        :rows="spanTableRows"
+        row-key="rowKey"
+        :loading="isLoading"
+        :empty-label="searchActive ? 'No spans match your search' : 'No spans found in this time range'"
+        clickable-rows
+        :row-class="spanTableRowClass"
+        @row-click="onSpanTableRowClick"
+      >
+        <template #cell-timestamp="{ row }"><span class="mono">{{ formatTimestamp(Number(row.timestamp)) }}</span></template>
+        <template #cell-service_name="{ row }"><span class="slt-svc-name">{{ row.service_name }}</span></template>
+        <template #cell-http_method="{ row }"><span class="method-badge" :class="String(row.http_method)">{{ row.http_method }}</span></template>
+        <template #cell-http_path="{ row }"><span class="mono">{{ row.http_path || '—' }}</span></template>
+        <template #cell-http_status_code="{ row }"><span class="mono" :class="statusClass(String(row.status), Number(row.http_status_code))">{{ Number(row.http_status_code) || '—' }}</span></template>
+        <template #cell-duration_ns="{ row }">
+          <div class="slt-dur-cell">
+            <div class="slt-dur-bar"><div class="slt-dur-fill" :style="{ width: durBarWidth(Number(row.duration_ns)), background: durBarColor(Number(row.duration_ns)) }" /></div>
+            <span class="mono" :class="durationClass(Number(row.duration_ns))">{{ formatDuration(Number(row.duration_ns)) }}</span>
           </div>
-          <div class="slt-col slt-col-method">
-            <span class="method-badge" :class="row.http_method">{{ row.http_method }}</span>
-          </div>
-          <div class="slt-col slt-col-path mono">{{ row.http_path || '\u2014' }}</div>
-          <div class="slt-col slt-col-status">
-            <span class="mono" :class="statusClass(row.status, row.http_status_code)">{{ row.http_status_code || '\u2014' }}</span>
-          </div>
-          <div class="slt-col slt-col-dur">
-            <div class="slt-dur-bar">
-              <div class="slt-dur-fill" :style="{ width: durBarWidth(row.duration_ns), background: durBarColor(row.duration_ns) }" />
-            </div>
-            <span class="mono" :class="durationClass(row.duration_ns)">{{ formatDuration(row.duration_ns) }}</span>
-          </div>
-          <div class="slt-col slt-col-trace">
-            <router-link
-              :to="`/trace/${row.trace_id}`"
-              class="slt-trace-link mono"
-              @click.stop
-              title="View full trace"
-            >{{ row.trace_id.slice(0, 8) }}</router-link>
-          </div>
-        </div>
-      </template>
+        </template>
+        <template #cell-trace_id="{ row }">
+          <router-link :to="`/trace/${String(row.trace_id)}`" class="slt-trace-link mono" @click.stop title="View full trace">{{ String(row.trace_id).slice(0, 8) }}</router-link>
+        </template>
+      </DataTable>
     </template>
 
     <!-- ═══ Logs table ═══ -->
@@ -558,57 +600,41 @@ onBeforeUnmount(() => loadMoreObserver?.disconnect())
         <span v-if="logCounts.info" class="dist-info" :style="{ width: logShare(logCounts.info) }" :title="`${logCounts.info} info`" />
         <span v-if="logCounts.debug" class="dist-debug" :style="{ width: logShare(logCounts.debug) }" :title="`${logCounts.debug} debug`" />
       </div>
-      <div class="slt-head">
-        <div class="slt-col slt-col-time">Time</div>
-        <div class="slt-col slt-col-level">Level</div>
-        <div v-if="showService" class="slt-col slt-col-svc">Service</div>
-        <div class="slt-col slt-col-msg">Message</div>
-        <div class="slt-col slt-col-trace">Detail</div>
-      </div>
-
-      <div v-if="isLoading" class="slt-empty">Loading logs...</div>
-      <div v-else-if="logs.length === 0" class="slt-empty">{{ searchActive ? 'No logs match your search' : 'No log events found in this time range' }}</div>
-      <template v-else>
-        <div v-for="log in logs" :key="log.id" class="slt-log-group" :class="{ expanded: selectedLogId === log.id }">
-          <div
-            class="slt-row slt-log-row"
-            :class="{ 'slt-error': log.level === 'error' || log.level === 'fatal' }"
-            role="button"
-            tabindex="0"
-            :aria-expanded="selectedLogId === log.id"
-            @click="toggleLog(log)"
-            @keydown.enter.prevent="toggleLog(log)"
-            @keydown.space.prevent="toggleLog(log)"
-          >
-            <div class="slt-col slt-col-time mono">{{ formatTimestamp(log.timestamp) }}</div>
-            <div class="slt-col slt-col-level">
-              <span class="slt-level-badge" :class="levelClass(log.level)">{{ log.level }}</span>
-            </div>
-            <div v-if="showService" class="slt-col slt-col-svc">
-              <span class="slt-svc-name">{{ log.serviceName }}</span>
-            </div>
-            <div class="slt-col slt-col-msg">{{ log.message }}</div>
-            <div class="slt-col slt-col-trace">
-              <span class="slt-open-log">{{ selectedLogId === log.id ? 'Close' : 'Inspect' }}</span>
-            </div>
-          </div>
-
-          <div v-if="selectedLogId === log.id" class="slt-log-detail" @click.stop>
-            <div class="slt-log-detail-message">{{ log.message }}</div>
+      <DataTable
+        class="slt-data-table"
+        bare
+        :columns="logTableColumns"
+        :rows="logTableRows"
+        row-key="id"
+        :loading="isLoading"
+        :empty-label="searchActive ? 'No logs match your search' : 'No log events found in this time range'"
+        clickable-rows
+        :expanded-row-key="selectedLogId"
+        :row-class="logTableRowClass"
+        @row-click="onLogTableRowClick"
+      >
+        <template #cell-timestamp="{ row }"><span class="mono">{{ formatTimestamp(Number(row.timestamp)) }}</span></template>
+        <template #cell-level="{ row }"><span class="slt-level-badge" :class="levelClass(String(row.level))">{{ row.level }}</span></template>
+        <template #cell-serviceName="{ row }"><span class="slt-svc-name">{{ row.serviceName }}</span></template>
+        <template #cell-message="{ row }"><span class="slt-log-message">{{ row.message }}</span></template>
+        <template #cell-id="{ row }"><span class="slt-open-log">{{ selectedLogId === row.id ? 'Close' : 'Inspect' }}</span></template>
+        <template #row-detail="{ row }">
+          <div class="slt-log-detail" @click.stop>
+            <div class="slt-log-detail-message">{{ row.message }}</div>
 
             <div class="slt-log-meta-strip">
-              <div><span>Event</span><strong class="mono">{{ log.eventName }}</strong></div>
-              <div><span>Timestamp</span><strong class="mono">{{ formatTimestamp(log.timestamp) }}</strong></div>
-              <div v-if="log.environment"><span>Environment</span><strong>{{ log.environment }}</strong></div>
-              <div v-if="log.hostName"><span>Host</span><strong class="mono">{{ log.hostName }}</strong></div>
-              <div v-if="log.httpPath"><span>Request</span><strong class="mono">{{ log.httpMethod }} {{ log.httpPath }}</strong></div>
-              <div v-if="log.httpStatusCode"><span>Status</span><strong class="mono" :class="statusClass('', log.httpStatusCode)">{{ log.httpStatusCode }}</strong></div>
+              <div><span>Event</span><strong class="mono">{{ row.eventName }}</strong></div>
+              <div><span>Timestamp</span><strong class="mono">{{ formatTimestamp(Number(row.timestamp)) }}</strong></div>
+              <div v-if="row.environment"><span>Environment</span><strong>{{ row.environment }}</strong></div>
+              <div v-if="row.hostName"><span>Host</span><strong class="mono">{{ row.hostName }}</strong></div>
+              <div v-if="row.httpPath"><span>Request</span><strong class="mono">{{ row.httpMethod }} {{ row.httpPath }}</strong></div>
+              <div v-if="row.httpStatusCode"><span>Status</span><strong class="mono" :class="statusClass('', Number(row.httpStatusCode))">{{ row.httpStatusCode }}</strong></div>
             </div>
 
-            <div v-if="detailAttributes(log).length" class="slt-log-fields">
-              <div class="slt-log-section-title">Structured fields <span>{{ detailAttributes(log).length }}</span></div>
+            <div v-if="detailAttributes(logRow(row)).length" class="slt-log-fields">
+              <div class="slt-log-section-title">Structured fields <span>{{ detailAttributes(logRow(row)).length }}</span></div>
               <div class="slt-log-field-grid">
-                <div v-for="([key, value]) in detailAttributes(log)" :key="key" class="slt-log-field">
+                <div v-for="([key, value]) in detailAttributes(logRow(row))" :key="key" class="slt-log-field">
                   <span class="slt-log-field-key">{{ key }}</span>
                   <span class="slt-log-field-value mono" :title="formatAttribute(value)">{{ formatAttribute(value) }}</span>
                 </div>
@@ -617,14 +643,16 @@ onBeforeUnmount(() => loadMoreObserver?.disconnect())
 
             <div class="slt-log-detail-footer">
               <div class="slt-log-correlation">
-                <span>trace <strong class="mono">{{ log.traceId.slice(0, 16) }}</strong></span>
-                <span>span <strong class="mono">{{ log.spanId.slice(0, 16) }}</strong></span>
-                <span v-if="log.durationNs">parent duration <strong class="mono">{{ formatDuration(log.durationNs) }}</strong></span>
+                <span>trace <strong class="mono">{{ String(row.traceId).slice(0, 16) }}</strong></span>
+                <span>span <strong class="mono">{{ String(row.spanId).slice(0, 16) }}</strong></span>
+                <span v-if="row.durationNs">parent duration <strong class="mono">{{ formatDuration(Number(row.durationNs)) }}</strong></span>
               </div>
-              <router-link :to="`/trace/${log.traceId}`" class="slt-view-trace" @click.stop>View correlated trace →</router-link>
+              <router-link :to="`/trace/${String(row.traceId)}`" class="slt-view-trace" @click.stop>View correlated trace →</router-link>
             </div>
           </div>
-        </div>
+        </template>
+      </DataTable>
+      <template v-if="logs.length">
         <div
           v-if="!searchActive && (hasMore || loadingMore)"
           ref="loadMoreRef"

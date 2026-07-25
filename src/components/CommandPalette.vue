@@ -96,6 +96,7 @@ const actions = computed<PaletteAction[]>(() => {
     { id: 'auth',         label: 'Auth' },
     { id: 'links',        label: 'Service Links' },
     { id: 'integrations', label: 'Integrations' },
+    { id: 'config',       label: 'Configuration' },
     { id: 'tenants',      label: 'Tenants' },
     { id: 'users',        label: 'Users' },
     { id: 'groups',       label: 'Groups' },

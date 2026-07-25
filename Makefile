@@ -1,28 +1,34 @@
-.PHONY: dev build preview install test clean docker up down lint typecheck help
+.PHONY: dev build preview install ensure-deps test clean docker up down lint typecheck help
 
 ## Development
 
 install:              ## Install dependencies
 	npm install
 
-dev:                  ## Start dev server on :5173 (proxies /api to query-api)
+ensure-deps:          ## Repair/install dependencies when the local install is incomplete
+	@if [ ! -f node_modules/vite/bin/vite.js ]; then \
+		echo "web-ui dependencies are missing or incomplete; running npm install..."; \
+		npm install; \
+	fi
+
+dev: ensure-deps       ## Start dev server on :5173 (proxies /api to query-api)
 	npm run dev
 
-build:                ## Type-check and build for production
+build: ensure-deps     ## Type-check and build for production
 	npm run build
 
-preview:              ## Preview production build locally
+preview: ensure-deps   ## Preview production build locally
 	npm run preview
 
 ## Quality
 
-test:                 ## Run unit tests (vitest)
+test: ensure-deps      ## Run unit tests (vitest)
 	npm test
 
-typecheck:            ## Run vue-tsc type checking
+typecheck: ensure-deps ## Run vue-tsc type checking
 	npx vue-tsc --noEmit
 
-lint:                 ## Lint with vue-tsc
+lint: ensure-deps      ## Lint with vue-tsc
 	npx vue-tsc --noEmit
 
 ## Docker

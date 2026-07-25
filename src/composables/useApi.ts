@@ -1397,6 +1397,15 @@ export function useApi() {
     return await request('/features')
   }
 
+  async function getRuntimeConfig(): Promise<{
+    tenant: string
+    runtime: Array<{ key: string; value: string | null; configured: boolean; sensitive: boolean; source: 'environment' | 'default' }>
+    license: LicenseStatus
+    integrations: Array<{ id: string; name: string; entitlement: string; compiled: boolean; licensed: boolean; loaded: boolean; manager_enabled: boolean; configured_targets: number }>
+  }> {
+    return await request('/settings/config')
+  }
+
   async function getDeployMarkersSetting(): Promise<{ enabled: boolean }> {
     return await request('/settings/deploy-markers')
   }
@@ -1599,7 +1608,7 @@ export function useApi() {
     listInvestigationSessions, getInvestigationSession, deleteInvestigationSession, listInvestigationTemplates,
     bubbleUp,
     listMonitors, getMonitor, createMonitor, updateMonitor, deleteMonitor, listMonitorEvents, previewMonitor, muteMonitor, unmuteMonitor, monitorAutocomplete, monitorSuggest,
-    getFeatures, setExportMaxRows, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, setSreAgentTenantAccess, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
+    getFeatures, getRuntimeConfig, setExportMaxRows, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, setSreAgentTenantAccess, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
     listMetricFirewall, createMetricFirewall, updateMetricFirewall, deleteMetricFirewall,
   }
 }

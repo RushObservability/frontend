@@ -72,7 +72,7 @@ function saveKubernetes() {
 }
 
 // ── Tab navigation ──
-type TabId = 'keys' | 'auth' | 'links' | 'integrations' | 'agent' | 'tenants' | 'retention' | 'groups' | 'users' | 'alerting' | 'general' | 'firewall' | 'license' | 'stats'
+type TabId = 'keys' | 'auth' | 'links' | 'integrations' | 'agent' | 'tenants' | 'retention' | 'groups' | 'users' | 'alerting' | 'general' | 'firewall' | 'license' | 'stats' | 'config'
 type AgentSubtabId = 'access' | 'models' | 'limits' | 'skills'
 interface TabDef {
   id: TabId
@@ -82,6 +82,7 @@ interface TabDef {
 }
 const tabs: TabDef[] = [
   { id: 'general',      label: 'General',       group: 'Workspace',         hint: 'Workspace-wide preferences and defaults.' },
+  { id: 'config',       label: 'Configuration', group: 'Workspace',         hint: 'Runtime wiring, loaded integrations, and redacted secrets.' },
   { id: 'license',      label: 'License',       group: 'Workspace',         hint: 'License status and entitled add-ons. Set RUSH_LICENSE_KEY to license this instance.' },
   { id: 'integrations', label: 'Integrations',  group: 'Workspace',         hint: 'Connect external tools and observability add-ons.' },
   { id: 'agent',        label: 'AI Agent',      group: 'Workspace',         hint: 'Custom investigation playbooks the SRE agent loads on demand.' },
@@ -119,6 +120,48 @@ const integrationsExpanded = ref(false)
 const activeIntegration = ref<string>('') // '' = overview table
 const license = ref<LicenseStatus | null>(null)
 const licenseLoading = ref(false)
+
+interface RuntimeConfigEntry {
+  key: string
+  value: string | null
+  configured: boolean
+  sensitive: boolean
+  source: 'environment' | 'default'
+}
+interface RuntimeIntegration {
+  id: string
+  name: string
+  entitlement: string
+  compiled: boolean
+  licensed: boolean
+  loaded: boolean
+  manager_enabled: boolean
+  configured_targets: number
+}
+interface RuntimeConfig {
+  tenant: string
+  runtime: RuntimeConfigEntry[]
+  license: LicenseStatus
+  integrations: RuntimeIntegration[]
+}
+const runtimeConfig = ref<RuntimeConfig | null>(null)
+const runtimeConfigLoading = ref(false)
+const runtimeConfigError = ref('')
+const loadedIntegrationCount = computed(() => runtimeConfig.value?.integrations.filter(item => item.loaded).length ?? 0)
+const configuredSecretCount = computed(() => runtimeConfig.value?.runtime.filter(item => item.sensitive && item.configured).length ?? 0)
+
+async function loadRuntimeConfig() {
+  if (runtimeConfigLoading.value) return
+  runtimeConfigLoading.value = true
+  runtimeConfigError.value = ''
+  try {
+    runtimeConfig.value = await api.getRuntimeConfig()
+  } catch (error: any) {
+    runtimeConfigError.value = error?.message || 'Unable to load runtime configuration.'
+  } finally {
+    runtimeConfigLoading.value = false
+  }
+}
 
 // Status per integration: helm-gated ones (argocd/fluxcd/kubernetes) are
 // "unavailable" unless their Helm feature flag is on; licensed add-ons are
@@ -188,6 +231,7 @@ function navHash(hash: string) {
 function setTab(id: TabId) {
   activeTab.value = id
   navHash(id === 'agent' ? `#agent/${activeAgentSubtab.value}` : `#${id}`)
+  if (id === 'config' && !runtimeConfig.value) loadRuntimeConfig()
   if (id === 'alerting' && !alertChannelsLoaded.value) {
     loadAlertChannels()
   }
@@ -275,6 +319,7 @@ function onHashChange() {
     activeIntegration.value = integrationsMeta.some(m => m.key === sub) ? sub : ''
   }
   if (tab === 'agent') activeAgentSubtab.value = validAgentSubtab(sub)
+  if (tab === 'config' && !runtimeConfig.value) loadRuntimeConfig()
 }
 
 // ── Data export (max rows) ──
@@ -2209,6 +2254,7 @@ onMounted(async () => {
   if (isAdmin.value) loadCloudwatchSetting()
   loadFeatures()
   loadLicense()
+  if (activeTab.value === 'config') loadRuntimeConfig()
   // Deep-link directly onto #agent (or #firewall) skips switchTab — load here.
   if (activeTab.value === 'agent') loadAgentBudget()
   if (activeTab.value === 'firewall' && !firewallLoaded.value) loadFirewallRules()
@@ -3479,6 +3525,94 @@ function formatDate(ts: string): string {
           </div>
         </template>
       </div>
+      </template>
+    </div>
+
+    <!-- Runtime Configuration Section -->
+    <div
+      v-show="activeTab === 'config'"
+      id="panel-config"
+      class="section"
+      role="tabpanel"
+    >
+      <div v-if="runtimeConfigLoading" class="config-loading" role="status">Loading runtime configuration…</div>
+      <div v-else-if="runtimeConfigError" class="config-error" role="alert">
+        <div class="config-error-title">Configuration unavailable</div>
+        <div>{{ runtimeConfigError }}</div>
+        <button class="btn btn-secondary btn-sm" @click="loadRuntimeConfig">Retry</button>
+      </div>
+      <template v-else-if="runtimeConfig">
+        <div class="config-summary" aria-label="Configuration summary">
+          <div class="config-summary-item">
+            <span class="config-summary-label">Tenant scope</span>
+            <strong class="config-summary-value mono">{{ runtimeConfig.tenant }}</strong>
+          </div>
+          <div class="config-summary-item">
+            <span class="config-summary-label">Loaded integrations</span>
+            <strong class="config-summary-value">{{ loadedIntegrationCount }}</strong>
+          </div>
+          <div class="config-summary-item">
+            <span class="config-summary-label">Secrets</span>
+            <strong class="config-summary-value">{{ configuredSecretCount }} configured</strong>
+          </div>
+          <div class="config-summary-item">
+            <span class="config-summary-label">License</span>
+            <strong class="config-summary-value config-summary-status" :class="`is-${runtimeConfig.license.status}`">
+              {{ runtimeConfig.license.status }}
+            </strong>
+          </div>
+        </div>
+
+        <div class="set-card config-card">
+          <div class="set-card-head">
+            <h2 class="card-title">Loaded integrations</h2>
+            <p class="card-desc">Build-time availability, license state, and active configuration for this instance.</p>
+          </div>
+          <div class="config-integrations">
+            <div v-for="integration in runtimeConfig.integrations" :key="integration.id" class="config-integration">
+              <div class="config-integration-mark" :class="{ 'is-loaded': integration.loaded }"></div>
+              <div class="config-integration-copy">
+                <div class="config-integration-name">{{ integration.name }}</div>
+                <div class="config-integration-id mono">{{ integration.id }} · requires {{ integration.entitlement }}</div>
+              </div>
+              <div class="config-integration-meta">
+                <span class="config-pill" :class="integration.compiled ? 'is-on' : 'is-off'">
+                  {{ integration.compiled ? 'Included' : 'Not included' }}
+                </span>
+                <span class="config-pill" :class="integration.licensed ? 'is-on' : 'is-off'">
+                  {{ integration.licensed ? 'Licensed' : 'Not licensed' }}
+                </span>
+                <span class="config-pill" :class="integration.manager_enabled ? 'is-on' : 'is-off'">
+                  {{ integration.manager_enabled ? 'Supervisor on' : 'Supervisor off' }}
+                </span>
+                <span v-if="integration.configured_targets" class="config-target-count">
+                  {{ integration.configured_targets }} target{{ integration.configured_targets === 1 ? '' : 's' }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="set-card config-card">
+          <div class="set-card-head">
+            <h2 class="card-title">Runtime configuration</h2>
+            <p class="card-desc">Values are read from the running query-api process. Secret values are intentionally never returned.</p>
+          </div>
+          <div class="config-table" role="table" aria-label="Runtime configuration values">
+            <div class="config-table-row config-table-head" role="row">
+              <span role="columnheader">Setting</span>
+              <span role="columnheader">Value</span>
+              <span role="columnheader">Source</span>
+            </div>
+            <div v-for="entry in runtimeConfig.runtime" :key="entry.key" class="config-table-row" role="row">
+              <code class="config-key" role="cell">{{ entry.key }}</code>
+              <span role="cell" :class="['config-value', { 'is-secret': entry.sensitive }]">
+                {{ entry.sensitive ? (entry.configured ? 'Configured' : 'Not set') : (entry.value || 'Not set') }}
+              </span>
+              <span class="config-source" role="cell">{{ entry.source }}</span>
+            </div>
+          </div>
+        </div>
       </template>
     </div>
 

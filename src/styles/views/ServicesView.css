@@ -20,8 +20,14 @@
 .refresh-btn:hover { border-color: var(--amber); color: var(--amber); }
 .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.col-name { display: flex; align-items: center; gap: var(--sp-2); }
-td.col-name { font-weight: 500; }
+.services-view :deep(.data-table td) { padding-block: var(--sp-5); }
+.services-view :deep(td.col-name) {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-weight: 500;
+}
+.services-view :deep(td.col-name .svc-dot) { flex: 0 0 auto; }
 .col-num { text-align: right; }
 .col-health { width: 100px; }
 

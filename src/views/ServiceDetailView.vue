@@ -5,6 +5,7 @@ import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
 import { useTenant } from '../composables/useTenant'
 import SpanLogTable from '../components/SpanLogTable.vue'
+import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 import TimePicker from '../components/TimePicker.vue'
 import PanelCard from '../components/PanelCard.vue'
 import TimeseriesWidget from '../components/widgets/TimeseriesWidget.vue'
@@ -961,10 +962,45 @@ function setEpSort(key: EpSortKey) {
     epSortDir.value = key === 'endpoint' ? 'asc' : 'desc'
   }
 }
-function epSortIndicator(key: EpSortKey): string {
-  if (epSortKey.value !== key) return ''
-  return epSortDir.value === 'asc' ? ' ▲' : ' ▼'
+const endpointTableColumns = computed<DataTableColumn[]>(() => [
+  { key: 'endpoint', label: endpointsMode.value === 'server' ? 'Endpoint' : 'Operation', sortable: true },
+  { key: 'impact', label: 'Impact', align: 'right', sortable: true, headerClass: 'svc-table-impact' },
+  { key: 'req', label: 'Req', align: 'right', sortable: true },
+  { key: 'rate', label: 'Rate', align: 'right' },
+  { key: 'errRate', label: 'Err%', align: 'right', sortable: true },
+  { key: 'p50_ms', label: 'P50', align: 'right', sortable: true },
+  { key: 'p95_ms', label: 'P95', align: 'right', sortable: true },
+  { key: 'p99_ms', label: 'P99', align: 'right', sortable: true },
+])
+
+function onEndpointTableSort(key: string) {
+  if (key === 'endpoint' || key === 'impact' || key === 'req' || key === 'errRate' || key === 'p50_ms' || key === 'p95_ms' || key === 'p99_ms') {
+    setEpSort(key)
+  }
 }
+
+function endpointRow(row: Record<string, unknown>): EndpointRow {
+  return row as unknown as EndpointRow
+}
+
+function onEndpointTableRowClick(row: Record<string, unknown>) {
+  exploreEndpoint(endpointRow(row))
+}
+
+const errorTableColumns = computed<DataTableColumn[]>(() => [
+  { key: 'error', label: errorsMode.value === 'endpoint' ? 'Error' : 'Message' },
+  { key: 'count', label: 'Count', align: 'right' },
+  { key: 'last_seen', label: 'Last seen', align: 'right' },
+])
+
+const errorTableRows = computed(() => errorGroups.value.map((group) => ({ ...group, error: group.key })))
+
+function onErrorTableRowClick(row: Record<string, unknown>) {
+  const key = String(row.key ?? '')
+  const group = errorGroups.value.find((candidate) => candidate.key === key)
+  if (group) exploreError(group)
+}
+
 // Drill into Explore filtered to this endpoint/operation for the same window.
 function exploreEndpoint(e: EndpointRow) {
   const parts = [`service_name=${serviceName.value}`]
@@ -1186,6 +1222,7 @@ async function loadSvcFunnels() {
     if (svcFunnels.value.length > 0 && !svcFunnelSel.value) {
       svcFunnelSel.value = svcFunnels.value[0]!
     }
+    if (svcFunnelSel.value) await runSvcFunnel()
   } catch { /* silent */ }
 }
 
@@ -1193,6 +1230,7 @@ function selectSvcFunnel(f: Funnel) {
   svcFunnelSel.value = f
   svcFunnelRes.value = null
   svcFunnelErr.value = null
+  void runSvcFunnel()
 }
 
 async function runSvcFunnel() {
@@ -1256,49 +1294,38 @@ async function createSvcFunnel() {
   }
 }
 
-// ── SVG funnel geometry ──
-const SF_CX      = 150   // center X in the 300-wide SVG
-const SF_STEP_H  = 52    // height of each band
-const SF_TAPER_H = 14    // height of taper between bands
-const SF_MAX_HW  = 138   // half-width at 100%
-const SF_MIN_HW  = 6     // minimum half-width (for near-zero steps)
+function svcFunnelStepMeta(index: number): string {
+  const step = svcFunnelSel.value?.steps[index]
+  if (!step) return 'Trace match'
+  const status = step.min_status_code || step.max_status_code
+    ? `status ${step.min_status_code ?? 'any'}–${step.max_status_code ?? 'any'}`
+    : ''
+  return [step.service_name || 'any service', step.http_path_prefix || 'all paths', status]
+    .filter(Boolean)
+    .join(' · ')
+}
 
-function sfHalfW(pct: number): number {
-  return Math.max((pct / 100) * SF_MAX_HW, SF_MIN_HW)
+function sfStageClass(pct: number): string {
+  if (pct >= 85) return 'sf-stage-good'
+  if (pct >= 65) return 'sf-stage-watch'
+  return 'sf-stage-drop'
 }
-function sfBandY(i: number): number {
-  return i * (SF_STEP_H + SF_TAPER_H)
+
+function sfPctLabel(step: FunnelResult['steps'][0], index: number): string {
+  return index === 0 ? '100%' : `${step.pct_of_first.toFixed(1)}%`
 }
-function sfBandRect(i: number, pct: number): { x: number; y: number; w: number; h: number } {
-  const hw = sfHalfW(pct)
-  return { x: SF_CX - hw, y: sfBandY(i), w: hw * 2, h: SF_STEP_H }
+
+function sfLastPct(steps: FunnelResult['steps']): number {
+  return steps[steps.length - 1]?.pct_of_first ?? 0
 }
-function sfTaperPoints(i: number, pctTop: number, pctBot: number): string {
-  const yT  = sfBandY(i) + SF_STEP_H
-  const yB  = yT + SF_TAPER_H
-  const hwT = sfHalfW(pctTop)
-  const hwB = sfHalfW(pctBot)
-  return `${SF_CX - hwT},${yT} ${SF_CX + hwT},${yT} ${SF_CX + hwB},${yB} ${SF_CX - hwB},${yB}`
+
+function sfConversionLabel(steps: FunnelResult['steps']): string {
+  const last = steps[steps.length - 1]
+  return last ? sfPctLabel(last, steps.length - 1) : '—'
 }
-function sfTotalH(n: number): number {
-  return n * SF_STEP_H + (n - 1) * SF_TAPER_H
-}
-function sfColor(pct: number): string {
-  if (pct >= 85) return '#22c55e'
-  if (pct >= 65) return '#84cc16'
-  if (pct >= 45) return '#f59e0b'
-  if (pct >= 25) return '#f97316'
-  return '#ef4444'
-}
-function sfFill(pct: number): string {
-  if (pct >= 85) return 'rgba(34,197,94,0.16)'
-  if (pct >= 65) return 'rgba(132,204,22,0.16)'
-  if (pct >= 45) return 'rgba(245,158,11,0.16)'
-  if (pct >= 25) return 'rgba(249,115,22,0.16)'
-  return 'rgba(239,68,68,0.16)'
-}
-function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
-  return i === 0 ? '100%' : step.pct_of_first.toFixed(1) + '%'
+
+function sfTotalLoss(steps: FunnelResult['steps']): number {
+  return Math.max((steps[0]?.count ?? 0) - (steps[steps.length - 1]?.count ?? 0), 0)
 }
 
 
@@ -1757,7 +1784,7 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
       <!-- ░░░░ ENDPOINTS ░░░░ — per-endpoint RED + top errors -->
       <section v-show="activeTab === 'endpoints'" class="svc-panel">
       <!-- ═══ Endpoints / Top Errors (tabbed) ═══ -->
-      <div class="svc-tabs card" ref="tabsCardRef">
+      <div class="svc-tabs card service-table-frame" ref="tabsCardRef">
         <div class="ep-header">
           <div class="svc-tab-row">
             <button class="svc-tab" :class="{ active: activeServiceTab === 'endpoints' }" @click="setServiceTab('endpoints')">Endpoints</button>
@@ -1784,41 +1811,38 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
             <span aria-hidden="true">◎</span>
             Impact estimates user exposure from traffic × p95 latency × error rate. Higher-impact rows are the best starting point.
           </div>
-          <table class="ep-table">
-            <thead>
-              <tr>
-                <th class="ep-th-name sortable" @click="setEpSort('endpoint')">{{ endpointsMode === 'server' ? 'Endpoint' : 'Operation' }}<span class="ep-sort">{{ epSortIndicator('endpoint') }}</span></th>
-                <th class="sortable ep-th-impact" title="Share of modeled impact: traffic × p95 latency × error-rate penalty" @click="setEpSort('impact')">Impact<span class="ep-sort">{{ epSortIndicator('impact') }}</span></th>
-                <th class="sortable" @click="setEpSort('req')">Req<span class="ep-sort">{{ epSortIndicator('req') }}</span></th>
-                <th>Rate</th>
-                <th class="sortable" @click="setEpSort('errRate')">Err%<span class="ep-sort">{{ epSortIndicator('errRate') }}</span></th>
-                <th class="sortable" @click="setEpSort('p50_ms')">P50<span class="ep-sort">{{ epSortIndicator('p50_ms') }}</span></th>
-                <th class="sortable" @click="setEpSort('p95_ms')">P95<span class="ep-sort">{{ epSortIndicator('p95_ms') }}</span></th>
-                <th class="sortable" @click="setEpSort('p99_ms')">P99<span class="ep-sort">{{ epSortIndicator('p99_ms') }}</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="e in sortedEndpoints" :key="e.endpoint" class="ep-row" @click="exploreEndpoint(e)" title="Open in Explore">
-                <td class="ep-name">
-                  <span class="ep-dot" :style="{ background: epColor(e) }"></span>
-                  <span v-if="e.method" class="ep-method">{{ e.method }}</span>
-                  <span class="mono ep-path">{{ endpointsMode === 'server' ? (e.path || '/') : e.endpoint }}</span>
-                </td>
-                <td class="ep-impact">
-                  <div class="ep-impact-value">
-                    <span class="mono">{{ formatImpactShare(e) }}</span>
-                    <span class="ep-impact-track" aria-hidden="true"><span :style="{ width: `${Math.max(epImpactShare(e) * 100, 1)}%` }" /></span>
-                  </div>
-                </td>
-                <td class="mono">{{ formatCount(e.req) }}</td>
-                <td class="mono ep-sub">{{ formatRps(epRps(e)) }}</td>
-                <td class="mono" :style="{ color: epColor(e) }">{{ formatPercent(epErrorRate(e)) }}</td>
-                <td class="mono">{{ formatMs(e.p50_ms) }}</td>
-                <td class="mono">{{ formatMs(e.p95_ms) }}</td>
-                <td class="mono">{{ formatMs(e.p99_ms) }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <DataTable
+            class="svc-breakdown-table svc-breakdown-table--wide"
+            bare
+            :columns="endpointTableColumns"
+            :rows="sortedEndpoints"
+            row-key="endpoint"
+            :sort-key="epSortKey"
+            :sort-direction="epSortDir"
+            clickable-rows
+            @sort="onEndpointTableSort"
+            @row-click="onEndpointTableRowClick"
+          >
+            <template #cell-endpoint="{ row }">
+              <div class="ep-name">
+                <span class="ep-dot" :style="{ background: epColor(endpointRow(row)) }"></span>
+                <span v-if="row.method" class="ep-method">{{ row.method }}</span>
+                <span class="mono ep-path">{{ endpointsMode === 'server' ? (row.path || '/') : row.endpoint }}</span>
+              </div>
+            </template>
+            <template #cell-impact="{ row }">
+              <div class="ep-impact-value">
+                <span class="mono">{{ formatImpactShare(endpointRow(row)) }}</span>
+                <span class="ep-impact-track" aria-hidden="true"><span :style="{ width: `${Math.max(epImpactShare(endpointRow(row)) * 100, 1)}%` }" /></span>
+              </div>
+            </template>
+            <template #cell-req="{ row }"><span class="mono">{{ formatCount(Number(row.req)) }}</span></template>
+            <template #cell-rate="{ row }"><span class="mono ep-sub">{{ formatRps(epRps(endpointRow(row))) }}</span></template>
+            <template #cell-errRate="{ row }"><span class="mono" :style="{ color: epColor(endpointRow(row)) }">{{ formatPercent(epErrorRate(endpointRow(row))) }}</span></template>
+            <template #cell-p50_ms="{ row }"><span class="mono">{{ formatMs(Number(row.p50_ms)) }}</span></template>
+            <template #cell-p95_ms="{ row }"><span class="mono">{{ formatMs(Number(row.p95_ms)) }}</span></template>
+            <template #cell-p99_ms="{ row }"><span class="mono">{{ formatMs(Number(row.p99_ms)) }}</span></template>
+          </DataTable>
           </div>
         </template>
 
@@ -1828,32 +1852,33 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
           <div v-else-if="errorGroups.length === 0" class="ep-empty text-muted">
             {{ errorsMode === 'endpoint' ? 'No errors in this window' : 'No error/warn logs in this window' }}
           </div>
-          <table v-else class="ep-table">
-            <thead>
-              <tr>
-                <th class="ep-th-name">{{ errorsMode === 'endpoint' ? 'Error' : 'Message' }}</th>
-                <th>Count</th>
-                <th>Last seen</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="g in errorGroups" :key="g.key" class="ep-row" @click="exploreError(g)" title="Open in Explore">
-                <td class="ep-name">
+          <div v-else class="ep-table-wrap">
+            <DataTable
+              class="svc-breakdown-table"
+              bare
+              :columns="errorTableColumns"
+              :rows="errorTableRows"
+              row-key="key"
+              clickable-rows
+              @row-click="onErrorTableRowClick"
+            >
+              <template #cell-error="{ row }">
+                <div class="ep-name">
                   <template v-if="errorsMode === 'endpoint'">
-                    <span class="err-badge" :style="{ color: errStatusColor(g.status_code), borderColor: errStatusColor(g.status_code) }">{{ g.status_code }}</span>
-                    <span v-if="g.method" class="ep-method">{{ g.method }}</span>
-                    <span class="mono ep-path">{{ g.path }}</span>
+                    <span class="err-badge" :style="{ color: errStatusColor(Number(row.status_code)), borderColor: errStatusColor(Number(row.status_code)) }">{{ row.status_code }}</span>
+                    <span v-if="row.method" class="ep-method">{{ row.method }}</span>
+                    <span class="mono ep-path">{{ row.path }}</span>
                   </template>
                   <template v-else>
-                    <span class="err-badge" :style="{ color: errSeverityColor(g.severity), borderColor: errSeverityColor(g.severity) }">{{ g.severity }}</span>
-                    <span class="mono err-msg" :title="g.example">{{ g.key }}</span>
+                    <span class="err-badge" :style="{ color: errSeverityColor(String(row.severity)), borderColor: errSeverityColor(String(row.severity)) }">{{ row.severity }}</span>
+                    <span class="mono err-msg" :title="String(row.example)">{{ row.key }}</span>
                   </template>
-                </td>
-                <td class="mono">{{ formatCount(g.count) }}</td>
-                <td class="mono ep-sub">{{ relTime(g.last_seen) }}</td>
-              </tr>
-            </tbody>
-          </table>
+                </div>
+              </template>
+              <template #cell-count="{ row }"><span class="mono">{{ formatCount(Number(row.count)) }}</span></template>
+              <template #cell-last_seen="{ row }"><span class="mono ep-sub">{{ relTime(String(row.last_seen)) }}</span></template>
+            </DataTable>
+          </div>
         </template>
 
       </div>
@@ -1861,7 +1886,7 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
 
       <!-- ░░░░ SPANS ░░░░ — recent spans for this service -->
       <section v-show="activeTab === 'spans'" class="svc-panel">
-        <div class="svc-tab-logs">
+        <div class="svc-tab-logs service-table-frame">
           <SpanLogTable
             force-mode="spans"
             :spans="traces"
@@ -1877,7 +1902,7 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
 
       <!-- ░░░░ LOGS ░░░░ — APM log lines extracted from span events -->
       <section v-show="activeTab === 'logs'" class="svc-panel">
-        <div class="svc-tab-logs">
+        <div class="svc-tab-logs service-table-frame">
           <SpanLogTable
             force-mode="logs"
             :spans="logTraces"
@@ -1906,27 +1931,29 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
               <path d="M1 2h12l-5 6v4l-2-1V8L1 2z" stroke="currentColor" stroke-width="1.4"
                     stroke-linejoin="round" fill="none"/>
             </svg>
-            Trace Funnels
+            <span>Trace funnels</span>
+            <span class="sf-scope">/ {{ serviceName }}</span>
           </div>
           <div class="sf-header-right">
             <template v-if="svcFunnelSel">
               <div class="sf-range-row">
-                <button
-                  v-for="opt in RANGE_OPTS" :key="opt.v"
-                  class="sf-range-btn" :class="{ active: svcFunnelRange === opt.v }"
-                  @click="svcFunnelRange = opt.v"
-                >{{ opt.l }}</button>
+              <button
+                v-for="opt in RANGE_OPTS" :key="opt.v"
+                class="sf-range-btn" :class="{ active: svcFunnelRange === opt.v }"
+                @click="svcFunnelRange = opt.v; runSvcFunnel()"
+              >{{ opt.l }}</button>
               </div>
               <button class="sf-run-btn" @click="runSvcFunnel" :disabled="svcFunnelBusy">
-                <span v-if="svcFunnelBusy" class="sf-spinner">⟳</span>
-                <span v-else>▶ Run</span>
+                <span v-if="svcFunnelBusy" class="sf-spinner" aria-hidden="true"></span>
+                <span v-if="svcFunnelBusy">Running</span>
+                <span v-else>Run analysis</span>
               </button>
             </template>
             <button
               class="sf-new-btn"
               :class="{ active: svcFunnelShowCreate }"
               @click="svcFunnelShowCreate = !svcFunnelShowCreate; if (svcFunnelShowCreate) initSvcFunnelSteps()"
-            >{{ svcFunnelShowCreate ? '✕' : '+ New' }}</button>
+            >{{ svcFunnelShowCreate ? 'Close' : 'New funnel' }}</button>
           </div>
         </div>
 
@@ -1978,83 +2005,83 @@ function sfPctLabel(step: FunnelResult['steps'][0], i: number): string {
         <!-- Error -->
         <div v-if="svcFunnelErr" class="sf-err-msg">{{ svcFunnelErr }}</div>
 
-        <!-- ── Result visualization ── -->
-        <div v-if="svcFunnelRes" class="sf-result">
-          <div class="sf-funnel-layout">
-            <!-- Left: step labels -->
-            <div class="sf-labels">
-              <div
-                v-for="(step, i) in svcFunnelRes.steps" :key="i"
-                class="sf-label-cell"
-                :style="{ height: SF_STEP_H + 'px', marginBottom: i < svcFunnelRes.steps.length - 1 ? SF_TAPER_H + 'px' : '0' }"
-              >
-                <span class="sf-label-num">{{ i + 1 }}</span>
-                <span class="sf-label-text">{{ step.label }}</span>
-              </div>
+        <div v-if="svcFunnelBusy" class="sf-loading" role="status">
+          <span class="sf-loading-mark"></span>
+          <span>Reading trace progression for the selected window…</span>
+        </div>
+
+        <div v-else-if="svcFunnelRes" class="sf-result">
+          <div class="sf-result-header">
+            <div class="sf-result-title">
+              <span class="sf-kicker">Trace progression</span>
+              <strong>{{ svcFunnelSel?.name }}</strong>
+              <span class="sf-result-window">last {{ svcFunnelRange === 60 ? '1h' : svcFunnelRange === 360 ? '6h' : svcFunnelRange === 1440 ? '24h' : '7d' }}</span>
             </div>
-
-            <!-- Center: SVG funnel -->
-            <svg
-              :viewBox="`0 0 300 ${sfTotalH(svcFunnelRes.steps.length)}`"
-              :height="sfTotalH(svcFunnelRes.steps.length)"
-              width="300"
-              class="sf-funnel-svg"
-              preserveAspectRatio="xMidYMin meet"
-            >
-              <template v-for="(step, i) in svcFunnelRes.steps" :key="i">
-                <!-- Band -->
-                <rect
-                  :x="sfBandRect(i, step.pct_of_first).x"
-                  :y="sfBandRect(i, step.pct_of_first).y"
-                  :width="sfBandRect(i, step.pct_of_first).w"
-                  :height="sfBandRect(i, step.pct_of_first).h"
-                  :fill="sfFill(step.pct_of_first)"
-                  :stroke="sfColor(step.pct_of_first)"
-                  stroke-width="1.5"
-                  rx="3"
-                  class="sf-band"
-                  :style="{ animationDelay: `${i * 70}ms` }"
-                />
-                <!-- Taper to next step -->
-                <polygon
-                  v-if="i < svcFunnelRes.steps.length - 1"
-                  :points="sfTaperPoints(i, step.pct_of_first, svcFunnelRes.steps[i + 1]!.pct_of_first)"
-                  :fill="sfFill(step.pct_of_first)"
-                  fill-opacity="0.45"
-                  stroke="none"
-                  class="sf-taper"
-                  :style="{ animationDelay: `${i * 70 + 35}ms` }"
-                />
-                <!-- Count label inside band -->
-                <text
-                  :x="SF_CX"
-                  :y="sfBandY(i) + SF_STEP_H / 2"
-                  text-anchor="middle"
-                  dominant-baseline="central"
-                  class="sf-band-count"
-                >{{ step.count.toLocaleString() }}</text>
-              </template>
-            </svg>
-
-            <!-- Right: pct + drop-off -->
-            <div class="sf-stats">
-              <div
-                v-for="(step, i) in svcFunnelRes.steps" :key="i"
-                class="sf-stat-cell"
-                :style="{ height: SF_STEP_H + 'px', marginBottom: i < svcFunnelRes.steps.length - 1 ? SF_TAPER_H + 'px' : '0' }"
-              >
-                <span class="sf-stat-pct" :style="{ color: sfColor(i === 0 ? 100 : step.pct_of_first) }">
-                  {{ sfPctLabel(step, i) }}
-                </span>
-                <span v-if="i > 0" class="sf-stat-drop">
-                  −{{ step.drop_off.toLocaleString() }}
-                </span>
-                <span v-if="i > 0" class="sf-stat-prev">
-                  {{ step.pct_of_prev.toFixed(0) }}% of prev
-                </span>
+            <div class="sf-summary" aria-label="Funnel summary">
+              <div class="sf-summary-item">
+                <span>Conversion</span>
+                <strong :class="sfStageClass(sfLastPct(svcFunnelRes.steps))">
+                  {{ sfConversionLabel(svcFunnelRes.steps) }}
+                </strong>
+              </div>
+              <div class="sf-summary-item">
+                <span>Observed</span>
+                <strong>{{ (svcFunnelRes.steps[0]?.count ?? 0).toLocaleString() }}</strong>
+                <small>distinct traces</small>
+              </div>
+              <div class="sf-summary-item">
+                <span>Lost</span>
+                <strong class="sf-loss">{{ sfTotalLoss(svcFunnelRes.steps).toLocaleString() }}</strong>
+                <small>through the path</small>
               </div>
             </div>
           </div>
+
+          <div class="sf-flow-head" aria-hidden="true">
+            <span>Stage</span>
+            <span>Trace volume</span>
+            <span>Share of entry</span>
+          </div>
+
+          <ol class="sf-stage-list">
+            <li
+              v-for="(step, i) in svcFunnelRes.steps" :key="i"
+              :class="['sf-stage', sfStageClass(i === 0 ? 100 : step.pct_of_first)]"
+            >
+              <div class="sf-stage-index">{{ String(i + 1).padStart(2, '0') }}</div>
+              <div class="sf-stage-copy">
+                <div class="sf-stage-label">
+                  <strong>{{ step.label }}</strong>
+                  <span v-if="i === 0" class="sf-entry-tag">entry</span>
+                </div>
+                <span class="sf-stage-meta">{{ svcFunnelStepMeta(i) }}</span>
+              </div>
+              <div class="sf-stage-volume">
+                <div class="sf-stage-track" aria-hidden="true">
+                  <span :style="{ width: `${Math.max(step.pct_of_first, 2)}%` }"></span>
+                </div>
+                <strong>{{ step.count.toLocaleString() }}</strong>
+              </div>
+              <div class="sf-stage-stats">
+                <strong>{{ sfPctLabel(step, i) }}</strong>
+                <span v-if="i > 0">−{{ step.drop_off.toLocaleString() }} from prior</span>
+                <span v-else>baseline</span>
+              </div>
+            </li>
+          </ol>
+
+          <div class="sf-result-note">
+            <span class="sf-note-rule"></span>
+            Counts represent distinct traces matching each stage in the selected window. Use the stage with the largest drop-off as the next investigation target.
+          </div>
+        </div>
+
+        <div v-else-if="svcFunnelSel && svcFunnelLoaded" class="sf-no-result">
+          <div>
+            <strong>Run this funnel against trace data</strong>
+            <span>Choose a time window, then inspect where traffic leaves the path.</span>
+          </div>
+          <button class="sf-run-btn" @click="runSvcFunnel">Run analysis</button>
         </div>
       </div>
       </section><!-- /funnels -->
