@@ -405,13 +405,13 @@ function targetLineY(geo: Geo = geoSmall): number {
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 2l4 3-4 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span class="sd-crumb-name">{{ slo.name }}</span>
       </div>
-      <button v-if="features.sre_agent" class="btn-investigate" @click="investigateSlo">Investigate</button>
-      <div class="sd-actions" v-if="canWrite">
-        <button class="sd-action-btn" @click="showEdit = !showEdit">
+      <div class="sd-actions" v-if="features.sre_agent || canWrite">
+        <button v-if="features.sre_agent" class="btn-investigate" @click="investigateSlo">Investigate</button>
+        <button v-if="canWrite" class="sd-action-btn" @click="showEdit = !showEdit">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M9.5 1.5l2 2L4 11H2V9L9.5 1.5z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           {{ showEdit ? 'Cancel' : 'Edit' }}
         </button>
-        <button class="sd-action-btn sd-action-danger" @click="showDeleteConfirm = true">
+        <button v-if="canWrite" class="sd-action-btn sd-action-danger" @click="showDeleteConfirm = true">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 4h9M4 4v7h5V4M5 2h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Delete
         </button>

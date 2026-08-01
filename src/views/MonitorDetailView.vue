@@ -92,10 +92,23 @@ function formatDate(ts: string | null): string {
   } catch { return ts }
 }
 
+function formatEventNumber(value: number | null): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '—'
+}
+
 const groupEntries = computed(() => {
   if (!monitor.value) return []
-  return Object.entries(monitor.value.group_states || {}).map(([key, state]) => ({ key, state }))
+  const statePriority: Record<string, number> = { alert: 0, warn: 1, no_data: 2, ok: 3 }
+  return Object.entries(monitor.value.group_states || {})
+    .map(([key, state]) => ({ key, state }))
+    .sort((a, b) => (statePriority[a.state] ?? 4) - (statePriority[b.state] ?? 4) || a.key.localeCompare(b.key))
 })
+
+const hasGroupBy = computed(() => Boolean(monitor.value?.group_by?.length))
+
+function formatGroupKey(key: string): string {
+  return key.trim() || 'All traffic'
+}
 
 // ── Live graph (standard TimeseriesWidget) ──
 // Map the preview timeseries to the widget's [epoch-seconds, value] series shape.
@@ -273,32 +286,83 @@ async function deleteMonitor() {
         </div>
       </PanelCard>
 
-      <!-- Group breakdown -->
-      <div v-if="groupEntries.length > 0" class="detail-section card">
-        <div class="section-title">Group Breakdown</div>
-        <table class="groups-table">
-          <thead>
-            <tr>
-              <th>Group Key</th>
-              <th>State</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="g in groupEntries" :key="g.key">
-              <td class="mono">{{ g.key }}</td>
-              <td>
-                <span class="group-state-badge" :style="{ color: stateColor(g.state) }">
-                  <span class="group-state-dot" :style="{ background: stateColor(g.state) }"></span>
-                  {{ stateLabel(g.state) }}
+      <!-- Grouped monitors: current groups with a compact event rail alongside -->
+      <div v-if="hasGroupBy" class="grouped-activity-layout">
+        <section class="detail-section card group-breakdown">
+          <div class="section-heading">
+            <div>
+              <div class="section-title">Group Breakdown</div>
+              <p class="section-description">Current state for each evaluated group.</p>
+            </div>
+            <div class="group-fields" aria-label="Group by fields">
+              <span class="group-fields-label">Group by</span>
+              <span v-for="field in monitor.group_by" :key="field" class="group-field mono">{{ field }}</span>
+            </div>
+          </div>
+
+          <div v-if="groupEntries.length === 0" class="groups-empty text-muted">
+            Waiting for the first grouped evaluation
+          </div>
+          <table v-else class="groups-table">
+            <thead>
+              <tr>
+                <th>Group</th>
+                <th>State</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="g in groupEntries" :key="g.key">
+                <td class="mono group-key-cell">{{ formatGroupKey(g.key) }}</td>
+                <td>
+                  <span class="group-state-badge" :style="{ color: stateColor(g.state) }">
+                    <span class="group-state-dot" :style="{ background: stateColor(g.state) }"></span>
+                    {{ stateLabel(g.state) }}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <aside class="detail-section card grouped-events" aria-label="Grouped monitor events">
+          <div class="section-heading event-rail-heading">
+            <div>
+              <div class="section-title">Events</div>
+              <p class="section-description">Recent state changes by group.</p>
+            </div>
+            <span class="event-count mono">{{ events.length }}</span>
+          </div>
+
+          <div v-if="events.length === 0" class="events-empty text-muted">
+            No state transition events yet
+          </div>
+          <div v-else class="event-rail">
+            <article v-for="ev in events" :key="ev.id" class="event-rail-item">
+              <div class="event-rail-meta">
+                <span class="event-state-dot" :style="{ background: stateColor(ev.new_state) }"></span>
+                <span class="transition-badge">
+                  <span :style="{ color: stateColor(ev.prev_state) }">{{ stateLabel(ev.prev_state) }}</span>
+                  <span class="transition-arrow">&rarr;</span>
+                  <span :style="{ color: stateColor(ev.new_state) }">{{ stateLabel(ev.new_state) }}</span>
                 </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                <time class="event-time mono text-muted">{{ formatDate(ev.created_at) }}</time>
+              </div>
+              <div class="event-group mono" :title="formatGroupKey(ev.group_key)">
+                {{ formatGroupKey(ev.group_key) }}
+              </div>
+              <div class="event-values mono text-muted">
+                value <span>{{ formatEventNumber(ev.value) }}</span>
+                <span class="event-value-divider">/</span>
+                threshold <span>{{ formatEventNumber(ev.threshold) }}</span>
+              </div>
+              <p v-if="ev.message" class="event-message" :title="ev.message">{{ ev.message }}</p>
+            </article>
+          </div>
+        </aside>
       </div>
 
-      <!-- Events table -->
-      <div class="detail-section card">
+      <!-- Ungrouped monitors keep the scan-friendly full-width event table -->
+      <div v-else class="detail-section card">
         <div class="section-title">Events</div>
         <div v-if="events.length === 0" class="events-empty text-muted">
           No state transition events yet
@@ -324,8 +388,8 @@ async function deleteMonitor() {
                   <span :style="{ color: stateColor(ev.new_state) }">{{ stateLabel(ev.new_state) }}</span>
                 </span>
               </td>
-              <td class="mono">{{ ev.value.toFixed(2) }}</td>
-              <td class="mono text-muted">{{ ev.threshold.toFixed(2) }}</td>
+              <td class="mono">{{ formatEventNumber(ev.value) }}</td>
+              <td class="mono text-muted">{{ formatEventNumber(ev.threshold) }}</td>
               <td class="mono text-muted">{{ ev.group_key || '-' }}</td>
               <td class="text-secondary" style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ ev.message || '-' }}</td>
             </tr>
@@ -508,6 +572,22 @@ async function deleteMonitor() {
   color: var(--text-muted);
   margin-bottom: var(--sp-3);
 }
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.section-heading .section-title {
+  margin-bottom: 3px;
+}
+.section-description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
 
 /* ── Chart ── */
 .live-graph-head {
@@ -585,7 +665,42 @@ async function deleteMonitor() {
   opacity: 1;
 }
 
-/* ── Groups table ── */
+/* ── Grouped activity ── */
+.grouped-activity-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(310px, 0.85fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.group-fields {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.group-fields-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.group-field {
+  padding: 2px 7px;
+  color: var(--amber);
+  background: var(--amber-dim);
+  border: 1px solid var(--amber-glow);
+  border-radius: var(--r-sm);
+  font-size: 10px;
+}
+.groups-empty {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--r-md);
+  font-size: 12px;
+}
 .groups-table {
   width: 100%;
   border-collapse: collapse;
@@ -608,6 +723,13 @@ async function deleteMonitor() {
 .groups-table tr:hover {
   background: var(--bg-hover);
 }
+.group-key-cell {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
 .group-state-badge {
   display: inline-flex;
   align-items: center;
@@ -620,6 +742,108 @@ async function deleteMonitor() {
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+/* ── Grouped event rail ── */
+.grouped-events {
+  min-width: 0;
+}
+.event-rail-heading {
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.event-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 7px;
+  color: var(--text-secondary);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-pill);
+  font-size: 10px;
+}
+.event-rail {
+  position: relative;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-left: 15px;
+}
+.event-rail::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 3px;
+  width: 1px;
+  background: var(--border-default);
+}
+.event-rail-item {
+  position: relative;
+  padding: 0 2px var(--sp-3) var(--sp-2);
+  margin-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.event-rail-item:last-child {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: 0;
+}
+.event-rail-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.event-state-dot {
+  position: absolute;
+  top: 5px;
+  left: -14px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--bg-surface);
+  border-radius: 50%;
+  box-sizing: content-box;
+}
+.event-time {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+}
+.event-group {
+  margin-top: 7px;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event-values {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 9px;
+}
+.event-values span:not(.event-value-divider) {
+  color: var(--text-secondary);
+}
+.event-value-divider {
+  color: var(--border-strong);
+}
+.event-message {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* ── Events table ── */
@@ -659,5 +883,34 @@ async function deleteMonitor() {
 }
 .transition-arrow {
   color: var(--text-muted);
+}
+
+@media (max-width: 980px) {
+  .grouped-activity-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .event-rail {
+    max-height: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .detail-header {
+    flex-direction: column;
+  }
+
+  .detail-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .section-heading {
+    flex-direction: column;
+  }
+
+  .group-fields {
+    justify-content: flex-start;
+  }
 }
 </style>

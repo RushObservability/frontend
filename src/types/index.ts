@@ -1309,8 +1309,8 @@ export interface MonitorEvent {
   group_key: string
   prev_state: string
   new_state: string
-  value: number
-  threshold: number
+  value: number | null
+  threshold: number | null
   message: string
   created_at: string
 }

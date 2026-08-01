@@ -96,6 +96,7 @@ function priorityLabel(p: number | null): string {
 }
 
 function groupCount(m: Monitor): number {
+  if (!m.group_by?.length) return 0
   return Object.keys(m.group_states || {}).length
 }
 
@@ -263,7 +264,7 @@ async function removeMonitor(id: string, ev: Event) {
             <div class="monitor-card-state">
               <span class="monitor-state-label mono" :style="{ color: stateColor(m.state) }">{{ stateLabel(m.state) }}</span>
               <span v-if="groupCount(m) > 0" class="monitor-group-count mono text-muted">
-                {{ groupCount(m) }} groups
+                {{ groupCount(m) }} group{{ groupCount(m) === 1 ? '' : 's' }}
               </span>
             </div>
             <div class="monitor-card-time text-muted mono">
