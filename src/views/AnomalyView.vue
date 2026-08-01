@@ -23,6 +23,7 @@ interface AnomalyConfig {
   id: string
   name: string
   description: string
+  enabled: boolean
   source: 'prometheus' | 'apm'
   pattern: string
   serviceName: string
@@ -58,6 +59,9 @@ const cursorFraction = ref<number | null>(null)
 
 const savedConfigs = ref<AnomalyConfig[]>([])
 const configData = ref<Record<string, MetricMonitor[]>>({})
+const configsLoaded = ref(false)
+const expandedDetectorIds = ref<Set<string>>(new Set())
+const detectorDataLoading = ref<Set<string>>(new Set())
 
 const liveMode = ref(true)
 const liveRefreshing = ref(false)
@@ -74,18 +78,43 @@ const initTab = validTabs.includes(route.query.tab as Tab) ? (route.query.tab as
 const activeTab = ref<Tab>(initTab)
 const serverEvents = ref<AnomalyEventWithRule[]>([])
 const serverEventsLoaded = ref(false)
+const serverEventsLoading = ref(false)
+const serverEventsError = ref(false)
+type HistoryStateFilter = 'all' | 'fired' | 'resolved'
+const historyStateFilter = ref<HistoryStateFilter>('all')
+const historySearch = ref('')
+type DetectorStateFilter = 'all' | 'firing' | 'normal' | 'no_data' | 'paused'
+const detectorStateFilter = ref<DetectorStateFilter>('all')
+const detectorSearch = ref('')
 
 // History pagination — a full-height paged table instead of a 300px inner scroll.
 const HISTORY_PER_PAGE = 50
 const historyPage = ref(1)
-const historyPageCount = computed(() => Math.max(1, Math.ceil(serverEvents.value.length / HISTORY_PER_PAGE)))
-const historyRangeStart = computed(() => serverEvents.value.length ? (historyPage.value - 1) * HISTORY_PER_PAGE + 1 : 0)
-const historyRangeEnd = computed(() => Math.min(historyPage.value * HISTORY_PER_PAGE, serverEvents.value.length))
+const filteredServerEvents = computed(() => {
+  const query = historySearch.value.trim().toLowerCase()
+  return serverEvents.value.filter(event => {
+    const matchesState = historyStateFilter.value === 'all'
+      || (historyStateFilter.value === 'fired' && event.state === 'anomalous')
+      || (historyStateFilter.value === 'resolved' && event.state !== 'anomalous')
+    const matchesSearch = !query
+      || event.rule_name.toLowerCase().includes(query)
+      || event.metric.toLowerCase().includes(query)
+    return matchesState && matchesSearch
+  })
+})
+const historyPageCount = computed(() => Math.max(1, Math.ceil(filteredServerEvents.value.length / HISTORY_PER_PAGE)))
+const historyRangeStart = computed(() => filteredServerEvents.value.length ? (historyPage.value - 1) * HISTORY_PER_PAGE + 1 : 0)
+const historyRangeEnd = computed(() => Math.min(historyPage.value * HISTORY_PER_PAGE, filteredServerEvents.value.length))
 const pagedEvents = computed(() =>
-  serverEvents.value.slice((historyPage.value - 1) * HISTORY_PER_PAGE, historyPage.value * HISTORY_PER_PAGE)
+  filteredServerEvents.value.slice((historyPage.value - 1) * HISTORY_PER_PAGE, historyPage.value * HISTORY_PER_PAGE)
 )
 function goHistoryPage(p: number) {
   historyPage.value = Math.min(Math.max(1, p), historyPageCount.value)
+}
+
+function setHistoryStateFilter(filter: HistoryStateFilter) {
+  historyStateFilter.value = filter
+  historyPage.value = 1
 }
 
 function setTab(tab: Tab) {
@@ -93,10 +122,6 @@ function setTab(tab: Tab) {
   router.replace({ query: { ...route.query, tab } })
   if (tab === 'history' && !serverEventsLoaded.value) {
     loadServerEvents()
-  }
-  if (tab === 'monitors') {
-    // Fetch chart data for all monitors when viewing the monitors tab
-    fetchAllConfigData(activeRangeIdx())
   }
 }
 
@@ -109,13 +134,18 @@ function anomalyBubbleUpUrl(ev: AnomalyEventWithRule): string {
 }
 
 async function loadServerEvents() {
+  serverEventsLoading.value = true
+  serverEventsError.value = false
   try {
     const resp = await api.listAllAnomalyEvents()
     serverEvents.value = resp.events
-    serverEventsLoaded.value = true
     historyPage.value = 1
   } catch {
     serverEvents.value = []
+    serverEventsError.value = true
+  } finally {
+    serverEventsLoaded.value = true
+    serverEventsLoading.value = false
   }
 }
 
@@ -172,6 +202,7 @@ function fromApiRule(rule: AnomalyRule): AnomalyConfig {
     id: rule.id,
     name: rule.name,
     description: rule.description,
+    enabled: rule.enabled,
     source: rule.source,
     pattern: rule.source === 'apm' ? '' : rule.pattern,
     serviceName: rule.service_name,
@@ -192,6 +223,8 @@ async function loadConfigs() {
     savedConfigs.value = resp.rules.map(fromApiRule)
   } catch {
     savedConfigs.value = []
+  } finally {
+    configsLoaded.value = true
   }
 }
 
@@ -384,10 +417,6 @@ async function fetchConfigData(config: AnomalyConfig, rangeIdx?: number) {
   }
 }
 
-async function fetchAllConfigData(rangeIdx?: number) {
-  await Promise.allSettled(savedConfigs.value.map(c => fetchConfigData(c, rangeIdx)))
-}
-
 function activeRangeIdx(): number | undefined {
   return undefined
 }
@@ -427,9 +456,6 @@ function anomalousChartsFor(configId: string) {
   return (allConfigCharts.value[configId] || []).filter(m => m.anomalyCount > 0)
 }
 
-// ═══ Anomalous configs (currently active OR triggered within last 30 min) ═══
-const RECENT_WINDOW_MS = 30 * 60 * 1000
-
 // Optional service filter (deep-linked from a service page via ?service=).
 const serviceFilter = ref((route.query.service as string) || '')
 const visibleSaved = computed(() =>
@@ -437,12 +463,83 @@ const visibleSaved = computed(() =>
 )
 
 const anomalousConfigs = computed(() => {
-  const cutoff = Date.now() - RECENT_WINDOW_MS
-  return visibleSaved.value.filter(c =>
-    c.state === 'anomalous' ||
-    (c.lastTriggeredAt !== null && c.lastTriggeredAt > cutoff)
-  )
+  return visibleSaved.value.filter(c => c.enabled && c.state === 'anomalous')
 })
+
+const normalDetectorCount = computed(() => visibleSaved.value.filter(c => c.enabled && c.state === 'normal').length)
+const noDataDetectorCount = computed(() => visibleSaved.value.filter(c => c.enabled && c.state === 'no_data').length)
+const pausedDetectorCount = computed(() => visibleSaved.value.filter(c => !c.enabled).length)
+const firingEventCount = computed(() => serverEvents.value.filter(event => event.state === 'anomalous').length)
+const resolvedEventCount = computed(() => serverEvents.value.length - firingEventCount.value)
+
+const filteredDetectors = computed(() => {
+  const query = detectorSearch.value.trim().toLowerCase()
+  return visibleSaved.value.filter(config => {
+    const matchesState = detectorStateFilter.value === 'all'
+      || (detectorStateFilter.value === 'firing' && config.enabled && config.state === 'anomalous')
+      || (detectorStateFilter.value === 'normal' && config.enabled && config.state === 'normal')
+      || (detectorStateFilter.value === 'no_data' && config.enabled && config.state === 'no_data')
+      || (detectorStateFilter.value === 'paused' && !config.enabled)
+    const searchable = [
+      config.name,
+      config.description,
+      config.pattern,
+      config.serviceName,
+      config.apmMetric,
+      config.source,
+    ].join(' ').toLowerCase()
+    return matchesState && (!query || searchable.includes(query))
+  })
+})
+
+function setDetectorStateFilter(filter: DetectorStateFilter) {
+  detectorStateFilter.value = filter
+}
+
+function detectorStateLabel(config: AnomalyConfig): string {
+  if (!config.enabled) return 'Paused'
+  if (config.state === 'anomalous') return 'Firing now'
+  if (config.state === 'no_data') return 'Waiting for data'
+  return 'Normal'
+}
+
+function detectorSignal(config: AnomalyConfig): string {
+  return config.source === 'apm'
+    ? `${config.serviceName}:${config.apmMetric}`
+    : config.pattern
+}
+
+function detectorScope(config: AnomalyConfig): string {
+  if (config.source === 'apm') return config.serviceName || 'All services'
+  if (config.splitLabels?.length) return `Split by ${config.splitLabels.join(', ')}`
+  return 'Combined series'
+}
+
+function isDetectorExpanded(id: string): boolean {
+  return expandedDetectorIds.value.has(id)
+}
+
+async function toggleDetectorSignal(config: AnomalyConfig) {
+  const next = new Set(expandedDetectorIds.value)
+  if (next.has(config.id)) {
+    next.delete(config.id)
+    expandedDetectorIds.value = next
+    return
+  }
+  next.add(config.id)
+  expandedDetectorIds.value = next
+  if (Object.prototype.hasOwnProperty.call(configData.value, config.id)) return
+  const loading = new Set(detectorDataLoading.value)
+  loading.add(config.id)
+  detectorDataLoading.value = loading
+  try {
+    await fetchConfigData(config, activeRangeIdx())
+  } finally {
+    const finished = new Set(detectorDataLoading.value)
+    finished.delete(config.id)
+    detectorDataLoading.value = finished
+  }
+}
 
 // ═══ Live mode ═══
 function toggleLive() {
@@ -826,20 +923,15 @@ function onDocClick(e: MouseEvent) {
 onMounted(async () => {
   document.addEventListener('click', onDocClick)
   await loadConfigs()
-  await loadMetricNames()
+  await Promise.all([loadMetricNames(), loadServerEvents()])
   try {
     const resp = await api.listChannels()
     channels.value = resp.channels
   } catch {
     channels.value = []
   }
-  // Load data appropriate for the initial tab
-  if (activeTab.value === 'history') {
-    loadServerEvents()
-  } else if (activeTab.value === 'monitors') {
-    fetchAllConfigData(activeRangeIdx())
-  }
-  // Fetch chart data for configs visible on anomalous tab (active + recently triggered)
+  // Fetch chart data only for detectors currently firing. Detector inventory
+  // charts are loaded on demand to keep the page focused and fast.
   const visible = anomalousConfigs.value
   if (visible.length) {
     await Promise.allSettled(visible.map(c => fetchConfigData(c)))
@@ -859,22 +951,20 @@ onUnmounted(() => {
 
 <template>
   <div class="anomaly-page">
-    <!-- ═══ Header ═══ -->
+    <!-- ═══ Detection desk header ═══ -->
     <div class="page-header">
       <div class="page-header-left">
-        <h1 class="page-title">Anomaly Detection</h1>
+        <span class="page-kicker">Detection desk</span>
+        <h1 class="page-title">Anomaly detectors</h1>
+        <p class="page-subtitle">See what needs attention now, how detection is configured, and every state change over time.</p>
       </div>
       <div class="page-header-right">
         <router-link v-if="canWrite" to="/anomaly/add" class="add-btn">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
-          Add Monitor
+          Create detector
         </router-link>
-        <button class="live-toggle" :class="{ active: liveMode, refreshing: liveRefreshing }" @click="toggleLive" v-if="activeTab === 'anomalous'">
-          <span class="live-dot" :class="{ spin: liveRefreshing }"></span>
-          {{ liveRefreshing ? 'Updating...' : liveMode ? 'Live' : 'Paused' }}
-        </button>
       </div>
     </div>
 
@@ -883,33 +973,60 @@ onUnmounted(() => {
       <button @click="serviceFilter = ''" title="Clear filter" aria-label="Clear service filter">&times;</button>
     </div>
 
-    <!-- ═══ Sub-tabs (matches Alerts) ═══ -->
-    <div class="sub-tabs">
-      <button class="sub-tab" :class="{ active: activeTab === 'anomalous' }" @click="setTab('anomalous')">
-        <span class="tab-icon tab-icon-anomalous">&#9679;</span> Anomalous
-        <span class="tab-count" v-if="anomalousConfigs.length">{{ anomalousConfigs.length }}</span>
+    <!-- ═══ Lifecycle navigation ═══ -->
+    <nav class="lifecycle-nav" aria-label="Anomaly detector views">
+      <button class="lifecycle-step firing" :class="{ active: activeTab === 'anomalous' }" :aria-pressed="activeTab === 'anomalous'" @click="setTab('anomalous')">
+        <span class="lifecycle-marker"><span class="status-pulse"></span></span>
+        <span class="lifecycle-copy">
+          <span class="lifecycle-label">Firing now</span>
+          <span class="lifecycle-description">Detectors currently outside their expected range</span>
+        </span>
+        <span class="lifecycle-count">{{ configsLoaded ? anomalousConfigs.length : '—' }}</span>
       </button>
-      <button class="sub-tab" :class="{ active: activeTab === 'history' }" @click="setTab('history')">
-        <span class="tab-icon tab-icon-history">&#9716;</span> History
+      <button class="lifecycle-step" :class="{ active: activeTab === 'monitors' }" :aria-pressed="activeTab === 'monitors'" @click="setTab('monitors')">
+        <span class="lifecycle-marker inventory-marker"></span>
+        <span class="lifecycle-copy">
+          <span class="lifecycle-label">All detectors</span>
+          <span class="lifecycle-description">Configured signals, scope, sensitivity, and routing</span>
+        </span>
+        <span class="lifecycle-count">{{ configsLoaded ? visibleSaved.length : '—' }}</span>
       </button>
-      <button class="sub-tab" :class="{ active: activeTab === 'monitors' }" @click="setTab('monitors')">
-        <span class="tab-icon tab-icon-monitors">&#9881;</span> Monitors
+      <button class="lifecycle-step" :class="{ active: activeTab === 'history' }" :aria-pressed="activeTab === 'history'" @click="setTab('history')">
+        <span class="lifecycle-marker history-marker"></span>
+        <span class="lifecycle-copy">
+          <span class="lifecycle-label">Event history</span>
+          <span class="lifecycle-description">When detectors fired and when they recovered</span>
+        </span>
+        <span class="lifecycle-count">{{ serverEventsLoading ? '—' : serverEvents.length }}</span>
       </button>
-    </div>
+    </nav>
 
     <!-- ═══ TAB: Anomalous ═══ -->
     <template v-if="activeTab === 'anomalous'">
+      <div class="tab-heading">
+        <div>
+          <span class="tab-eyebrow danger">Live status</span>
+          <h2>Firing now</h2>
+          <p>Only detectors that are currently anomalous appear here. Resolved transitions stay in Event history.</p>
+        </div>
+        <button class="live-toggle" :class="{ active: liveMode, refreshing: liveRefreshing }" @click="toggleLive">
+          <span class="live-dot" :class="{ spin: liveRefreshing }"></span>
+          {{ liveRefreshing ? 'Refreshing status…' : liveMode ? 'Live · every 30s' : 'Live updates paused' }}
+        </button>
+      </div>
       <!-- Anomalous configs detected by engine -->
       <template v-for="config in anomalousConfigs" :key="config.id">
-      <div class="monitor-section">
+      <div class="monitor-section active-detector">
         <div class="section-header">
           <div class="section-header-left">
             <span class="section-name">{{ config.name || config.pattern || `${config.serviceName}:${config.apmMetric}` }}</span>
             <span class="section-pattern mono" v-if="config.source === 'apm'">{{ config.serviceName }}:{{ config.apmMetric }}</span>
             <span class="section-pattern mono" v-else-if="config.name && config.name !== config.pattern">{{ config.pattern }}</span>
-            <span class="state-badge mono anomalous" v-if="config.state === 'anomalous'">anomalous</span>
-            <span class="state-badge mono recent" v-else>resolved</span>
-            <span class="recent-time mono" v-if="config.state !== 'anomalous' && config.lastTriggeredAt">{{ formatTimeAgo(config.lastTriggeredAt) }}</span>
+            <span class="state-badge anomalous"><span class="state-dot"></span>Firing now</span>
+          </div>
+          <div class="section-header-actions">
+            <span class="recent-time" v-if="config.lastTriggeredAt">Started {{ formatTimeAgo(config.lastTriggeredAt) }}</span>
+            <router-link :to="{ name: 'anomaly-detail', params: { ruleId: config.id } }" class="open-detector-link">Open detector →</router-link>
           </div>
         </div>
         <div class="charts-grid" v-if="anomalousChartsFor(config.id).length">
@@ -966,20 +1083,46 @@ onUnmounted(() => {
       </template>
 
       <!-- Empty anomalous state -->
-      <div class="empty-panel card" v-if="!anomalousConfigs.length">
-        <div class="empty-icon">&#10003;</div>
-        <div class="empty-text">No anomalies in the last 30 minutes</div>
-        <div class="empty-sub">All monitors are reporting normal</div>
+      <div class="empty-panel card" v-if="!configsLoaded">
+        <div class="loading-mark" aria-hidden="true"></div>
+        <div class="empty-text">Checking detector state</div>
+        <div class="empty-sub">Loading the latest status for this tenant.</div>
+      </div>
+      <div class="empty-panel card" v-else-if="!anomalousConfigs.length">
+        <div class="empty-icon healthy-check">&#10003;</div>
+        <div class="empty-text">No detectors are firing</div>
+        <div class="empty-sub">{{ normalDetectorCount }} normal · {{ noDataDetectorCount }} waiting for data · {{ pausedDetectorCount }} paused</div>
+        <button class="empty-link" @click="setTab('monitors')">Review all detectors →</button>
       </div>
     </template>
 
     <!-- ═══ TAB: History ═══ -->
     <template v-if="activeTab === 'history'">
-      <div class="events-table card" v-if="serverEvents.length">
+      <div class="tab-heading">
+        <div>
+          <span class="tab-eyebrow">State timeline</span>
+          <h2>Event history</h2>
+          <p>Each row is a detector transition. “Fired” marks the start of an anomaly; “Resolved” marks recovery.</p>
+        </div>
+      </div>
+
+      <div class="detector-toolbar" v-if="serverEvents.length || historySearch || historyStateFilter !== 'all'">
+        <label class="search-control">
+          <span>Search history</span>
+          <input v-model="historySearch" type="search" placeholder="Detector or metric" @input="historyPage = 1" />
+        </label>
+        <div class="filter-group" aria-label="Filter history by state">
+          <button class="filter-chip" :class="{ active: historyStateFilter === 'all' }" @click="setHistoryStateFilter('all')">All <span>{{ serverEvents.length }}</span></button>
+          <button class="filter-chip" :class="{ active: historyStateFilter === 'fired' }" @click="setHistoryStateFilter('fired')">Fired <span>{{ firingEventCount }}</span></button>
+          <button class="filter-chip" :class="{ active: historyStateFilter === 'resolved' }" @click="setHistoryStateFilter('resolved')">Resolved <span>{{ resolvedEventCount }}</span></button>
+        </div>
+      </div>
+
+      <div class="events-table card" v-if="filteredServerEvents.length">
         <div class="events-thead">
           <span class="ev-col ev-time">Time</span>
           <span class="ev-col ev-sev">State</span>
-          <span class="ev-col ev-rule">Monitor</span>
+          <span class="ev-col ev-rule">Detector</span>
           <span class="ev-col ev-metric">Metric</span>
           <span class="ev-col ev-val">Value</span>
           <span class="ev-col ev-exp">Expected</span>
@@ -991,21 +1134,23 @@ onUnmounted(() => {
             :to="{ name: 'anomaly-detail', params: { ruleId: ev.rule_id }, query: { event: ev.id } }"
             class="events-row clickable"
           >
-            <span class="ev-col ev-time mono">{{ formatEventTime(ev.created_at) }}</span>
-            <span class="ev-col ev-sev">
-              <span class="sev-badge" :class="ev.state === 'anomalous' ? 'critical' : 'resolved'">{{ ev.state }}</span>
+            <span class="ev-col ev-time mono" data-label="Time">{{ formatEventTime(ev.created_at) }}</span>
+            <span class="ev-col ev-sev" data-label="State">
+              <span class="sev-badge" :class="ev.state === 'anomalous' ? 'critical' : 'resolved'">
+                <span class="state-dot"></span>{{ ev.state === 'anomalous' ? 'Fired' : 'Resolved' }}
+              </span>
             </span>
-            <span class="ev-col ev-rule">{{ ev.rule_name }}</span>
-            <span class="ev-col ev-metric mono">{{ ev.metric }}</span>
-            <span class="ev-col ev-val mono">{{ fmtCompact(ev.value) }}</span>
-            <span class="ev-col ev-exp mono">{{ fmtCompact(ev.expected) }} ±{{ ev.deviation.toFixed(1) }}σ</span>
+            <span class="ev-col ev-rule" data-label="Detector">{{ ev.rule_name }}</span>
+            <span class="ev-col ev-metric mono" data-label="Metric">{{ ev.metric }}</span>
+            <span class="ev-col ev-val mono" data-label="Value">{{ fmtCompact(ev.value) }}</span>
+            <span class="ev-col ev-exp mono" data-label="Expected">{{ fmtCompact(ev.expected) }} ±{{ ev.deviation.toFixed(1) }}σ</span>
             <span class="ev-col ev-actions" @click.prevent.stop>
               <router-link :to="anomalyBubbleUpUrl(ev)" class="btn-bubbleup-sm">⬡ BubbleUp</router-link>
             </span>
           </router-link>
         </div>
-        <div class="events-pager" v-if="serverEvents.length">
-          <span class="events-pager-info mono">{{ historyRangeStart }}–{{ historyRangeEnd }} of {{ serverEvents.length }}</span>
+        <div class="events-pager">
+          <span class="events-pager-info mono">{{ historyRangeStart }}–{{ historyRangeEnd }} of {{ filteredServerEvents.length }}</span>
           <div class="events-pager-controls" v-if="historyPageCount > 1">
             <button class="pager-btn" :disabled="historyPage === 1" @click="goHistoryPage(historyPage - 1)">‹ Prev</button>
             <span class="pager-page mono">{{ historyPage }} / {{ historyPageCount }}</span>
@@ -1013,17 +1158,62 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+      <div class="empty-panel card" v-else-if="serverEventsLoading">
+        <div class="loading-mark" aria-hidden="true"></div>
+        <div class="empty-text">Loading event history</div>
+        <div class="empty-sub">Retrieving detector transitions for this tenant.</div>
+      </div>
+      <div class="empty-panel card" v-else-if="serverEventsError">
+        <div class="empty-icon">!</div>
+        <div class="empty-text">History could not be loaded</div>
+        <div class="empty-sub">The detector configuration is still available. Retry the event request when you’re ready.</div>
+        <button class="empty-link" @click="loadServerEvents">Retry history</button>
+      </div>
+      <div class="empty-panel card" v-else-if="serverEvents.length">
+        <div class="empty-icon">⌕</div>
+        <div class="empty-text">No matching events</div>
+        <div class="empty-sub">Try another detector name, metric, or state.</div>
+        <button class="empty-link" @click="historySearch = ''; setHistoryStateFilter('all')">Clear filters</button>
+      </div>
       <div class="empty-panel card" v-else>
         <div class="empty-icon">&#9716;</div>
         <div class="empty-text">No history yet</div>
-        <div class="empty-sub">Anomaly events will appear here as the engine detects state changes</div>
+        <div class="empty-sub">The first fired or resolved detector transition will appear here.</div>
       </div>
     </template>
 
     <!-- ═══ TAB: Monitors ═══ -->
     <template v-if="activeTab === 'monitors'">
-    <template v-for="config in visibleSaved" :key="config.id">
-    <div class="monitor-section">
+    <div class="tab-heading">
+      <div>
+        <span class="tab-eyebrow">Configuration</span>
+        <h2>All detectors</h2>
+        <p>Review what each detector watches, where it applies, its health, and when it last fired.</p>
+      </div>
+    </div>
+
+    <div class="detector-toolbar" v-if="visibleSaved.length">
+      <label class="search-control">
+        <span>Find a detector</span>
+        <input v-model="detectorSearch" type="search" placeholder="Name, service, or metric" />
+      </label>
+      <div class="filter-group" aria-label="Filter detectors by status">
+        <button class="filter-chip" :class="{ active: detectorStateFilter === 'all' }" @click="setDetectorStateFilter('all')">All <span>{{ visibleSaved.length }}</span></button>
+        <button class="filter-chip danger" :class="{ active: detectorStateFilter === 'firing' }" @click="setDetectorStateFilter('firing')">Firing <span>{{ anomalousConfigs.length }}</span></button>
+        <button class="filter-chip" :class="{ active: detectorStateFilter === 'normal' }" @click="setDetectorStateFilter('normal')">Normal <span>{{ normalDetectorCount }}</span></button>
+        <button class="filter-chip" :class="{ active: detectorStateFilter === 'no_data' }" @click="setDetectorStateFilter('no_data')">No data <span>{{ noDataDetectorCount }}</span></button>
+        <button class="filter-chip" :class="{ active: detectorStateFilter === 'paused' }" @click="setDetectorStateFilter('paused')">Paused <span>{{ pausedDetectorCount }}</span></button>
+      </div>
+    </div>
+
+    <template v-for="config in filteredDetectors" :key="config.id">
+    <div
+      class="monitor-section detector-shell"
+      :class="[
+        !config.enabled ? 'is-paused' : `is-${config.state}`,
+        { expanded: isDetectorExpanded(config.id) }
+      ]"
+    >
       <!-- Edit mode -->
       <template v-if="editingId === config.id">
         <div class="edit-form card">
@@ -1081,35 +1271,56 @@ onUnmounted(() => {
       </template>
       <!-- View mode -->
       <template v-else>
-        <div class="section-header">
-          <div class="section-header-left">
-            <span class="section-name">{{ config.name || config.pattern || `${config.serviceName}:${config.apmMetric}` }}</span>
-            <span class="section-pattern mono" v-if="config.source === 'apm'">{{ config.serviceName }}:{{ config.apmMetric }}</span>
-            <span class="section-pattern mono" v-else-if="config.name && config.name !== config.pattern">{{ config.pattern }}</span>
-            <span class="state-badge mono" :class="config.state">{{ config.state }}</span>
-            <span class="settings-badge mono">σ={{ config.sensitivity.toFixed(1) }} α={{ config.alpha.toFixed(2) }}</span>
-            <span class="settings-badge mono" v-if="config.splitLabels?.length">split: {{ config.splitLabels.join(', ') }}</span>
-            <template v-if="config.channelIds?.length">
-              <span
-                v-for="chId in config.channelIds"
-                :key="chId"
-                class="channel-badge"
-              >{{ channels.find(c => c.id === chId)?.name || chId }}</span>
-            </template>
+        <div class="detector-summary">
+          <div class="detector-main">
+            <div class="detector-title-row">
+              <h3>{{ config.name || config.pattern || `${config.serviceName}:${config.apmMetric}` }}</h3>
+              <span class="state-badge" :class="!config.enabled ? 'paused' : config.state">
+                <span class="state-dot"></span>{{ detectorStateLabel(config) }}
+              </span>
+              <span class="source-badge">{{ config.source === 'apm' ? 'APM' : 'Prometheus' }}</span>
+            </div>
+            <p class="section-description" v-if="config.description">{{ config.description }}</p>
+            <div class="detector-meta-grid">
+              <div class="detector-meta-item">
+                <span class="meta-label">Signal</span>
+                <span class="meta-value mono">{{ detectorSignal(config) }}</span>
+              </div>
+              <div class="detector-meta-item">
+                <span class="meta-label">Scope</span>
+                <span class="meta-value">{{ detectorScope(config) }}</span>
+              </div>
+              <div class="detector-meta-item">
+                <span class="meta-label">Last fired</span>
+                <span class="meta-value">{{ config.lastTriggeredAt ? formatTimeAgo(config.lastTriggeredAt) : 'Never' }}</span>
+              </div>
+              <div class="detector-meta-item">
+                <span class="meta-label">Tuning</span>
+                <span class="meta-value mono">{{ config.sensitivity.toFixed(1) }}σ · α {{ config.alpha.toFixed(2) }}</span>
+              </div>
+            </div>
+            <div class="detector-routing" v-if="config.channelIds?.length">
+              <span class="meta-label">Notifies</span>
+              <span v-for="chId in config.channelIds" :key="chId" class="channel-badge">{{ channels.find(c => c.id === chId)?.name || chId }}</span>
+            </div>
           </div>
-          <div class="section-header-actions" v-if="canWrite">
-            <button class="edit-btn" @click="startEdit(config)" title="Edit monitor">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
+          <div class="detector-actions">
+            <div class="detector-icon-actions" v-if="canWrite">
+              <button class="edit-btn" @click="startEdit(config)" title="Edit detector" :aria-label="`Edit ${config.name || 'detector'}`">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+              <button class="delete-btn" @click="confirmDelete(config)" title="Delete detector" :aria-label="`Delete ${config.name || 'detector'}`">&times;</button>
+            </div>
+            <button class="signal-toggle" :aria-expanded="isDetectorExpanded(config.id)" @click="toggleDetectorSignal(config)">
+              {{ isDetectorExpanded(config.id) ? 'Hide signal' : 'View signal' }} <span aria-hidden="true">{{ isDetectorExpanded(config.id) ? '↑' : '↓' }}</span>
             </button>
-            <button class="delete-btn" @click="confirmDelete(config)" title="Remove monitor">&times;</button>
           </div>
         </div>
-        <div class="section-description" v-if="config.description">{{ config.description }}</div>
       </template>
-      <div class="charts-grid" v-if="(allConfigCharts[config.id] || []).length">
+      <div class="charts-grid detector-charts" v-if="isDetectorExpanded(config.id) && (allConfigCharts[config.id] || []).length">
         <div v-for="(m, mi) in allConfigCharts[config.id]" :key="formatSeriesName(m.name, m.labels)" class="chart-card card" :data-chart-metric="formatSeriesName(m.name, m.labels)">
           <div class="chart-header">
             <div class="chart-header-left">
@@ -1206,23 +1417,34 @@ onUnmounted(() => {
           </svg>
         </div>
       </div>
-      <div class="no-data card" v-else-if="!configData[config.id]?.length">
-        <span class="empty-sub">No data for this pattern</span>
+      <div class="detector-signal-state" v-else-if="isDetectorExpanded(config.id) && detectorDataLoading.has(config.id)">
+        <span class="loading-mark" aria-hidden="true"></span>
+        <span>Loading the latest signal…</span>
+      </div>
+      <div class="detector-signal-state" v-else-if="isDetectorExpanded(config.id) && !configData[config.id]?.length">
+        <span class="empty-text">No recent signal data</span>
+        <span class="empty-sub">Check the source, metric, and scope for this detector.</span>
       </div>
     </div>
     </template>
 
     <!-- Empty State for monitors tab -->
-    <div class="empty-panel card" v-if="!savedConfigs.length">
+    <div class="empty-panel card" v-if="configsLoaded && !visibleSaved.length">
       <div class="empty-icon">&#128225;</div>
-      <div class="empty-text">No monitors configured yet</div>
-      <div class="empty-sub">Click "Add Monitor" to create your first anomaly detector</div>
+      <div class="empty-text">No detectors configured yet</div>
+      <div class="empty-sub">Create a detector to learn a signal’s normal range and surface unexpected changes.</div>
       <router-link v-if="canWrite" to="/anomaly/add" class="add-btn empty-add">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
           <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
         </svg>
-        Add Monitor
+        Create detector
       </router-link>
+    </div>
+    <div class="empty-panel card" v-else-if="visibleSaved.length && !filteredDetectors.length">
+      <div class="empty-icon">⌕</div>
+      <div class="empty-text">No matching detectors</div>
+      <div class="empty-sub">Try another name, service, metric, or status.</div>
+      <button class="empty-link" @click="detectorSearch = ''; setDetectorStateFilter('all')">Clear filters</button>
     </div>
     </template>
 
@@ -1230,7 +1452,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <div class="modal-overlay" v-if="deleteTarget" @click.self="cancelDelete">
         <div class="modal-box">
-          <div class="modal-title">Delete Monitor</div>
+          <div class="modal-title">Delete detector</div>
           <div class="modal-body">
             Are you sure you want to delete
             <strong>{{ deleteTarget.name || deleteTarget.pattern }}</strong>?
