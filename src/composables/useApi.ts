@@ -528,7 +528,13 @@ export function useApi() {
     return await request('/api-keys')
   }
 
-  async function createApiKey(data: { name: string }): Promise<ApiKeyCreated> {
+  async function createApiKey(data: {
+    name: string
+    key_type: 'query' | 'ingest'
+    signals: string[]
+    rate_limit_per_minute: number
+    source_cidrs: string[]
+  }): Promise<ApiKeyCreated> {
     return await request('/api-keys', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1040,8 +1046,14 @@ export function useApi() {
     return await request('/tenants')
   }
 
-  async function createTenant(name: string, opts?: { signals?: Partial<SignalFlags> }): Promise<Tenant> {
+  async function createTenant(name: string, opts?: {
+    auth_required?: boolean
+    ingest_auth_required?: boolean
+    signals?: Partial<SignalFlags>
+  }): Promise<Tenant> {
     const body: Record<string, unknown> = { name }
+    if (opts?.auth_required != null) body.auth_required = opts.auth_required
+    if (opts?.ingest_auth_required != null) body.ingest_auth_required = opts.ingest_auth_required
     if (opts?.signals) body.signals = opts.signals
     return await request('/tenants', {
       method: 'POST',
@@ -1066,6 +1078,14 @@ export function useApi() {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ auth_required }),
+    })
+  }
+
+  async function setTenantIngestAuthRequired(id: string, ingest_auth_required: boolean): Promise<Tenant> {
+    return await request<Tenant>(`/tenants/${encodeURIComponent(id)}/ingest-auth`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ingest_auth_required }),
     })
   }
 
@@ -1594,7 +1614,7 @@ export function useApi() {
     listDetectionRules, getDetectionRule, createDetectionRule, updateDetectionRule, deleteDetectionRule, testDetectionRule, listDetectionEvents,
     getSsoStatus, listSsoProviders, saveSsoProvider, deleteSsoProvider, listIdpGroupMappings, createIdpGroupMapping, updateIdpGroupMapping, deleteIdpGroupMapping, createSetupToken, validateSetupToken, completeSetupToken,
     listGroups, createGroup, updateGroup, deleteGroup, setGroupTenants, getUserGroups, setUserGroups,
-    listTenants, createTenant, deleteTenant, toggleTenant, setTenantAuthRequired, getTenantRetention, setTenantRetention, deleteTenantRetention, getTenantSignals, setTenantSignals, getGlobalRetention, setGlobalRetention,
+    listTenants, createTenant, deleteTenant, toggleTenant, setTenantAuthRequired, setTenantIngestAuthRequired, getTenantRetention, setTenantRetention, deleteTenantRetention, getTenantSignals, setTenantSignals, getGlobalRetention, setGlobalRetention,
     listUsers, createUser, deleteUser, changeUserPassword, toggleUser,
     listInvestigationSessions, getInvestigationSession, deleteInvestigationSession, listInvestigationTemplates,
     bubbleUp,

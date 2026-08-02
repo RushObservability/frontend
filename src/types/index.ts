@@ -591,6 +591,11 @@ export interface ApiKey {
   id: string
   name: string
   prefix: string
+  tenant_id: string
+  key_type: 'query' | 'ingest' | 'legacy'
+  signals: string[]
+  rate_limit_per_minute: number
+  source_cidrs: string[]
   created_at: string
 }
 
@@ -806,6 +811,7 @@ export interface Tenant {
   name: string
   enabled: boolean
   auth_required: boolean
+  ingest_auth_required: boolean
   created_at: string
   signals?: SignalFlags
 }

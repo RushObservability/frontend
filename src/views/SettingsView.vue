@@ -435,7 +435,7 @@ const cloudwatchUrlEndpoint = computed(() => `${cloudwatchOrigin}/cloudwatch/fir
 // True when the selected tenant requires auth — Firehose must then send a
 // tenant-scoped API key as its access-key header (enforced server-side).
 const cloudwatchTenantProtected = computed(() =>
-  tenants.value.some(t => t.name === cloudwatchTenant.value && t.auth_required))
+  tenants.value.some(t => t.name === cloudwatchTenant.value && t.ingest_auth_required))
 const cloudwatchAccessKeyHeader = 'X-Amz-Firehose-Access-Key: <your-tenant-api-key>'
 // A tenant has been picked (drives the setup instructions / CLI example).
 const cloudwatchTenantChosen = computed(() => !!cloudwatchTenant.value)
@@ -1029,6 +1029,10 @@ async function confirmDelete() {
 const keys = ref<ApiKey[]>([])
 const showForm = ref(false)
 const keyName = ref('')
+const keyType = ref<'query' | 'ingest'>('ingest')
+const keySignals = ref<string[]>(['logs', 'traces', 'metrics'])
+const keyRateLimit = ref(60000)
+const keySourceCidrs = ref('')
 const newlyCreated = ref<ApiKeyCreated | null>(null)
 const copied = ref(false)
 
@@ -1266,6 +1270,8 @@ function formatSkillDate(iso: string): string {
 const tenants = ref<Tenant[]>([])
 const showTenantForm = ref(false)
 const tenantName = ref('')
+const newTenantAuthRequired = ref(true)
+const newTenantIngestAuthRequired = ref(true)
 
 function openTenantForm() {
   tenantName.value = ''
@@ -1276,6 +1282,8 @@ function openTenantForm() {
   newSignalApm.value = true
   newSignalMetrics.value = true
   newSignalRum.value = true
+  newTenantAuthRequired.value = true
+  newTenantIngestAuthRequired.value = true
   if (!globalRetention.value) loadGlobalRetention()
   showTenantForm.value = true
 }
@@ -1311,6 +1319,8 @@ async function createTenant() {
   creatingTenant.value = true
   try {
     const created = await api.createTenant(tenantName.value.trim(), {
+      auth_required: newTenantAuthRequired.value,
+      ingest_auth_required: newTenantIngestAuthRequired.value,
       signals: {
         logs: newSignalLogs.value,
         apm: newSignalApm.value,
@@ -1525,7 +1535,9 @@ const groupPermissions = ref<string[]>(['read'])
 const groupTenantIds = ref<string[]>([])
 
 const allScopes = ['logs', 'traces', 'metrics', 'all']
-const allPermissions = ['read', 'write']
+// Infrastructure access is intentionally independent from telemetry `read`.
+// Admins can grant it only to groups that should inspect Kubernetes/GitOps data.
+const allPermissions = ['read', 'write', 'infrastructure:read']
 
 async function loadGroups() {
   try {
@@ -2273,11 +2285,23 @@ async function loadKeys() {
 }
 
 async function createKey() {
-  if (!keyName.value.trim()) return
+  if (!keyName.value.trim() || (keyType.value === 'ingest' && keySignals.value.length === 0)) return
   try {
-    const created = await api.createApiKey({ name: keyName.value.trim() })
+    const created = await api.createApiKey({
+      name: keyName.value.trim(),
+      key_type: keyType.value,
+      signals: keyType.value === 'ingest' ? keySignals.value : [],
+      rate_limit_per_minute: keyType.value === 'ingest' ? keyRateLimit.value : 0,
+      source_cidrs: keyType.value === 'ingest'
+        ? keySourceCidrs.value.split(/[\n,]/).map(value => value.trim()).filter(Boolean)
+        : [],
+    })
     newlyCreated.value = created
     keyName.value = ''
+    keyType.value = 'ingest'
+    keySignals.value = ['logs', 'traces', 'metrics']
+    keyRateLimit.value = 60000
+    keySourceCidrs.value = ''
     showForm.value = false
     await loadKeys()
   } catch { /* error in api.error */ }
@@ -2447,7 +2471,7 @@ function formatDate(ts: string): string {
           <div class="card-header-text">
             <h2 class="card-title">API Keys</h2>
             <p class="card-desc text-secondary">
-              Generate API keys for programmatic access. Keys are 64-character alphanumeric strings.
+              Query keys read telemetry. Ingest keys can only write the selected signals and cannot query data.
             </p>
           </div>
           <button class="btn-create" @click="showForm = !showForm">
@@ -2457,19 +2481,52 @@ function formatDate(ts: string): string {
 
         <!-- Create Key Form -->
         <div v-if="showForm" class="create-form fade-in">
-          <div class="form-row-inline">
+          <div class="key-form-grid">
             <div class="form-group-inline">
               <label class="form-label">Key Name</label>
               <input
                 v-model="keyName"
                 class="form-input mono"
-                placeholder="e.g. ci-pipeline, grafana-read"
-                @keyup.enter="createKey"
+                placeholder="e.g. production-otel, grafana-read"
               />
             </div>
-            <div class="form-actions-inline">
+            <div class="form-group-inline">
+              <label class="form-label">Access</label>
+              <select v-model="keyType" class="form-input">
+                <option value="ingest">Ingest only</option>
+                <option value="query">Query only</option>
+              </select>
+            </div>
+            <template v-if="keyType === 'ingest'">
+              <div class="form-group-inline key-form-wide">
+                <label class="form-label">Allowed signals</label>
+                <div class="key-signal-options">
+                  <label v-for="signal in ['logs', 'traces', 'metrics', 'rum']" :key="signal" class="checkbox-label">
+                    <input v-model="keySignals" type="checkbox" :value="signal" />
+                    <span>{{ signal }}</span>
+                  </label>
+                </div>
+              </div>
+              <div class="form-group-inline">
+                <label class="form-label">Requests / minute</label>
+                <input v-model.number="keyRateLimit" type="number" min="1" max="1000000" class="form-input mono" />
+              </div>
+              <div class="form-group-inline key-form-wide">
+                <label class="form-label">Source IPs / CIDRs <span class="text-muted">(optional)</span></label>
+                <input v-model="keySourceCidrs" class="form-input mono" placeholder="10.20.0.0/16, 2001:db8::/32" />
+                <span class="text-muted fs-11">Compared with the direct network peer. Include your ingress or proxy address range when applicable.</span>
+              </div>
+            </template>
+            <div v-else class="key-form-note key-form-wide">
+              Query keys can use telemetry read APIs for this tenant, but are rejected by every ingest endpoint.
+            </div>
+            <div class="form-actions-inline key-form-actions">
               <button class="btn btn-secondary" @click="showForm = false; keyName = ''">Cancel</button>
-              <button class="btn btn-primary" @click="createKey" :disabled="!keyName.trim()">Create</button>
+              <button
+                class="btn btn-primary"
+                @click="createKey"
+                :disabled="!keyName.trim() || (keyType === 'ingest' && (keySignals.length === 0 || keyRateLimit < 1))"
+              >Create scoped key</button>
             </div>
           </div>
         </div>
@@ -2499,15 +2556,25 @@ function formatDate(ts: string): string {
 
         <!-- Keys Table -->
         <div v-if="keys.length > 0" class="keys-table">
-          <div class="table-header">
+          <div class="table-header key-table-row">
             <div class="col-name">Name</div>
-            <div class="col-key">Key</div>
+            <div class="col-key">Key / tenant</div>
+            <div class="col-scope">Access</div>
             <div class="col-created">Created</div>
             <div class="col-actions">Actions</div>
           </div>
-          <div v-for="k in keys" :key="k.id" class="table-row">
+          <div v-for="k in keys" :key="k.id" class="table-row key-table-row">
             <div class="col-name">{{ k.name }}</div>
-            <div class="col-key mono text-muted">{{ k.prefix }}...</div>
+            <div class="col-key mono text-muted">
+              <div>{{ k.prefix }}...</div>
+              <div class="fs-11">{{ k.tenant_id }}</div>
+            </div>
+            <div class="col-scope">
+              <span class="key-type-badge" :class="`key-type-${k.key_type}`">{{ k.key_type }}</span>
+              <span v-if="k.key_type === 'ingest'" class="text-muted fs-11">{{ k.signals.join(', ') }} · {{ k.rate_limit_per_minute }}/min</span>
+              <span v-else-if="k.key_type === 'legacy'" class="text-muted fs-11">query compatibility</span>
+              <span v-else class="text-muted fs-11">telemetry read APIs</span>
+            </div>
             <div class="col-created mono text-secondary">{{ formatDate(k.created_at) }}</div>
             <div class="col-actions">
               <button class="action-btn action-btn-danger" @click="askDelete('key', k.id, k.name)">Delete</button>
@@ -4158,7 +4225,8 @@ function formatDate(ts: string): string {
             <div>Name</div>
             <div>ID</div>
             <div>Retention</div>
-            <div>Locked</div>
+            <div>Query auth</div>
+            <div>Ingest auth</div>
             <div>Enabled</div>
             <div>Signals</div>
             <div>Actions</div>
@@ -4179,9 +4247,18 @@ function formatDate(ts: string): string {
             <div class="grid-cell">
               <label
                 class="toggle"
-                :title="t.auth_required ? 'Locked — requires API key or session' : 'Open — X-Rush-Tenant header accepted'"
+                :title="t.auth_required ? 'Queries require a session or query key' : 'Queries are open without authentication'"
               >
                 <input type="checkbox" :checked="t.auth_required" @change="api.setTenantAuthRequired(t.id, !t.auth_required).then(() => loadTenants())" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="grid-cell">
+              <label
+                class="toggle"
+                :title="t.ingest_auth_required ? 'Ingest requires a scoped ingest key' : 'Ingest is open without authentication'"
+              >
+                <input type="checkbox" :checked="t.ingest_auth_required" @change="api.setTenantIngestAuthRequired(t.id, !t.ingest_auth_required).then(() => loadTenants())" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -4255,6 +4332,23 @@ function formatDate(ts: string): string {
                     @keyup.enter="createTenant"
                   />
                   <p v-if="tenantNameTaken" class="fw-field-err">A tenant named "{{ tenantName.trim() }}" already exists — names must be unique.</p>
+                </div>
+
+                <div class="group-drawer-section">
+                  <label class="form-label">Authentication</label>
+                  <p class="text-secondary fs-11" style="line-height: 1.5; margin: 4px 0 var(--sp-2)">
+                    Query and ingest access are independent. Open ingest accepts telemetry without a key.
+                  </p>
+                  <div class="tenant-auth-options">
+                    <label class="checkbox-label">
+                      <input v-model="newTenantAuthRequired" type="checkbox" />
+                      <span>Require authentication for queries</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input v-model="newTenantIngestAuthRequired" type="checkbox" />
+                      <span>Require an ingest key for telemetry</span>
+                    </label>
+                  </div>
                 </div>
 
                 <div class="group-drawer-section">
@@ -5190,6 +5284,9 @@ function formatDate(ts: string): string {
               </div>
               <div class="group-drawer-section">
                 <label class="form-label">Permissions</label>
+                <p class="text-muted fs-11" style="margin: 0 0 8px">
+                  infrastructure:read grants access to allowlisted Kubernetes, ArgoCD, and Flux resources.
+                </p>
                 <div class="group-drawer-checks">
                   <label v-for="p in allPermissions" :key="p" class="checkbox-label">
                     <input type="checkbox" :checked="groupPermissions.includes(p)" @change="togglePermission(p)" />
