@@ -5,6 +5,7 @@ import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import type { Slo, NotificationChannel } from '../types'
 import SloForm from '../components/SloForm.vue'
+import { useVisibilityAwareInterval } from '../composables/useVisibilityAwareInterval'
 
 const router = useRouter()
 const route = useRoute()
@@ -22,19 +23,19 @@ const showForm = ref(false)
 const editingSlo = ref<Slo | null>(null)
 const formError = ref<string | null>(null)
 
-let refreshTimer: ReturnType<typeof setInterval> | undefined
+const refreshLoop = useVisibilityAwareInterval(() => {
+  if (showForm.value) return
+  return loadSlos()
+}, 20_000)
 
 onMounted(async () => {
   await Promise.all([loadSlos(), loadChannels()])
   // Live refresh so error/total counts and state track the engine's evaluations.
-  refreshTimer = setInterval(() => {
-    if (showForm.value) return // don't disrupt an open create/edit form
-    loadSlos()
-  }, 20000)
+  refreshLoop.start()
 })
 
 onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
+  refreshLoop.stop()
 })
 
 async function loadSlos() {

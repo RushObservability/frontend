@@ -1381,11 +1381,14 @@ const SIGNAL_DEFS: { key: 'logs' | 'apm' | 'metrics' | 'rum'; label: string }[] 
 ]
 
 async function loadAllTenantSignals() {
-  for (const t of tenants.value) {
-    try {
-      tenantSignalsMap.value[t.id] = await api.getTenantSignals(t.id)
-    } catch { /* ignore — defaults to all-enabled in the UI */ }
+  const results = await Promise.allSettled(
+    tenants.value.map(async (t) => ({ id: t.id, signals: await api.getTenantSignals(t.id) })),
+  )
+  const next = { ...tenantSignalsMap.value }
+  for (const result of results) {
+    if (result.status === 'fulfilled') next[result.value.id] = result.value.signals
   }
+  tenantSignalsMap.value = next
 }
 
 // Effective enabled flag for a tenant signal (defaults true if not loaded).
@@ -1423,12 +1426,14 @@ const retentionLogs = ref<string>('')
 const retentionSaving = ref(false)
 
 async function loadAllTenantRetention() {
-  for (const t of tenants.value) {
-    try {
-      const r = await api.getTenantRetention(t.id)
-      tenantRetentionMap.value[t.id] = r
-    } catch { /* ignore */ }
+  const results = await Promise.allSettled(
+    tenants.value.map(async (t) => ({ id: t.id, retention: await api.getTenantRetention(t.id) })),
+  )
+  const next = { ...tenantRetentionMap.value }
+  for (const result of results) {
+    if (result.status === 'fulfilled') next[result.value.id] = result.value.retention
   }
+  tenantRetentionMap.value = next
 }
 
 const retentionSaveError = ref<string | null>(null)

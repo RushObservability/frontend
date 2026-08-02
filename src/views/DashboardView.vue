@@ -16,6 +16,7 @@ import TimeseriesWidget from '../components/widgets/TimeseriesWidget.vue'
 import WidgetEditor from '../components/widgets/WidgetEditor.vue'
 import VariableEditor from '../components/widgets/VariableEditor.vue'
 import TimePicker from '../components/TimePicker.vue'
+import { useVisibilityAwareInterval } from '../composables/useVisibilityAwareInterval'
 
 const props = defineProps<{ id: string }>()
 
@@ -103,7 +104,7 @@ const refreshOptions = [
   { label: '5m', value: 300 },
 ]
 const refreshInterval = ref(0)
-let refreshTimer: ReturnType<typeof setInterval> | null = null
+const refreshLoop = useVisibilityAwareInterval(() => loadAllWidgetData(), 1000)
 
 const isAutoRefreshing = computed(() => refreshInterval.value > 0)
 const refreshLabel = computed(() => {
@@ -255,7 +256,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
+  refreshLoop.stop()
 })
 
 async function loadDashboard() {
@@ -299,9 +300,10 @@ async function loadSingleWidget(widget: Widget) {
 
 function setRefresh(secs: number) {
   refreshInterval.value = secs
-  if (refreshTimer) clearInterval(refreshTimer)
+  refreshLoop.stop()
   if (secs > 0) {
-    refreshTimer = setInterval(() => loadAllWidgetData(), secs * 1000)
+    refreshLoop.setIntervalMs(secs * 1000)
+    refreshLoop.start()
   }
 }
 

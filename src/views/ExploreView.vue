@@ -16,6 +16,7 @@ import { useTenant } from '../composables/useTenant'
 import { compareFindingStrength, compareFindingSummary, rankCompareFindings } from '../lib/compareFindings'
 import { authenticatedFetch } from '../composables/authSession'
 import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from '../composables/storageScope'
+import { useVisibilityAwareInterval } from '../composables/useVisibilityAwareInterval'
 
 interface ContextMenuItem {
   label: string
@@ -163,7 +164,6 @@ if (!tenantsLoaded.value) loadTenantSignals()
 
 // ═══ Live mode ═══
 const liveMode = ref(false)
-let liveInterval: ReturnType<typeof setInterval> | null = null
 let livePolling = false
 const liveNewIds = ref(new Set<string>())
 let livePrevIds = new Set<string>()
@@ -287,12 +287,11 @@ async function livePoll() {
   }
 }
 
+const liveLoop = useVisibilityAwareInterval(livePoll, 10_000)
+
 function stopLive() {
   liveMode.value = false
-  if (liveInterval) {
-    clearInterval(liveInterval)
-    liveInterval = null
-  }
+  liveLoop.stop()
   liveNewIds.value = new Set()
   livePrevIds = new Set()
 }
@@ -304,7 +303,7 @@ function toggleLive() {
     liveMode.value = true
     customRange.value = null
     livePoll()
-    liveInterval = setInterval(livePoll, 10000)
+    liveLoop.start()
   }
 }
 

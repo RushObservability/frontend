@@ -5,6 +5,7 @@ import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { useTenant } from '../composables/useTenant'
 import { removeLegacyStorageKey, storageUserId, tenantScopedStorageKey } from '../composables/storageScope'
+import { useVisibilityAwareInterval } from '../composables/useVisibilityAwareInterval'
 import type { ServiceEntry, GraphNode, GraphEdge, Funnel, FunnelResult, FunnelStep } from '../types'
 import TimePicker from '../components/TimePicker.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
@@ -32,7 +33,6 @@ const graphNodes = ref<GraphNode[]>([])
 const graphEdges = ref<GraphEdge[]>([])
 const graphMinutes = ref(60)
 const graphLoading = ref(false)
-let graphInterval: ReturnType<typeof setInterval> | null = null
 
 // Catalog state
 const catalogLoading = ref(false)
@@ -214,6 +214,8 @@ async function loadGraph() {
   }
 }
 
+const graphLoop = useVisibilityAwareInterval(loadGraph, 30_000)
+
 function syncUrl() {
   const q: Record<string, string> = {}
   if (viewMode.value !== 'catalog') q.view = viewMode.value
@@ -225,12 +227,9 @@ watch(viewMode, (mode) => {
   syncUrl()
   if (mode === 'graph') {
     loadGraph()
-    graphInterval = setInterval(loadGraph, 30_000)
+    graphLoop.start()
   } else {
-    if (graphInterval) {
-      clearInterval(graphInterval)
-      graphInterval = null
-    }
+    graphLoop.stop()
     loadCatalogMetrics()
   }
 })
@@ -244,7 +243,7 @@ watch(graphMinutes, () => {
 })
 
 onUnmounted(() => {
-  if (graphInterval) clearInterval(graphInterval)
+  graphLoop.stop()
   window.removeEventListener('keydown', onFvKey)
 })
 

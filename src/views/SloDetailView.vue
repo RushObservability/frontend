@@ -7,6 +7,7 @@ import { useFeatures } from '../composables/useFeatures'
 import { useAuth } from '../composables/useAuth'
 import type { Slo, SloEvent, NotificationChannel, TimeseriesBucket } from '../types'
 import SloForm from '../components/SloForm.vue'
+import { useVisibilityAwareInterval } from '../composables/useVisibilityAwareInterval'
 
 const props = defineProps<{ sloId: string }>()
 const router = useRouter()
@@ -28,22 +29,22 @@ const chartLoading = ref(false)
 
 // Live refresh: the SLO engine re-evaluates on its interval, so poll for updated
 // error/total counts and budget instead of leaving the page frozen at load time.
-let refreshTimer: ReturnType<typeof setInterval> | undefined
+const refreshLoop = useVisibilityAwareInterval(() => {
+  if (showEdit.value) return
+  pollSlo()
+  loadChartData()
+}, 20_000)
 
 onMounted(async () => {
   await Promise.all([loadSlo(), loadChannels()])
   loading.value = false
   if (slo.value) loadChartData()
-  refreshTimer = setInterval(() => {
-    if (showEdit.value) return // don't clobber the edit form mid-edit
-    pollSlo()
-    loadChartData()
-  }, 20000)
+  refreshLoop.start()
   window.addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
+  refreshLoop.stop()
   window.removeEventListener('keydown', onKeydown)
 })
 

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
+import { useVisibilityAwareInterval } from '../composables/useVisibilityAwareInterval'
 import type { NotificationChannel, AnomalyRule, AnomalyEventWithRule, TimeseriesBucket } from '../types'
 
 const route = useRoute()
@@ -65,7 +66,6 @@ const detectorDataLoading = ref<Set<string>>(new Set())
 
 const liveMode = ref(true)
 const liveRefreshing = ref(false)
-const liveTimer = ref<ReturnType<typeof setInterval> | null>(null)
 // @ts-ignore used for future feature
 const historicalRange = ref(0) // index into TIME_RANGES, default 1h
 const channels = ref<NotificationChannel[]>([])
@@ -546,10 +546,9 @@ function toggleLive() {
   liveMode.value = !liveMode.value
   if (liveMode.value) {
     refreshAll()
-    liveTimer.value = setInterval(refreshAll, LIVE_INTERVAL)
-  } else if (liveTimer.value) {
-    clearInterval(liveTimer.value)
-    liveTimer.value = null
+    liveLoop.start()
+  } else {
+    liveLoop.stop()
   }
 }
 
@@ -568,6 +567,8 @@ async function refreshAll() {
     liveRefreshing.value = false
   }
 }
+
+const liveLoop = useVisibilityAwareInterval(refreshAll, LIVE_INTERVAL)
 
 function triggerNotifications() {
   for (const config of savedConfigs.value) {
@@ -937,15 +938,12 @@ onMounted(async () => {
     await Promise.allSettled(visible.map(c => fetchConfigData(c)))
   }
   triggerNotifications()
-  liveTimer.value = setInterval(refreshAll, LIVE_INTERVAL)
+  liveLoop.start()
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
-  if (liveTimer.value) {
-    clearInterval(liveTimer.value)
-    liveTimer.value = null
-  }
+  liveLoop.stop()
 })
 </script>
 

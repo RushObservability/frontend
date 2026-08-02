@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useApi } from '../../../composables/useApi'
 import type { Filter, LogRecord, PromVectorResponse } from '../../../types'
 import DataTable, { type DataTableColumn } from '../../../components/DataTable.vue'
+import { useVisibilityAwareInterval } from '../../../composables/useVisibilityAwareInterval'
 
 const props = defineProps<{ server?: string }>()
 const api = useApi()
@@ -34,7 +35,7 @@ const sessionColumns: DataTableColumn[] = [
 interface Wait { type: string; event: string; count: number }
 const waits = ref<Wait[]>([])
 const stateCounts = ref<Record<string, number>>({})
-let timer: ReturnType<typeof setInterval> | null = null
+const refreshLoop = useVisibilityAwareInterval(load, 7_000)
 
 const num = (s: string | undefined) => parseFloat(s ?? '0') || 0
 
@@ -169,9 +170,9 @@ function fmtAge(s: number): string {
 
 onMounted(() => {
   load()
-  timer = setInterval(load, 7000)
+  refreshLoop.start()
 })
-onUnmounted(() => { if (timer) clearInterval(timer) })
+onUnmounted(() => { refreshLoop.stop() })
 watch(() => props.server, load)
 </script>
 
