@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "typecheck": "vue-tsc -b",
     "security:check": "node scripts/security-check.mjs",
     "security:audit": "npm audit --audit-level=high"
@@ -23,6 +24,7 @@
     "web-vitals": "^4.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/dompurify": "^3.0.5",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^6.0.2",

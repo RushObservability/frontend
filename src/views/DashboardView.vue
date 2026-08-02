@@ -105,6 +105,7 @@ const refreshOptions = [
 ]
 const refreshInterval = ref(0)
 const refreshLoop = useVisibilityAwareInterval(() => loadAllWidgetData(), 1000)
+let widgetRefreshRequest: Promise<void> | null = null
 
 const isAutoRefreshing = computed(() => refreshInterval.value > 0)
 const refreshLabel = computed(() => {
@@ -282,8 +283,17 @@ async function loadDeploys() {
 
 async function loadAllWidgetData() {
   if (!dashboard.value) return
-  await Promise.all(dashboard.value.widgets.map(widget => loadSingleWidget(widget)))
-  lastRefreshedAt.value = new Date()
+  if (widgetRefreshRequest) return widgetRefreshRequest
+  const run = (async () => {
+    await Promise.all(dashboard.value!.widgets.map(widget => loadSingleWidget(widget)))
+    lastRefreshedAt.value = new Date()
+  })()
+  widgetRefreshRequest = run
+  try {
+    await run
+  } finally {
+    if (widgetRefreshRequest === run) widgetRefreshRequest = null
+  }
 }
 
 async function loadSingleWidget(widget: Widget) {

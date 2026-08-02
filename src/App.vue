@@ -145,6 +145,7 @@ watch(isAuthenticated, async (authed) => {
 
 <template>
   <div class="app">
+    <a v-if="!isLoginPage" class="skip-link" href="#main-content">Skip to main content</a>
     <header v-if="!isLoginPage" class="topbar">
       <div class="topbar-left">
         <router-link to="/" class="logo">
@@ -253,19 +254,20 @@ watch(isAuthenticated, async (authed) => {
       </div>
       <div class="topbar-right">
         <div v-if="isAuthenticated && showSwitcher" class="tenant-menu-wrap">
-          <button class="tenant-menu-btn" @click="toggleTenantMenu" title="Switch tenant">
+          <button class="tenant-menu-btn" @click="toggleTenantMenu" title="Switch tenant" aria-haspopup="menu" :aria-expanded="tenantMenuOpen">
             <span class="tenant-name">{{ activeTenantName }}</span>
             <svg class="tenant-chevron" :class="{ open: tenantMenuOpen }" width="10" height="10" viewBox="0 0 10 10" fill="none">
               <path d="M2.5 4L5 6.5L7.5 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
-          <div v-if="tenantMenuOpen" class="tenant-dropdown">
+          <div v-if="tenantMenuOpen" class="tenant-dropdown" role="menu" aria-label="Tenants">
             <div class="tenant-dropdown-header">Tenants</div>
             <div class="tenant-dropdown-divider"></div>
             <button
               v-for="t in tenants"
               :key="t.name"
               class="tenant-dropdown-item"
+              role="menuitem"
               :class="{ active: t.name === activeTenant }"
               @click="selectTenant(t.name)"
             >
@@ -274,17 +276,17 @@ watch(isAuthenticated, async (authed) => {
             </button>
           </div>
         </div>
-        <button class="theme-toggle" @click="toggleTheme" :title="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+        <button class="theme-toggle" @click="toggleTheme" :title="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'" :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
           <span v-if="theme === 'dark'">&#9788;</span>
           <span v-else>&#9790;</span>
         </button>
         <div v-if="appEnv !== 'production'" class="env-badge">{{ appEnv }}</div>
         <div v-if="isAuthenticated" class="user-menu-wrap">
-          <button class="user-menu-btn" @click="toggleUserMenu">
+          <button class="user-menu-btn" @click="toggleUserMenu" aria-haspopup="menu" :aria-expanded="userMenuOpen">
             <span class="user-avatar">{{ user?.display_name?.charAt(0)?.toUpperCase() || user?.username?.charAt(0)?.toUpperCase() || '?' }}</span>
             <span class="user-name">{{ user?.display_name || user?.username }}</span>
           </button>
-          <div v-if="userMenuOpen" class="user-dropdown">
+          <div v-if="userMenuOpen" class="user-dropdown" role="menu" aria-label="User menu">
             <div class="user-dropdown-header">
               <span class="user-dropdown-name">{{ user?.display_name || user?.username }}</span>
               <span class="user-dropdown-role">{{ user?.role }}</span>
@@ -295,7 +297,7 @@ watch(isAuthenticated, async (authed) => {
         </div>
       </div>
     </header>
-    <main class="main" v-if="!isLoginPage">
+    <main id="main-content" class="main" v-if="!isLoginPage" tabindex="-1">
       <router-view />
     </main>
     <router-view v-else />
@@ -463,6 +465,51 @@ button {
   cursor: pointer;
 }
 
+/* Keep keyboard focus visible across the shell, including controls whose
+   component styles intentionally remove the native outline. */
+:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: fixed;
+  top: var(--sp-3);
+  left: var(--sp-3);
+  z-index: 1000;
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-inverse);
+  background: var(--amber);
+  border-radius: var(--r-md);
+  transform: translateY(-180%);
+  transition: transform 120ms ease;
+}
+
+.skip-link:focus-visible { transform: translateY(0); }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The app contains many independently animated panels. A single global
+   preference keeps reduced-motion behavior consistent as new views are added. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -619,6 +666,58 @@ button {
   max-width: 1800px;
   width: 100%;
   margin: 0 auto;
+}
+
+/* Keep the shell usable on narrow screens without shrinking navigation labels
+   into unreadable controls. The nav becomes a horizontal, keyboard-scrollable
+   strip and the main content gets a smaller gutter. */
+@media (max-width: 900px) {
+  .topbar {
+    padding-inline: var(--sp-3);
+  }
+
+  .topbar-left {
+    min-width: 0;
+    gap: var(--sp-3);
+  }
+
+  .nav {
+    min-width: 0;
+    max-width: 62vw;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-item { flex: 0 0 auto; }
+  .main { padding: var(--sp-4); }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    height: auto;
+    min-height: 42px;
+    flex-wrap: wrap;
+    row-gap: var(--sp-2);
+    padding-block: var(--sp-2);
+  }
+
+  .topbar-left {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .nav {
+    order: 3;
+    flex-basis: 100%;
+    max-width: 100%;
+    padding-bottom: 2px;
+  }
+
+  .nav-item.active::after { bottom: -2px; }
+  .topbar-right { position: absolute; top: var(--sp-2); right: var(--sp-3); }
+  .user-name, .tenant-name { max-width: 88px; }
+  .env-badge { display: none; }
 }
 
 /* ═══ Utilities ═══ */

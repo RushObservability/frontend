@@ -1,4 +1,5 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig } from 'vitest/config'
+import type { Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'path'
 
@@ -24,6 +25,9 @@ function runtimeConfigDev(): Plugin {
 
 export default defineConfig({
   plugins: [vue(), runtimeConfigDev()],
+  test: {
+    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**'],
+  },
   optimizeDeps: {
     include: ['@rushobservability/rum-sdk'],
   },

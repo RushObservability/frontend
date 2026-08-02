@@ -553,6 +553,8 @@ function toggleLive() {
 }
 
 async function refreshAll() {
+  if (refreshRequest) return refreshRequest
+  const run = (async () => {
   liveRefreshing.value = true
   try {
     // Re-load rule states from API so anomalous tab reflects engine state changes
@@ -566,8 +568,16 @@ async function refreshAll() {
   } finally {
     liveRefreshing.value = false
   }
+  })()
+  refreshRequest = run
+  try {
+    await run
+  } finally {
+    if (refreshRequest === run) refreshRequest = null
+  }
 }
 
+let refreshRequest: Promise<void> | null = null
 const liveLoop = useVisibilityAwareInterval(refreshAll, LIVE_INTERVAL)
 
 function triggerNotifications() {

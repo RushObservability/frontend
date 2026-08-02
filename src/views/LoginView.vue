@@ -111,9 +111,9 @@ async function handleSubmit() {
           />
         </div>
 
-        <div v-if="error" class="login-error">{{ error }}</div>
+        <div v-if="error" class="login-error" role="alert" aria-live="assertive">{{ error }}</div>
 
-        <button type="submit" class="login-btn" :disabled="submitting">
+        <button type="submit" class="login-btn" :disabled="submitting" :aria-busy="submitting">
           <span v-if="submitting" class="login-spinner"></span>
           <span v-else>Sign in</span>
         </button>

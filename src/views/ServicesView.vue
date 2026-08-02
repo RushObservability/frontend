@@ -202,6 +202,8 @@ function latencyClass(ms: number): string {
 // ── Graph logic ──
 
 async function loadGraph() {
+  if (graphRequest) return graphRequest
+  const run = (async () => {
   graphLoading.value = true
   try {
     const result = await api.serviceGraph(graphMinutes.value)
@@ -212,8 +214,16 @@ async function loadGraph() {
   } finally {
     graphLoading.value = false
   }
+  })()
+  graphRequest = run
+  try {
+    await run
+  } finally {
+    if (graphRequest === run) graphRequest = null
+  }
 }
 
+let graphRequest: Promise<void> | null = null
 const graphLoop = useVisibilityAwareInterval(loadGraph, 30_000)
 
 function syncUrl() {

@@ -101,9 +101,21 @@ import type {
 } from '../types'
 
 const API_BASE = '/api/v1'
+// Identical read requests are common when a view is mounted, refreshed, and
+// reacts to a URL/variable change at nearly the same time. Share the promise
+// for the active tenant so those callers consume one response body and one
+// backend request. Mutations and caller-cancelable reads stay independent.
+const inFlightReads = new Map<string, Promise<unknown>>()
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const { activeTenant } = useTenant()
+  const method = (options?.method || 'GET').toUpperCase()
+  const canDeduplicate = method === 'GET' && !options?.signal
+  const requestKey = canDeduplicate ? `${activeTenant.value}:${path}` : undefined
+  const existing = requestKey ? inFlightReads.get(requestKey) : undefined
+  if (existing) return existing as Promise<T>
+
+  const operation = (async () => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'X-Rush-Tenant': activeTenant.value,
@@ -121,7 +133,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     // Invalid credentials and an already-ended manual logout are expected 401s;
     // neither should be presented as an expired in-app session.
     ignoreUnauthorized: path === '/auth/login' || path === '/auth/logout',
-    requestKey: (!options?.method || options.method.toUpperCase() === 'GET') ? `api:${path}` : undefined,
+    requestKey: (!options?.method || options.method.toUpperCase() === 'GET') ? `api:${activeTenant.value}:${path}` : undefined,
   })
   if (!res.ok) {
     // Do not surface or log the response body: it may contain stack traces,
@@ -134,6 +146,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // delete look like a failure to the caller.
   const body = await res.text()
   return (body ? JSON.parse(body) : null) as T
+  })()
+
+  if (requestKey) inFlightReads.set(requestKey, operation)
+  try {
+    return await operation
+  } finally {
+    if (requestKey && inFlightReads.get(requestKey) === operation) {
+      inFlightReads.delete(requestKey)
+    }
+  }
 }
 
 export function useApi() {
@@ -1249,9 +1271,10 @@ export function useApi() {
   }
 
   async function promQuery(query: string, time?: number): Promise<PromVectorResponse> {
+    const { activeTenant } = useTenant()
     const params = new URLSearchParams({ query })
     if (time !== undefined) params.set('time', String(time))
-    const res = await authenticatedFetch(`/prom/api/v1/query?${params}`, { headers: promHeaders() }, { requestKey: 'prom:query' })
+    const res = await authenticatedFetch(`/prom/api/v1/query?${params}`, { headers: promHeaders() }, { requestKey: `prom:${activeTenant.value}:query:${params}` })
     if (!res.ok) {
       try { await res.body?.cancel() } catch { /* best effort: release the body */ }
       throw new Error(safeApiErrorMessage(res.status, 'Prometheus query'))
@@ -1263,13 +1286,14 @@ export function useApi() {
   async function promQueryRange(
     query: string, start: number, end: number, step: number
   ): Promise<PromMatrixResponse> {
+    const { activeTenant } = useTenant()
     const params = new URLSearchParams({
       query,
       start: String(start),
       end: String(end),
       step: String(step),
     })
-    const res = await authenticatedFetch(`/prom/api/v1/query_range?${params}`, { headers: promHeaders() }, { requestKey: 'prom:query-range' })
+    const res = await authenticatedFetch(`/prom/api/v1/query_range?${params}`, { headers: promHeaders() }, { requestKey: `prom:${activeTenant.value}:query-range:${params}` })
     if (!res.ok) {
       try { await res.body?.cancel() } catch { /* best effort: release the body */ }
       throw new Error(safeApiErrorMessage(res.status, 'Prometheus range query'))
@@ -1279,8 +1303,9 @@ export function useApi() {
   }
 
   async function promLabels(match?: string): Promise<string[]> {
+    const { activeTenant } = useTenant()
     const qs = match ? `?match[]=${encodeURIComponent(match)}` : ''
-    const res = await authenticatedFetch(`/prom/api/v1/labels${qs}`, { headers: promHeaders() }, { requestKey: 'prom:labels' })
+    const res = await authenticatedFetch(`/prom/api/v1/labels${qs}`, { headers: promHeaders() }, { requestKey: `prom:${activeTenant.value}:labels:${qs}` })
     if (!res.ok) {
       try { await res.body?.cancel() } catch { /* best effort: release the body */ }
       throw new Error(safeApiErrorMessage(res.status, 'Prometheus label query'))
@@ -1290,8 +1315,9 @@ export function useApi() {
   }
 
   async function promLabelValues(label: string, match?: string): Promise<string[]> {
+    const { activeTenant } = useTenant()
     const qs = match ? `?match[]=${encodeURIComponent(match)}` : ''
-    const res = await authenticatedFetch(`/prom/api/v1/label/${encodeURIComponent(label)}/values${qs}`, { headers: promHeaders() }, { requestKey: 'prom:label-values' })
+    const res = await authenticatedFetch(`/prom/api/v1/label/${encodeURIComponent(label)}/values${qs}`, { headers: promHeaders() }, { requestKey: `prom:${activeTenant.value}:label-values:${label}:${qs}` })
     if (!res.ok) {
       try { await res.body?.cancel() } catch { /* best effort: release the body */ }
       throw new Error(safeApiErrorMessage(res.status, 'Prometheus label-values query'))

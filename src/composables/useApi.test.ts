@@ -37,4 +37,21 @@ describe('tenant-aware API transport', () => {
       expect(init?.credentials).toBe('same-origin')
     }
   })
+
+  it('deduplicates identical in-flight reads within the active tenant', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ services: [] }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { setStorageUserId } = await import('./storageScope')
+    setStorageUserId('user-a')
+    const { useApi } = await import('./useApi')
+    const api = useApi()
+
+    const [first, second] = await Promise.all([api.getServices(), api.getServices()])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(first).toEqual(second)
+  })
 })

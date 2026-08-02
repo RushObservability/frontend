@@ -34,8 +34,9 @@ function reset() {
 
     <div v-if="!started" class="investigate-form">
       <div class="form-group">
-        <label>Ask a question about your system</label>
+        <label for="investigation-question">Ask a question about your system</label>
         <textarea
+          id="investigation-question"
           v-model="inputQuestion"
           placeholder="e.g. Why is the checkout service seeing elevated error rates? What changed in the last hour?"
           rows="3"
