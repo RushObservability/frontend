@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "vue-tsc -b"
+    "typecheck": "vue-tsc -b",
+    "security:check": "node scripts/security-check.mjs",
+    "security:audit": "npm audit --audit-level=high"
   },
   "dependencies": {
     "@rushobservability/rum-sdk": "^0.2.0",
