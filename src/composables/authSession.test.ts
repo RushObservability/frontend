@@ -33,4 +33,28 @@ describe('authenticatedFetch', () => {
     expect(listener).not.toHaveBeenCalled()
     stop()
   })
+
+  it('defaults browser API requests to same-origin credentials and no-store', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await authenticatedFetch('/api/v1/auth/me')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/auth/me', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+  })
+
+  it('preserves an explicit credential policy for non-browser callers', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await authenticatedFetch('/api/v1/ingest', { credentials: 'include', cache: 'reload' })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/ingest', {
+      credentials: 'include',
+      cache: 'reload',
+    })
+  })
 })

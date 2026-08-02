@@ -30,7 +30,14 @@ export async function authenticatedFetch(
   init?: RequestInit,
   options?: { ignoreUnauthorized?: boolean },
 ): Promise<Response> {
-  const response = await fetch(input, init)
+  // All browser API calls use the session cookie boundary deliberately. Keep
+  // this default centralized so one-off fetch callers cannot silently omit
+  // credentials or allow sensitive responses to enter the HTTP cache.
+  const response = await fetch(input, {
+    ...init,
+    credentials: init?.credentials ?? 'same-origin',
+    cache: init?.cache ?? 'no-store',
+  })
   if (response.status === 401 && !options?.ignoreUnauthorized) {
     reportSessionExpired()
   }
