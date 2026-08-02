@@ -11,6 +11,7 @@ import type { HistoryEntry } from '../composables/useQueryHistory'
 import TimePicker from '../components/TimePicker.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import PanelCard from '../components/PanelCard.vue'
+import VirtualTable from '../components/VirtualTable.vue'
 import { useTenant } from '../composables/useTenant'
 import { compareFindingStrength, compareFindingSummary, rankCompareFindings } from '../lib/compareFindings'
 import { authenticatedFetch } from '../composables/authSession'
@@ -87,6 +88,10 @@ const histogram = ref<CountBucket[]>([])
 const queryDurationMs = ref<number | null>(null)
 const searching = ref(false)
 const histogramPhase = ref<'idle' | 'waiting' | 'loading' | 'done'>('idle')
+
+function resultAt(index: number): RushEvent {
+  return results.value[index]!
+}
 
 // ═══ Logs match histogram (adaptive, click-to-zoom) ═══
 // Time-bucketed count of matching log lines across the selected range, fetched
@@ -304,6 +309,7 @@ function toggleLive() {
 }
 
 interface LogEntry {
+  key: string
   timestamp: number
   service_name: string
   trace_id: string
@@ -321,6 +327,42 @@ interface LogEntry {
   _source: 'span' | 'otel'
 }
 
+// These rows are replaced on live refreshes, but pagination and detail loads
+// retain the existing objects. WeakMap caches avoid reparsing the same JSON on
+// every computed invalidation while allowing old result pages to be collected.
+const spanAttributesCache = new WeakMap<RushEvent, Record<string, unknown>>()
+const spanEventAttributesCache = new WeakMap<RushEvent, Map<number, Record<string, unknown>>>()
+
+function parsedObject(raw: string | undefined): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function spanAttributes(row: RushEvent): Record<string, unknown> {
+  const cached = spanAttributesCache.get(row)
+  if (cached) return cached
+  const parsed = parsedObject(row.attributes)
+  spanAttributesCache.set(row, parsed)
+  return parsed
+}
+
+function spanEventAttributes(row: RushEvent, index: number): Record<string, unknown> {
+  let cache = spanEventAttributesCache.get(row)
+  if (!cache) {
+    cache = new Map<number, Record<string, unknown>>()
+    spanEventAttributesCache.set(row, cache)
+  }
+  const cached = cache.get(index)
+  if (cached) return cached
+  const parsed = parsedObject(row.event_attributes[index])
+  cache.set(index, parsed)
+  return parsed
+}
+
 const logEntries = computed(() => {
   const entries: LogEntry[] = []
 
@@ -328,21 +370,18 @@ const logEntries = computed(() => {
   for (let ri = 0; ri < results.value.length; ri++) {
     const row = results.value[ri]!
     // Extract resource-level attrs from the parent span (k8s metadata, etc.)
-    let spanResourceAttrs: Record<string, string> = {}
-    try {
-      const parsed = JSON.parse(row.attributes || '{}')
-      for (const [k, v] of Object.entries(parsed)) {
-        if (k.startsWith('k8s.') || k.startsWith('container.') || k.startsWith('cloud.') || k.startsWith('host.') || k === 'deployment.environment') {
-          spanResourceAttrs[k] = String(v)
-        }
+    const spanResourceAttrs: Record<string, string> = {}
+    for (const [k, v] of Object.entries(spanAttributes(row))) {
+      if (k.startsWith('k8s.') || k.startsWith('container.') || k.startsWith('cloud.') || k.startsWith('host.') || k === 'deployment.environment') {
+        spanResourceAttrs[k] = String(v)
       }
-    } catch {}
+    }
     for (let i = 0; i < row.event_names.length; i++) {
-      let attrs: Record<string, unknown> = {}
-      try { attrs = JSON.parse(row.event_attributes[i] || '{}') } catch {}
+      const attrs = spanEventAttributes(row, i)
       const message = (attrs['log.message'] as string) || (attrs['exception.message'] as string) || row.event_names[i] || ''
       const level = (attrs['log.level'] as string) || (attrs['log.severity'] as string) || ''
       entries.push({
+        key: `${row.span_id || `${row.trace_id}:${row.timestamp}`}:event:${i}`,
         timestamp: row.event_timestamps[i] ?? row.timestamp,
         service_name: row.service_name,
         trace_id: row.trace_id,
@@ -366,6 +405,7 @@ const logEntries = computed(() => {
   for (let sourceLogIndex = 0; sourceLogIndex < otelLogs.value.length; sourceLogIndex++) {
     const log = otelLogs.value[sourceLogIndex]!
     entries.push({
+      key: `otel:${log.TraceId || 'no-trace'}:${log.Timestamp}:${sourceLogIndex}`,
       timestamp: log.Timestamp,
       service_name: log.ServiceName,
       trace_id: log.TraceId,
@@ -475,6 +515,10 @@ const logEntries = computed(() => {
     return groups.some(group => group.every(term => matchEntry(e, term)))
   })
 })
+
+function logEntryAt(index: number): LogEntry {
+  return logEntries.value[index]!
+}
 
 const expandedLogRow = ref<number | null>(null)
 
@@ -5417,8 +5461,15 @@ onMounted(async () => {
             <div class="et-col et-col-trace">Trace</div>
           </div>
 
-          <!-- Table rows -->
-          <template v-for="(row, i) in results" :key="row.span_id || i">
+          <!-- Table rows: the virtual window keeps the DOM bounded while
+               preserving global indexes for keyboard navigation and links. -->
+          <VirtualTable
+            :count="results.length"
+            :disabled="expandedRow !== null || inlineTraceRow !== null"
+            @near-end="loadMore"
+          >
+          <template #default="{ index: i }">
+          <template v-for="row in [resultAt(i)]" :key="row.span_id || `${row.trace_id}:${row.timestamp}:${i}`" v-memo="[row.span_id, row.timestamp, row.status, row.http_status_code, row.duration_ns, selectedRowIndex === i, modalRowIndex === i, inlineTraceRow === i, liveNewIds.has(row.span_id)]">
             <div
               class="et-row"
               :class="{
@@ -5518,8 +5569,10 @@ onMounted(async () => {
               <div v-else class="inline-trace-loading text-muted">Failed to load trace</div>
             </div>
           </template>
+          </template>
 
           <!-- Infinite scroll sentinel -->
+          <template #footer>
           <div class="scroll-sentinel">
             <div v-if="loadingMore" class="loading-more">
               <span class="loading-more-spinner">&#9676;</span> Loading more…
@@ -5531,6 +5584,8 @@ onMounted(async () => {
               All {{ total.toLocaleString() }} spans loaded
             </div>
           </div>
+          </template>
+          </VirtualTable>
         </div><!-- /event-table (spans) -->
 
         <!-- ═══ Log Table (Logs mode) ═══ -->
@@ -5562,7 +5617,13 @@ onMounted(async () => {
               <div class="et-col log-col-trace">Trace</div>
             </div>
             <!-- Log rows -->
-            <template v-for="(entry, i) in logEntries" :key="i">
+            <VirtualTable
+              :count="logEntries.length"
+              :disabled="logWordWrap || inlineExpandedLog !== null || inlineTraceRow !== null"
+              @near-end="loadMore"
+            >
+            <template #default="{ index: i }">
+            <template v-for="entry in [logEntryAt(i)]" :key="entry.key" v-memo="[entry.key, entry.timestamp, entry.level, entry.message, selectedRowIndex === i, inlineExpandedLog === i, inlineTraceRow === -(i + 1), highlightLogIdx === i]">
               <div
                 class="et-row"
                 :data-log-i="i"
@@ -5783,8 +5844,10 @@ onMounted(async () => {
                 <div v-else class="inline-trace-loading text-muted">Failed to load trace</div>
               </div>
             </template>
+            </template>
 
             <!-- Infinite scroll sentinel (logs share the same underlying results) -->
+            <template #footer>
             <div class="scroll-sentinel scroll-sentinel-logs">
               <div v-if="loadingMore" class="loading-more">
                 <span class="loading-more-spinner">&#9676;</span> Loading more…
@@ -5796,6 +5859,8 @@ onMounted(async () => {
                 {{ logEntries.length.toLocaleString() }} log entries total
               </div>
             </div>
+            </template>
+            </VirtualTable>
           </template>
         </div><!-- /event-table (logs) -->
 

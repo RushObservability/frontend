@@ -1323,6 +1323,11 @@
   cursor: pointer;
   font-size: 11px;
   transition: background 0.08s;
+  /* Let the browser skip style/layout/paint work for rows outside the
+     viewport. This is native viewport windowing without changing row order,
+     keyboard indexes, or the variable-height inline detail panels. */
+  content-visibility: auto;
+  contain-intrinsic-size: 30px;
 }
 .et-row:hover { background: var(--bg-hover); }
 .et-row.et-selected {
