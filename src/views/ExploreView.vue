@@ -14,6 +14,7 @@ import PanelCard from '../components/PanelCard.vue'
 import { useTenant } from '../composables/useTenant'
 import { compareFindingStrength, compareFindingSummary, rankCompareFindings } from '../lib/compareFindings'
 import { authenticatedFetch } from '../composables/authSession'
+import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from '../composables/storageScope'
 
 interface ContextMenuItem {
   label: string
@@ -2182,10 +2183,18 @@ function formatBubbleUpTime(iso: string): string {
 // ═══ Interaction ═══
 
 // Log word-wrap toggle (persisted in localStorage)
-const logWordWrap = ref(localStorage.getItem('rush-log-word-wrap') === 'true')
+const LOG_WORD_WRAP_KEY = 'rush-log-word-wrap'
+removeLegacyStorageKey(LOG_WORD_WRAP_KEY)
+const logWordWrap = ref(false)
+watch(storageUserId, (userId) => {
+  const key = userScopedStorageKey(LOG_WORD_WRAP_KEY, userId)
+  try { logWordWrap.value = key ? localStorage.getItem(key) === 'true' : false } catch { logWordWrap.value = false }
+}, { immediate: true })
 function toggleLogWordWrap() {
   logWordWrap.value = !logWordWrap.value
-  localStorage.setItem('rush-log-word-wrap', String(logWordWrap.value))
+  const key = userScopedStorageKey(LOG_WORD_WRAP_KEY)
+  if (!key) return
+  try { localStorage.setItem(key, String(logWordWrap.value)) } catch { /* storage may be unavailable */ }
 }
 
 // Inline preview (click row to expand metadata below it)

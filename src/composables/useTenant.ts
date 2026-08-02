@@ -1,12 +1,15 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Tenant } from '../types'
 import { authenticatedFetch } from './authSession'
+import {
+  clearTenantScopedStorage,
+  storageUserId,
+  userScopedStorageKey,
+} from './storageScope'
 
 // The active tenant is stored by NAME (not UUID) because that's what the
 // X-Rush-Tenant header uses and what ClickHouse data has in the tenant_id column.
-const activeTenant = ref<string>(
-  localStorage.getItem('rush-active-tenant') || 'default'
-)
+const activeTenant = ref<string>('default')
 const tenants = ref<Tenant[]>([])
 const loaded = ref(false)
 
@@ -32,6 +35,15 @@ const metricsEnabled = computed(() => {
   return t?.signals?.metrics !== false
 })
 
+watch(storageUserId, (userId) => {
+  if (!userId) {
+    activeTenant.value = 'default'
+    return
+  }
+  const key = userScopedStorageKey('active-tenant', userId)
+  try { activeTenant.value = key ? (localStorage.getItem(key) || 'default') : 'default' } catch { activeTenant.value = 'default' }
+}, { immediate: true })
+
 async function loadTenants(): Promise<void> {
   try {
     const res = await authenticatedFetch('/api/v1/tenants', {
@@ -51,7 +63,8 @@ async function loadTenants(): Promise<void> {
       const fallback = tenants.value.find((t) => t.name === 'default')
       const first = tenants.value[0]
       activeTenant.value = fallback ? fallback.name : (first ? first.name : 'default')
-      localStorage.setItem('rush-active-tenant', activeTenant.value)
+      const key = userScopedStorageKey('active-tenant')
+      try { if (key) localStorage.setItem(key, activeTenant.value) } catch { /* storage may be unavailable */ }
     }
 
     loaded.value = true
@@ -62,8 +75,10 @@ async function loadTenants(): Promise<void> {
 
 function setTenant(name: string): void {
   if (name === activeTenant.value) return
+  clearTenantScopedStorage(activeTenant.value)
   activeTenant.value = name
-  localStorage.setItem('rush-active-tenant', name)
+  const key = userScopedStorageKey('active-tenant')
+  try { if (key) localStorage.setItem(key, name) } catch { /* storage may be unavailable */ }
   // Full page reload so every API call picks up the new tenant header
   window.location.reload()
 }

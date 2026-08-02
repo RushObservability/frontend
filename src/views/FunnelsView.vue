@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import type { Funnel, FunnelStep, FunnelResult } from '../types'
+import { useTenant } from '../composables/useTenant'
+import { removeLegacyStorageKey, storageUserId, tenantScopedStorageKey } from '../composables/storageScope'
 
 const api = useApi()
 const { canWrite } = useAuth()
+const { activeTenant } = useTenant()
 
 // ── State ──
 const funnels = ref<Funnel[]>([])
@@ -16,10 +19,21 @@ const resultError = ref<string | null>(null)
 
 // Time range — default 1h, persisted across navigations
 const RANGE_KEY = 'funnels_range_minutes'
-const rangeMinutes = ref<number>(Number(localStorage.getItem(RANGE_KEY)) || 60)
+removeLegacyStorageKey(RANGE_KEY)
+const rangeMinutes = ref<number>(60)
+function loadRange() {
+  const key = tenantScopedStorageKey(RANGE_KEY, activeTenant.value)
+  try {
+    const stored = key ? Number(localStorage.getItem(key)) : NaN
+    rangeMinutes.value = Number.isFinite(stored) && stored > 0 ? stored : 60
+  } catch { rangeMinutes.value = 60 }
+}
+watch([storageUserId, activeTenant], loadRange, { immediate: true })
 function setRange(v: number) {
   rangeMinutes.value = v
-  localStorage.setItem(RANGE_KEY, String(v))
+  const key = tenantScopedStorageKey(RANGE_KEY, activeTenant.value)
+  if (!key) return
+  try { localStorage.setItem(key, String(v)) } catch { /* storage may be unavailable */ }
 }
 const rangeOptions = [
   { label: '1h', value: 60 },

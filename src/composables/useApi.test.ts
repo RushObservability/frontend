@@ -4,7 +4,7 @@ describe('tenant-aware API transport', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.stubGlobal('localStorage', {
-      getItem: vi.fn((key: string) => key === 'rush-active-tenant' ? 'customer-a' : null),
+      getItem: vi.fn((key: string) => key === 'rush:v2:user-a:user:active-tenant' ? 'customer-a' : null),
       setItem: vi.fn(),
       removeItem: vi.fn(),
       clear: vi.fn(),
@@ -21,6 +21,8 @@ describe('tenant-aware API transport', () => {
       .mockResolvedValueOnce(new Response('data: [DONE]\n\n', { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
+    const { setStorageUserId } = await import('./storageScope')
+    setStorageUserId('user-a')
     const { useApi } = await import('./useApi')
     const api = useApi()
 

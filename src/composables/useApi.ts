@@ -121,6 +121,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     // Invalid credentials and an already-ended manual logout are expected 401s;
     // neither should be presented as an expired in-app session.
     ignoreUnauthorized: path === '/auth/login' || path === '/auth/logout',
+    requestKey: (!options?.method || options.method.toUpperCase() === 'GET') ? `api:${path}` : undefined,
   })
   if (!res.ok) {
     // Do not surface or log the response body: it may contain stack traces,
@@ -1250,8 +1251,11 @@ export function useApi() {
   async function promQuery(query: string, time?: number): Promise<PromVectorResponse> {
     const params = new URLSearchParams({ query })
     if (time !== undefined) params.set('time', String(time))
-    const res = await authenticatedFetch(`/prom/api/v1/query?${params}`, { headers: promHeaders() })
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
+    const res = await authenticatedFetch(`/prom/api/v1/query?${params}`, { headers: promHeaders() }, { requestKey: 'prom:query' })
+    if (!res.ok) {
+      try { await res.body?.cancel() } catch { /* best effort: release the body */ }
+      throw new Error(safeApiErrorMessage(res.status, 'Prometheus query'))
+    }
     const json = await res.json()
     return json.data as PromVectorResponse
   }
@@ -1265,24 +1269,33 @@ export function useApi() {
       end: String(end),
       step: String(step),
     })
-    const res = await authenticatedFetch(`/prom/api/v1/query_range?${params}`, { headers: promHeaders() })
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
+    const res = await authenticatedFetch(`/prom/api/v1/query_range?${params}`, { headers: promHeaders() }, { requestKey: 'prom:query-range' })
+    if (!res.ok) {
+      try { await res.body?.cancel() } catch { /* best effort: release the body */ }
+      throw new Error(safeApiErrorMessage(res.status, 'Prometheus range query'))
+    }
     const json = await res.json()
     return json.data as PromMatrixResponse
   }
 
   async function promLabels(match?: string): Promise<string[]> {
     const qs = match ? `?match[]=${encodeURIComponent(match)}` : ''
-    const res = await authenticatedFetch(`/prom/api/v1/labels${qs}`, { headers: promHeaders() })
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
+    const res = await authenticatedFetch(`/prom/api/v1/labels${qs}`, { headers: promHeaders() }, { requestKey: 'prom:labels' })
+    if (!res.ok) {
+      try { await res.body?.cancel() } catch { /* best effort: release the body */ }
+      throw new Error(safeApiErrorMessage(res.status, 'Prometheus label query'))
+    }
     const json = await res.json()
     return json.data as string[]
   }
 
   async function promLabelValues(label: string, match?: string): Promise<string[]> {
     const qs = match ? `?match[]=${encodeURIComponent(match)}` : ''
-    const res = await authenticatedFetch(`/prom/api/v1/label/${encodeURIComponent(label)}/values${qs}`, { headers: promHeaders() })
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`)
+    const res = await authenticatedFetch(`/prom/api/v1/label/${encodeURIComponent(label)}/values${qs}`, { headers: promHeaders() }, { requestKey: 'prom:label-values' })
+    if (!res.ok) {
+      try { await res.body?.cancel() } catch { /* best effort: release the body */ }
+      throw new Error(safeApiErrorMessage(res.status, 'Prometheus label-values query'))
+    }
     const json = await res.json()
     return json.data as string[]
   }

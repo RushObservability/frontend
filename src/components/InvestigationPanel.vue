@@ -26,6 +26,52 @@ interface Turn {
   done: boolean
 }
 
+const MAX_SSE_LINE_CHARS = 512_000
+const MAX_SSE_BUFFER_CHARS = 1_000_000
+const MAX_SSE_EVENTS = 10_000
+const MAX_EVENT_FIELD_CHARS = 1_000_000
+const SSE_READ_TIMEOUT_MS = 45_000
+
+function boundedText(value: string | undefined): string | undefined {
+  if (!value || value.length <= MAX_EVENT_FIELD_CHARS) return value
+  return `${value.slice(0, MAX_EVENT_FIELD_CHARS)}\n[truncated]`
+}
+
+function boundedEvent(event: AgentEvent): AgentEvent {
+  return {
+    ...event,
+    text: boundedText(event.text),
+    data: boundedText(event.data),
+    message: boundedText(event.message),
+  }
+}
+
+function appendBounded(current: string, addition: string): string {
+  if (!addition) return current
+  const next = current + addition
+  return next.length <= MAX_EVENT_FIELD_CHARS
+    ? next
+    : `${next.slice(0, MAX_EVENT_FIELD_CHARS)}\n[truncated]`
+}
+
+async function readChunkWithTimeout(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error('The investigation stream timed out while waiting for evidence.')
+          error.name = 'TimeoutError'
+          reject(error)
+        }, SSE_READ_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 const props = defineProps<{
   eventId?: string
   question?: string
@@ -118,7 +164,7 @@ function handleEvent(event: AgentEvent) {
       }
       break
     case 'thinking_delta':
-      thinking.value += event.text || ''
+      thinking.value = appendBounded(thinking.value, event.text || '')
       break
     case 'tool_call':
       if (thinking.value) {
@@ -167,6 +213,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
 
   const controller = new AbortController()
   abortController.value = controller
+  let streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null
 
   try {
     const resp = await api.openInvestigationStream(body, controller.signal)
@@ -178,27 +225,40 @@ async function streamInvestigation(body: Record<string, unknown>) {
       return
     }
 
-    const reader = resp.body!.getReader()
+    if (!resp.body) throw new Error('The investigation stream returned no body.')
+    const reader = resp.body.getReader()
+    streamReader = reader
     const decoder = new TextDecoder()
     let buffer = ''
+    let eventCount = 0
     let receivedTerminalEvent = false
 
     while (true) {
-      const { done: streamDone, value } = await reader.read()
+      const { done: streamDone, value } = await readChunkWithTimeout(reader)
       if (streamDone) break
 
       buffer += decoder.decode(value, { stream: true })
+      if (buffer.length > MAX_SSE_BUFFER_CHARS) {
+        throw new Error('The investigation stream sent an oversized event.')
+      }
       const lines = buffer.split('\n')
       buffer = lines.pop() || ''
 
       for (const line of lines) {
+        if (line.length > MAX_SSE_LINE_CHARS) {
+          throw new Error('The investigation stream sent an oversized event.')
+        }
         const trimmed = line.trim()
         if (!trimmed.startsWith('data: ')) continue
         const json = trimmed.slice(6)
         if (json === '[DONE]') continue
+        eventCount += 1
+        if (eventCount > MAX_SSE_EVENTS) {
+          throw new Error('The investigation stream exceeded its event limit.')
+        }
 
         try {
-          const event: AgentEvent = JSON.parse(json)
+          const event: AgentEvent = boundedEvent(JSON.parse(json))
           if (event.type === 'done' || event.type === 'error') {
             receivedTerminalEvent = true
           }
@@ -219,12 +279,19 @@ async function streamInvestigation(body: Record<string, unknown>) {
       errorMsg.value = 'The evidence stream was interrupted before the investigation completed.'
     }
   } catch (e: any) {
+    // A timeout/parse/size failure must release the underlying connection;
+    // otherwise a stalled SSE reader can remain alive after the UI has moved on.
+    try { await streamReader?.cancel() } catch { /* best effort: release the stream */ }
+    if (e.name === 'TimeoutError') controller.abort()
     if (e.name !== 'AbortError') {
-      errorMsg.value = e.message || 'Connection failed'
+      errorMsg.value = e.name === 'TimeoutError'
+        ? 'The investigation stream timed out. Retry to continue the investigation.'
+        : e.message || 'Connection failed'
     }
   } finally {
     running.value = false
     abortController.value = null
+    streamReader = null
   }
 }
 

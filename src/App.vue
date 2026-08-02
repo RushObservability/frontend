@@ -8,6 +8,7 @@ import { useLicense } from './composables/useLicense'
 import { availableAddons } from './integrations/catalog'
 import { isAddonEnabled } from './composables/useIntegrationEnabled'
 import { onSessionExpired } from './composables/authSession'
+import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from './composables/storageScope'
 import CommandPalette from './components/CommandPalette.vue'
 import { defaultTheme } from './config'
 
@@ -20,10 +21,9 @@ const isLoginPage = computed(() => route.name === 'login')
 
 // A saved preference always wins; otherwise fall back to the deploy default
 // (DEFAULT_THEME env var, defaults to light when unset).
-const _storedTheme = localStorage.getItem('rush-theme')
-const theme = ref<'dark' | 'light'>(
-  _storedTheme === 'dark' || _storedTheme === 'light' ? _storedTheme : defaultTheme()
-)
+const THEME_STORAGE_KEY = 'rush-theme'
+removeLegacyStorageKey(THEME_STORAGE_KEY)
+const theme = ref<'dark' | 'light'>(defaultTheme())
 const appEnv = import.meta.env.MODE
 
 function toggleTheme() {
@@ -104,8 +104,21 @@ async function handleLogout() {
 
 watch(theme, (t) => {
   document.documentElement.setAttribute('data-theme', t)
-  localStorage.setItem('rush-theme', t)
 }, { immediate: true })
+
+watch(storageUserId, (userId) => {
+  const key = userScopedStorageKey(THEME_STORAGE_KEY, userId)
+  let stored: string | null = null
+  try { stored = key ? localStorage.getItem(key) : null } catch { /* storage may be unavailable */ }
+  if (stored === 'dark' || stored === 'light') theme.value = stored
+  else if (!userId) theme.value = defaultTheme()
+}, { immediate: true })
+
+watch([theme, storageUserId], ([t, userId]) => {
+  const key = userScopedStorageKey(THEME_STORAGE_KEY, userId)
+  if (!key) return
+  try { localStorage.setItem(key, t) } catch { /* storage may be unavailable */ }
+})
 
 onMounted(async () => {
   document.documentElement.setAttribute('data-theme', theme.value)

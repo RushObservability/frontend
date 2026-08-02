@@ -2,6 +2,7 @@ import { ref, computed, readonly } from 'vue'
 import type { AuthUser } from '../types'
 import { useApi } from './useApi'
 import { markSessionActive, onSessionExpired } from './authSession'
+import { clearAllScopedStorage, setStorageUserId, storageUserId } from './storageScope'
 
 const user = ref<AuthUser | null>(null)
 const checked = ref(false)
@@ -17,6 +18,8 @@ const { login: apiLogin, logout: apiLogout, getMe } = useApi()
 // The App shell owns the corresponding route change.
 onSessionExpired(() => {
   user.value = null
+  setStorageUserId(null)
+  clearAllScopedStorage()
   checked.value = true
   loading.value = false
 })
@@ -26,9 +29,12 @@ async function checkSession(): Promise<void> {
   loading.value = true
   try {
     user.value = await getMe()
+    setStorageUserId(user.value.id)
     markSessionActive()
   } catch {
     user.value = null
+    setStorageUserId(null)
+    clearAllScopedStorage()
   } finally {
     checked.value = true
     loading.value = false
@@ -37,7 +43,9 @@ async function checkSession(): Promise<void> {
 
 async function login(username: string, password: string): Promise<void> {
   const res = await apiLogin(username, password)
+  if (storageUserId.value && storageUserId.value !== res.user.id) clearAllScopedStorage()
   user.value = res.user
+  setStorageUserId(res.user.id)
   checked.value = true
   markSessionActive()
 }
@@ -47,6 +55,8 @@ async function logout(): Promise<void> {
     await apiLogout()
   } finally {
     user.value = null
+    setStorageUserId(null)
+    clearAllScopedStorage()
     checked.value = false
   }
 }
