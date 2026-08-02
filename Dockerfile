@@ -23,10 +23,10 @@ RUN npm run build
 # ── Tools stage ──────────────────────────────────────────────────────────────
 # The runtime image (Chainguard nginx) is distroless — no shell, and we can't RUN
 # in it. Stage a busybox multi-call binary + the applet symlinks the entrypoint
-# needs (sh, sed, mkdir) so it can render the config template at start.
+# needs (sh, sed, mkdir, grep) so it can validate and render config at start.
 FROM cgr.dev/chainguard/busybox:latest AS tools
 # The busybox image also runs non-root, so assemble the tools under /tmp (writable).
-RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/busybox; for a in sh sed mkdir; do ln -s busybox /tmp/tools/$a; done"]
+RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/busybox; for a in sh sed mkdir grep; do ln -s busybox /tmp/tools/$a; done"]
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
 # Chainguard nginx: 0-CVE, distroless, runs as non-root (uid 65532) and listens
@@ -40,6 +40,7 @@ COPY --from=tools /tmp/tools/ /usr/local/bin/
 # Top-level config (writable paths under /tmp, logs to stdout/stderr, includes
 # the rendered server block). Overwrites the image default.
 COPY nginx-main.conf /etc/nginx/nginx.conf
+COPY nginx-security-headers.conf /etc/nginx/security-headers.conf
 # Server-block template rendered at start by the entrypoint. The Helm chart mounts
 # its own template over this path; standalone runs use this baked default.
 COPY nginx.conf /etc/nginx/templates/default.conf.template

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
+import { withoutQueryParameter } from '../lib/url'
 
 const route = useRoute()
+const router = useRouter()
 const api = useApi()
 
 const loading = ref(true)
@@ -139,6 +141,21 @@ function protocolForProvider(p: string): string {
 
 onMounted(async () => {
   token.value = (route.query.token as string) || ''
+
+  // The setup token is a one-time credential. Remove it from the address bar
+  // and browser history immediately after reading it so later navigation,
+  // screenshots, referrers, and copied URLs cannot retain the token.
+  if (typeof route.query.token === 'string') {
+    try {
+      await router.replace({
+        path: route.path,
+        query: withoutQueryParameter(route.query, 'token'),
+      })
+    } catch {
+      // Token cleanup is best effort; validation still uses the in-memory copy.
+    }
+  }
+
   if (!token.value) {
     error.value = 'No setup token provided.'
     loading.value = false

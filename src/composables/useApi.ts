@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { useTenant } from './useTenant'
 import { authenticatedFetch } from './authSession'
+import { safeApiErrorMessage } from '../lib/apiError'
 import type {
   AuthUser,
   TraceResponse,
@@ -122,18 +123,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ignoreUnauthorized: path === '/auth/login' || path === '/auth/logout',
   })
   if (!res.ok) {
-    const text = await res.text()
-    // Extract only a safe "message" field from JSON bodies; never surface raw server
-    // text (may contain stack traces, SQL, internal paths) directly to the UI.
-    let userMessage: string
-    try {
-      const json = JSON.parse(text)
-      userMessage = typeof json.message === 'string' ? json.message : `Request failed (${res.status})`
-    } catch {
-      userMessage = `Request failed (${res.status})`
-    }
-    console.debug('[API] error response:', path, res.status, text)
-    throw new Error(userMessage)
+    // Do not surface or log the response body: it may contain stack traces,
+    // SQL, internal paths, or sensitive integration details.
+    try { await res.body?.cancel() } catch { /* best effort: release the body */ }
+    throw new Error(safeApiErrorMessage(res.status))
   }
   // Tolerate empty bodies (e.g. 204 No Content from DELETE endpoints) — res.json()
   // would otherwise throw "Unexpected end of JSON input" and make a successful
@@ -1550,9 +1543,8 @@ export function useApi() {
       }),
     })
     if (!res.ok) {
-      let msg = `Export failed (${res.status})`
-      try { const j = JSON.parse(await res.text()); if (typeof j.message === 'string') msg = j.message } catch { /* noop */ }
-      throw new Error(msg)
+      try { await res.body?.cancel() } catch { /* best effort: release the body */ }
+      throw new Error(safeApiErrorMessage(res.status, 'Export'))
     }
     const blob = await res.blob()
     const cd = res.headers.get('Content-Disposition') || ''

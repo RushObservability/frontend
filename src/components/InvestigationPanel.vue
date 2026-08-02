@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, nextTick, watch, computed, onMounted } from 'vue'
 import { useApi } from '../composables/useApi'
+import { safeApiErrorMessage } from '../lib/apiError'
 import type { InvestigationSession, InvestigationTemplate } from '../types'
 
 interface AgentEvent {
@@ -171,8 +172,8 @@ async function streamInvestigation(body: Record<string, unknown>) {
     const resp = await api.openInvestigationStream(body, controller.signal)
 
     if (!resp.ok) {
-      const text = await resp.text()
-      errorMsg.value = `${resp.status}: ${text}`
+      try { await resp.body?.cancel() } catch { /* best effort: release the body */ }
+      errorMsg.value = safeApiErrorMessage(resp.status, 'Investigation request')
       running.value = false
       return
     }
