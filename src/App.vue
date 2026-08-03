@@ -215,6 +215,7 @@ watch(isAuthenticated, async (authed) => {
             <router-link to="/services" class="side-nav-item" :class="{ active: currentNav === 'services' || currentNav === 'service-detail' }"><span class="side-nav-dot"></span>Services</router-link>
             <router-link to="/dashboards" class="side-nav-item" :class="{ active: currentNav === 'dashboards' || currentNav === 'dashboard' }"><span class="side-nav-dot"></span>Dashboards</router-link>
             <router-link to="/metrics" class="side-nav-item" :class="{ active: currentNav === 'metrics' || currentNav === 'metric-detail' }"><span class="side-nav-dot"></span>Metrics</router-link>
+            <router-link v-if="features.rum !== false" to="/rum" class="side-nav-item" :class="{ active: currentNav === 'rum' || currentNav === 'rum-detail' }"><span class="side-nav-dot"></span>RUM</router-link>
           </div>
           <div class="nav-group">
             <div class="nav-group-label">Respond</div>
@@ -226,8 +227,13 @@ watch(isAuthenticated, async (authed) => {
           <div class="nav-group">
             <div class="nav-group-label">Investigate</div>
             <router-link v-if="features.sre_agent" to="/sre-agent" class="side-nav-item" :class="{ active: currentNav === 'sre-agent' }"><span class="side-nav-dot"></span>SRE Agent</router-link>
-            <router-link v-if="features.rum !== false" to="/rum" class="side-nav-item" :class="{ active: currentNav === 'rum' || currentNav === 'rum-detail' }"><span class="side-nav-dot"></span>RUM</router-link>
-            <router-link to="/investigate" class="side-nav-item" :class="{ active: currentNav === 'investigate' }"><span class="side-nav-dot"></span>Investigations</router-link>
+          </div>
+          <div class="nav-group">
+            <div class="nav-group-label">Notebooks</div>
+            <div class="side-nav-item is-disabled" aria-disabled="true" title="Notebooks are coming soon">
+              <span class="side-nav-dot"></span>
+              <span>Coming soon</span>
+            </div>
           </div>
           <div class="nav-group">
             <div class="nav-group-label">Control</div>
@@ -1264,6 +1270,20 @@ button {
   background: var(--bg-raised);
   transform: translateX(1px);
 }
+
+.side-nav-item.is-disabled {
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0.68;
+}
+
+.side-nav-item.is-disabled:hover {
+  color: var(--text-muted);
+  background: transparent;
+  transform: none;
+}
+
+.side-nav-item.is-disabled .side-nav-dot { background: var(--border-default); }
 
 .side-nav-item.active {
   color: var(--amber);
