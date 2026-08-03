@@ -227,12 +227,9 @@ watch(isAuthenticated, async (authed) => {
           <div class="nav-group">
             <div class="nav-group-label">Investigate</div>
             <router-link v-if="features.sre_agent" to="/sre-agent" class="side-nav-item" :class="{ active: currentNav === 'sre-agent' }"><span class="side-nav-dot"></span>SRE Agent</router-link>
-          </div>
-          <div class="nav-group">
-            <div class="nav-group-label">Notebooks</div>
             <div class="side-nav-item is-disabled" aria-disabled="true" title="Notebooks are coming soon">
               <span class="side-nav-dot"></span>
-              <span>Coming soon</span>
+              <span>Notebooks</span>
             </div>
           </div>
           <div class="nav-group">

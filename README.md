@@ -33,6 +33,19 @@ Needs Node 22+ and query-api running on `:8080`; the dev server proxies `/api` a
 make up         # nginx on :5180, proxying to query-api on the host
 ```
 
+To validate the metrics used by the capacity view, run this while query-api and
+sre-agent expose their `/metrics` endpoints:
+
+```bash
+make validate-capacity-metrics
+```
+
+The check defaults to `http://localhost:8080/metrics` and
+`http://localhost:8081/metrics`. Override either endpoint with
+`QUERY_API_METRICS_URL` or `SRE_AGENT_METRICS_URL`. It verifies required metric
+families, Prometheus types, exact low-cardinality labels, and rejects tenant or
+request identity labels.
+
 ## What's in it
 
 Explore (unified trace + log search with a query builder), Services and per-service detail with a dependency graph, a PromQL Metrics explorer, Dashboards, Alerts and notification channels, SLOs with burn-rate, Anomaly rules, RUM (per-app vitals, pages, errors, sessions), Stats, and Settings (tenants, users, SSO, API keys, retention, the metric firewall). Routes live in `src/router.ts`; views in `src/views`.

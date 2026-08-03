@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "typecheck": "vue-tsc -b",
+    "validate:capacity-metrics": "node scripts/validate-capacity-metrics.mjs",
     "security:check": "node scripts/security-check.mjs",
     "security:audit": "npm audit --audit-level=high"
   },

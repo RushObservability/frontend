@@ -1,4 +1,4 @@
-.PHONY: dev build preview install ensure-deps test clean docker up down lint typecheck help
+.PHONY: dev build preview install ensure-deps test validate-capacity-metrics clean docker up down lint typecheck help
 
 ## Development
 
@@ -27,6 +27,9 @@ test: ensure-deps      ## Run unit tests (vitest)
 
 typecheck: ensure-deps ## Run vue-tsc type checking
 	npx vue-tsc --noEmit
+
+validate-capacity-metrics: ensure-deps ## Validate query-api and SRE-agent metric names, types, and labels
+	npm run validate:capacity-metrics
 
 lint: ensure-deps      ## Lint with vue-tsc
 	npx vue-tsc --noEmit
