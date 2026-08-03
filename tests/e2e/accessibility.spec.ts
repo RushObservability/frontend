@@ -68,7 +68,7 @@ test('shell navigation stays scrollable on a phone-sized viewport', async ({ pag
   await page.goto('/services')
 
   await expect(page.locator('.topbar')).toBeVisible()
-  await expect(page.locator('.nav')).toHaveCSS('overflow-x', 'auto')
+  await expect(page.locator('.sidebar-nav')).toHaveCSS('overflow-x', 'auto')
   await expect(page.locator('.main')).toBeVisible()
 })
 
