@@ -5468,7 +5468,11 @@ onMounted(async () => {
             @near-end="loadMore"
           >
           <template #default="{ index: i }">
-          <template v-for="row in [resultAt(i)]" :key="row.span_id || `${row.trace_id}:${row.timestamp}:${i}`" v-memo="[row.span_id, row.timestamp, row.status, row.http_status_code, row.duration_ns, selectedRowIndex === i, modalRowIndex === i, inlineTraceRow === i, liveNewIds.has(row.span_id)]">
+          <!-- VirtualTable already bounds the DOM. Keep this wrapper free of
+               v-memo: Vue can receive a transient row during result refreshes,
+               and memoizing a template v-for makes that update crash the whole
+               Explore surface instead of waiting for the next result batch. -->
+          <template v-for="row in [resultAt(i)]" :key="row.span_id || `${row.trace_id}:${row.timestamp}:${i}`">
             <div
               class="et-row"
               :class="{
@@ -5622,7 +5626,7 @@ onMounted(async () => {
               @near-end="loadMore"
             >
             <template #default="{ index: i }">
-            <template v-for="entry in [logEntryAt(i)]" :key="entry.key" v-memo="[entry.key, entry.timestamp, entry.level, entry.message, selectedRowIndex === i, inlineExpandedLog === i, inlineTraceRow === -(i + 1), highlightLogIdx === i]">
+            <template v-for="entry in [logEntryAt(i)]" :key="entry.key">
               <div
                 class="et-row"
                 :data-log-i="i"

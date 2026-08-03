@@ -196,13 +196,40 @@
   white-space: nowrap;
 }
 
-/* ═══ Shared service table surface ═══
-   Span and log bodies use the same DataTable shell as Endpoints/Top Errors.
+/* ═══ Explore table rhythm ═══
+   Service spans/logs use the same compact evidence-table cadence as Explore:
+   short 28px headers, 30px rows, quiet dividers, and a raised header band.
    The slots below keep their domain-specific method, duration, level, and
-   trace affordances without reintroducing a second row system. */
-.slt-data-table :deep(.data-table) { min-width: 720px; }
-.slt-data-table :deep(.data-table th) { font-size: 10px; letter-spacing: 0.06em; }
-.slt-data-table :deep(.data-table td) { color: var(--text-secondary); }
+   trace affordances without introducing a second row system. */
+.slt-data-table :deep(.data-table-wrap) {
+  background: transparent;
+  border-radius: 0;
+}
+.slt-data-table :deep(.data-table) {
+  min-width: 720px;
+  font-size: 11px;
+}
+.slt-data-table :deep(.data-table thead) {
+  box-shadow: 0 1px 0 var(--border-default);
+}
+.slt-data-table :deep(.data-table th) {
+  height: 28px;
+  padding: 0 10px;
+  background: var(--bg-raised);
+  border-bottom-color: var(--border-default);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.slt-data-table :deep(.data-table td) {
+  height: 30px;
+  padding: 0 10px;
+  color: var(--text-secondary);
+  border-bottom-color: var(--border-subtle);
+}
+.slt-data-table :deep(.data-table tbody tr:hover td) {
+  background: var(--bg-hover);
+}
 .slt-data-table :deep(.data-table tbody tr.slt-error td:first-child) { box-shadow: inset 2px 0 0 var(--error); }
 .slt-data-table :deep(.data-table tbody tr[aria-expanded='true'] td) { background: var(--bg-hover); }
 .slt-data-table :deep(.data-table-detail-row > td) { background: transparent; }
@@ -277,8 +304,8 @@
   text-transform: uppercase;
 }
 .lvl-error { background: rgba(229, 88, 79, 0.12); color: var(--error); }
-.lvl-warn  { background: rgba(59, 130, 246, 0.12); color: var(--amber); }
-.lvl-info  { background: rgba(91, 141, 217, 0.12); color: var(--method-post); }
+.lvl-warn  { background: var(--warning-dim); color: var(--warning); }
+.lvl-info  { background: var(--amber-dim); color: var(--amber); }
 .lvl-debug { background: rgba(148, 163, 184, 0.12); color: var(--text-muted); }
 
 /* ═══ Empty state ═══ */
@@ -333,7 +360,25 @@
 .dist-info { background: var(--method-post); }
 .dist-debug { background: var(--text-muted); }
 
-.slt-logs-mode .slt-data-table :deep(.data-table) { min-width: 640px; }
+.slt-logs-mode .slt-data-table :deep(.data-table) {
+  min-width: 640px;
+  table-layout: fixed;
+}
+.slt-logs-mode .slt-data-table :deep(.data-table .slt-log-col-time) {
+  width: 138px;
+}
+.slt-logs-mode .slt-data-table :deep(.data-table .slt-log-col-level) {
+  width: 58px;
+}
+.slt-logs-mode .slt-data-table :deep(.data-table .slt-log-col-service) {
+  width: 112px;
+}
+.slt-logs-mode .slt-data-table :deep(.data-table .slt-log-col-detail) {
+  width: 72px;
+}
+.slt-logs-mode .slt-data-table :deep(.data-table .slt-log-col-message) {
+  width: auto;
+}
 .slt-logs-mode .slt-data-table :deep(.data-table td.slt-message-cell) { color: var(--text-primary); }
 .slt-logs-mode .slt-data-table :deep(.data-table tbody tr.slt-error td:first-child) { box-shadow: inset 2px 0 0 var(--error); }
 .slt-open-log {

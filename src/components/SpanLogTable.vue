@@ -344,13 +344,13 @@ const spanTableRows = computed(() => displaySpans.value.map((row, index) => ({
 
 const logTableColumns = computed<DataTableColumn[]>(() => {
   const columns: DataTableColumn[] = [
-    { key: 'timestamp', label: 'Time' },
-    { key: 'level', label: 'Level' },
+    { key: 'timestamp', label: 'Time', headerClass: 'slt-log-col-time', cellClass: 'slt-log-col-time' },
+    { key: 'level', label: 'Level', headerClass: 'slt-log-col-level', cellClass: 'slt-log-col-level' },
   ]
-  if (props.showService) columns.push({ key: 'serviceName', label: 'Service' })
+  if (props.showService) columns.push({ key: 'serviceName', label: 'Service', headerClass: 'slt-log-col-service', cellClass: 'slt-log-col-service' })
   columns.push(
-    { key: 'message', label: 'Message', cellClass: 'slt-message-cell' },
-    { key: 'id', label: 'Detail', align: 'right' },
+    { key: 'message', label: 'Message', headerClass: 'slt-log-col-message', cellClass: 'slt-log-col-message slt-message-cell' },
+    { key: 'id', label: 'Detail', align: 'right', headerClass: 'slt-log-col-detail', cellClass: 'slt-log-col-detail' },
   )
   return columns
 })
@@ -386,11 +386,13 @@ function onLogTableRowClick(row: Record<string, unknown>) {
 // ═══ Formatters ═══
 function formatTimestamp(ns: number): string {
   const d = new Date(ns / 1_000_000)
+  const month = (d.getMonth() + 1).toString().padStart(2, '0')
+  const day = d.getDate().toString().padStart(2, '0')
+  const year = d.getFullYear().toString()
   const hh = d.getHours().toString().padStart(2, '0')
   const mm = d.getMinutes().toString().padStart(2, '0')
   const ss = d.getSeconds().toString().padStart(2, '0')
-  const ms = d.getMilliseconds().toString().padStart(3, '0')
-  return `${hh}:${mm}:${ss}.${ms}`
+  return `${month}/${day}/${year} ${hh}:${mm}:${ss}`
 }
 
 function formatDuration(ns: number): string {

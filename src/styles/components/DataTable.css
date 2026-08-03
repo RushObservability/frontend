@@ -1,6 +1,8 @@
 .data-table-wrap {
   overflow-x: auto;
   padding: 0;
+  background: var(--bg-surface);
+  border-radius: var(--r-md);
 }
 
 .data-table {
@@ -13,18 +15,19 @@
   position: sticky;
   top: 0;
   z-index: 1;
+  box-shadow: 0 1px 0 var(--border-subtle);
 }
 
 .data-table th {
-  padding: var(--sp-3) var(--sp-4);
+  padding: 12px 16px;
   text-align: left;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
-  background: var(--bg-raised);
-  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
   white-space: nowrap;
 }
 
@@ -38,7 +41,7 @@
   justify-content: inherit;
   gap: 3px;
   width: 100%;
-  padding: var(--sp-3) var(--sp-4);
+  padding: 12px 16px;
   color: inherit;
   font: inherit;
   text-align: inherit;
@@ -69,13 +72,14 @@
 }
 
 .data-table td {
-  padding: var(--sp-3) var(--sp-4);
+  padding: 15px 16px;
+  color: var(--text-secondary);
   border-bottom: 1px solid var(--border-subtle);
   white-space: nowrap;
 }
 
 .data-table tbody tr:hover td {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--amber-dim) 42%, var(--bg-surface));
 }
 
 .data-table tbody tr:last-child td {

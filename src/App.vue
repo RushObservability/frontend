@@ -147,116 +147,21 @@ watch(isAuthenticated, async (authed) => {
   <div class="app">
     <a v-if="!isLoginPage" class="skip-link" href="#main-content">Skip to main content</a>
     <header v-if="!isLoginPage" class="topbar">
-      <div class="topbar-left">
-        <router-link to="/" class="logo">
-          <img src="/logo-mark.svg" alt="Rush" class="logo-icon" />
-          <span class="logo-text">Rush</span>
-        </router-link>
-        <nav class="nav">
-          <router-link
-            to="/"
-            class="nav-item"
-            :class="{ active: currentNav === 'explore' }"
-          >
-            Explore
-          </router-link>
-          <router-link
-            to="/services"
-            class="nav-item"
-            :class="{ active: currentNav === 'services' }"
-          >
-            Services
-          </router-link>
-          <router-link
-            to="/metrics"
-            class="nav-item"
-            :class="{ active: currentNav === 'metrics' }"
-          >
-            Metrics
-          </router-link>
-          <router-link
-            v-if="features.rum !== false"
-            to="/rum"
-            class="nav-item"
-            :class="{ active: currentNav === 'rum' }"
-          >
-            RUM
-          </router-link>
-          <router-link
-            to="/dashboards"
-            class="nav-item"
-            :class="{ active: currentNav === 'dashboards' || currentNav === 'dashboard' }"
-          >
-            Dashboards
-          </router-link>
-          <router-link
-            v-if="hasIntegrations"
-            to="/integrations"
-            class="nav-item"
-            :class="{ active: typeof currentNav === 'string' && currentNav.startsWith('integration') }"
-          >
-            Integrations
-          </router-link>
-          <router-link
-            to="/alerts"
-            class="nav-item"
-            :class="{ active: ['alerts', 'monitor-create', 'monitor-detail', 'monitor-edit', 'alert-rule-add', 'alert-rule-edit', 'alert-channel-add'].includes(currentNav) }"
-          >
-            Monitors
-          </router-link>
-          <router-link
-            to="/anomaly"
-            class="nav-item"
-            :class="{ active: currentNav === 'anomaly' }"
-          >
-            Anomaly
-          </router-link>
-          <router-link
-            to="/slos"
-            class="nav-item"
-            :class="{ active: currentNav === 'slos' }"
-          >
-            SLOs
-          </router-link>
-          <router-link
-            to="/deploys"
-            class="nav-item"
-            :class="{ active: currentNav === 'deploys' }"
-          >
-            Deploys
-          </router-link>
-
-          <router-link
-            v-if="features.sre_agent"
-            to="/sre-agent"
-            class="nav-item"
-            :class="{ active: currentNav === 'sre-agent' }"
-          >
-            SRE Agent
-          </router-link>
-          <router-link
-            v-if="isAdmin"
-            to="/audit"
-            class="nav-item"
-            :class="{ active: currentNav === 'audit' }"
-          >
-            Audit
-          </router-link>
-          <router-link
-            v-if="isAdmin"
-            to="/settings"
-            class="nav-item"
-            :class="{ active: currentNav === 'settings' }"
-          >
-            Settings
-          </router-link>
-        </nav>
-      </div>
+      <router-link to="/" class="logo" aria-label="Rush Observability home">
+        <span class="logo-icon" aria-hidden="true">R</span>
+        <span class="logo-text">Rush Observability</span>
+      </router-link>
+      <button class="global-search" type="button" @click="paletteOpen = true" aria-label="Open global search">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.1"/><path d="m10 10 3.2 3.2"/></svg>
+        <span>Search services, traces, logs, metrics</span>
+        <kbd>⌘ K</kbd>
+      </button>
       <div class="topbar-right">
         <div v-if="isAuthenticated && showSwitcher" class="tenant-menu-wrap">
           <button class="tenant-menu-btn" @click="toggleTenantMenu" title="Switch tenant" aria-haspopup="menu" :aria-expanded="tenantMenuOpen">
+            <span class="tenant-status-dot" aria-hidden="true"></span>
             <span class="tenant-name">{{ activeTenantName }}</span>
-            <svg class="tenant-chevron" :class="{ open: tenantMenuOpen }" width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <svg class="tenant-chevron" :class="{ open: tenantMenuOpen }" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
               <path d="M2.5 4L5 6.5L7.5 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
@@ -276,13 +181,17 @@ watch(isAuthenticated, async (authed) => {
             </button>
           </div>
         </div>
+        <button v-else class="tenant-standalone" type="button" aria-label="Active tenant">
+          <span class="tenant-status-dot" aria-hidden="true"></span>
+          <span class="tenant-name">{{ activeTenantName || 'default' }}</span>
+        </button>
         <button class="theme-toggle" @click="toggleTheme" :title="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'" :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
-          <span v-if="theme === 'dark'">&#9788;</span>
-          <span v-else>&#9790;</span>
+          <svg v-if="theme === 'dark'" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><path d="M8 1.5v1.2M8 13.3v1.2M1.5 8h1.2M13.3 8h1.2M3.4 3.4l.9.9M11.7 11.7l.9.9M12.6 3.4l-.9.9M4.3 11.7l-.9.9"/></svg>
+          <svg v-else viewBox="0 0 16 16" aria-hidden="true"><path d="M11.8 10.8A5.2 5.2 0 0 1 5.2 4.2 5.2 5.2 0 1 0 11.8 10.8Z"/></svg>
         </button>
         <div v-if="appEnv !== 'production'" class="env-badge">{{ appEnv }}</div>
         <div v-if="isAuthenticated" class="user-menu-wrap">
-          <button class="user-menu-btn" @click="toggleUserMenu" aria-haspopup="menu" :aria-expanded="userMenuOpen">
+          <button class="user-menu-btn" @click="toggleUserMenu" aria-haspopup="menu" :aria-expanded="userMenuOpen" aria-label="Open user menu">
             <span class="user-avatar">{{ user?.display_name?.charAt(0)?.toUpperCase() || user?.username?.charAt(0)?.toUpperCase() || '?' }}</span>
             <span class="user-name">{{ user?.display_name || user?.username }}</span>
           </button>
@@ -297,9 +206,42 @@ watch(isAuthenticated, async (authed) => {
         </div>
       </div>
     </header>
-    <main id="main-content" class="main" v-if="!isLoginPage" tabindex="-1">
-      <router-view />
-    </main>
+    <div v-if="!isLoginPage" class="app-frame">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <nav class="sidebar-nav">
+          <div class="nav-group">
+            <div class="nav-group-label">Observe</div>
+            <router-link to="/" class="side-nav-item" :class="{ active: currentNav === 'explore' }"><span class="side-nav-dot"></span>Explore</router-link>
+            <router-link to="/services" class="side-nav-item" :class="{ active: currentNav === 'services' || currentNav === 'service-detail' }"><span class="side-nav-dot"></span>Services</router-link>
+            <router-link to="/dashboards" class="side-nav-item" :class="{ active: currentNav === 'dashboards' || currentNav === 'dashboard' }"><span class="side-nav-dot"></span>Dashboards</router-link>
+            <router-link to="/metrics" class="side-nav-item" :class="{ active: currentNav === 'metrics' || currentNav === 'metric-detail' }"><span class="side-nav-dot"></span>Metrics</router-link>
+          </div>
+          <div class="nav-group">
+            <div class="nav-group-label">Respond</div>
+            <router-link to="/alerts" class="side-nav-item" :class="{ active: ['alerts', 'monitor-create', 'monitor-detail', 'monitor-edit', 'alert-rule-add', 'alert-rule-edit', 'alert-channel-add'].includes(currentNav) }"><span class="side-nav-dot"></span>Alerts</router-link>
+            <router-link to="/anomaly" class="side-nav-item" :class="{ active: typeof currentNav === 'string' && currentNav.startsWith('anomaly') }"><span class="side-nav-dot"></span>Anomaly</router-link>
+            <router-link to="/slos" class="side-nav-item" :class="{ active: currentNav === 'slos' || currentNav === 'slo-detail' }"><span class="side-nav-dot"></span>SLOs</router-link>
+            <router-link to="/deploys" class="side-nav-item" :class="{ active: currentNav === 'deploys' }"><span class="side-nav-dot"></span>Deploys</router-link>
+          </div>
+          <div class="nav-group">
+            <div class="nav-group-label">Investigate</div>
+            <router-link v-if="features.sre_agent" to="/sre-agent" class="side-nav-item" :class="{ active: currentNav === 'sre-agent' }"><span class="side-nav-dot"></span>SRE Agent</router-link>
+            <router-link v-if="features.rum !== false" to="/rum" class="side-nav-item" :class="{ active: currentNav === 'rum' || currentNav === 'rum-detail' }"><span class="side-nav-dot"></span>RUM</router-link>
+            <router-link to="/investigate" class="side-nav-item" :class="{ active: currentNav === 'investigate' }"><span class="side-nav-dot"></span>Investigations</router-link>
+          </div>
+          <div class="nav-group">
+            <div class="nav-group-label">Control</div>
+            <router-link v-if="hasIntegrations" to="/integrations" class="side-nav-item" :class="{ active: typeof currentNav === 'string' && currentNav.startsWith('integration') }"><span class="side-nav-dot"></span>Integrations</router-link>
+            <router-link v-if="isAdmin" to="/audit" class="side-nav-item" :class="{ active: currentNav === 'audit' }"><span class="side-nav-dot"></span>Audit</router-link>
+            <router-link v-if="isAdmin" to="/settings" class="side-nav-item" :class="{ active: currentNav === 'settings' }"><span class="side-nav-dot"></span>Settings</router-link>
+          </div>
+        </nav>
+        <div class="sidebar-footer">RUSH <span>/</span> CONTROL ROOM</div>
+      </aside>
+      <main id="main-content" class="main" tabindex="-1">
+        <router-view />
+      </main>
+    </div>
     <router-view v-else />
     <CommandPalette v-model:open="paletteOpen" />
   </div>
@@ -308,7 +250,7 @@ watch(isAuthenticated, async (authed) => {
 <style>
 /* ═══════════════════════════════════════════════════════════
    Rush O11y — Design System
-   "Dark Observatory" — precision instruments for production
+   "Control Room" — quiet chrome, readable signals, deliberate actions
    ═══════════════════════════════════════════════════════════ */
 :root {
   /* ── Backgrounds ── */
@@ -324,6 +266,7 @@ watch(isAuthenticated, async (authed) => {
   --border-subtle:  #1c2233;
   --border-default: #272d42;
   --border-strong:  #343b54;
+  --border:         var(--border-default);
 
   /* ── Text (WCAG AA compliant) ── */
   --text-primary:   #dfe3ec;
@@ -331,7 +274,7 @@ watch(isAuthenticated, async (authed) => {
   --text-muted:     #6b7490;
   --text-inverse:   #060710;
 
-  /* ── Accent: blue (token names kept; brighter on dark for legibility) ── */
+  /* ── Accent: warm signal amber ── */
   --amber:       #3b82f6;
   --amber-dim:   rgba(59, 130, 246, 0.12);
   --amber-glow:  rgba(59, 130, 246, 0.22);
@@ -392,6 +335,7 @@ watch(isAuthenticated, async (authed) => {
   --border-subtle:  #e2e5eb;
   --border-default: #cdd1da;
   --border-strong:  #b4bac7;
+  --border:         var(--border-default);
 
   /* ── Text (WCAG AA compliant) ── */
   --text-primary:   #1a1d26;
@@ -399,7 +343,7 @@ watch(isAuthenticated, async (authed) => {
   --text-muted:     #636c80;
   --text-inverse:   #ffffff;
 
-  /* ── Accent: blue (slightly deeper brand blue for light bg contrast) ── */
+  /* ── Accent: product amber ── */
   --amber:       #2563eb;
   --amber-dim:   rgba(37, 99, 235, 0.10);
   --amber-glow:  rgba(37, 99, 235, 0.16);
@@ -1073,5 +1017,329 @@ button {
   border-radius: 2px;
   padding: 0px 3px;
   line-height: 1.5;
+}
+
+/* ═══ Control-room shell override ═══
+   The application is intentionally quiet: navigation owns the left edge,
+   the header owns global context, and page content gets a consistent canvas. */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-root);
+  background-image: none;
+}
+
+.topbar {
+  height: 74px;
+  flex: 0 0 74px;
+  gap: clamp(24px, 5vw, 96px);
+  padding: 0 38px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  box-shadow: none;
+  z-index: 100;
+}
+
+.topbar::after { display: none; }
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.logo-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--amber);
+  color: var(--text-inverse);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.logo-text {
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.global-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(100%, 1430px);
+  height: 36px;
+  min-width: 160px;
+  padding: 0 14px;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  text-align: left;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.global-search:hover,
+.global-search:focus-visible {
+  background: var(--bg-raised);
+  border-color: var(--amber-muted);
+  box-shadow: 0 0 0 3px var(--amber-dim);
+}
+
+.global-search svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: var(--amber);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.35;
+}
+
+.global-search span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.global-search kbd {
+  margin-left: auto;
+  padding: 1px 5px;
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex: 0 0 auto;
+}
+
+.tenant-menu-btn,
+.tenant-standalone {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+}
+
+.tenant-menu-btn:hover,
+.tenant-standalone:hover { color: var(--text-primary); }
+
+.tenant-status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-dim);
+}
+
+.tenant-name {
+  max-width: 160px;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.theme-toggle {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+}
+
+.theme-toggle:hover { color: var(--amber); background: var(--amber-dim); }
+.theme-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.3; }
+
+.env-badge { padding: 3px 7px; }
+
+.user-menu-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.user-menu-btn:hover { background: transparent; }
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #e9eef6;
+  color: #1b273b;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.user-name { display: none; }
+
+.app-frame {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: calc(100vh - 74px);
+}
+
+.sidebar {
+  position: sticky;
+  top: 74px;
+  display: flex;
+  flex: 0 0 228px;
+  flex-direction: column;
+  align-self: flex-start;
+  width: 228px;
+  height: calc(100vh - 74px);
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 27px;
+  padding: 29px 16px 24px;
+  overflow-y: auto;
+}
+
+.nav-group { display: flex; flex-direction: column; gap: 5px; }
+
+.nav-group-label,
+.sidebar-footer {
+  padding: 0 12px 8px;
+  color: #8491a9;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.side-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 39px;
+  padding: 0 12px;
+  color: var(--text-secondary);
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.side-nav-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-raised);
+  transform: translateX(1px);
+}
+
+.side-nav-item.active {
+  color: var(--amber);
+  background: var(--amber-dim);
+}
+
+.side-nav-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #c7d0dc;
+}
+
+.side-nav-item.active .side-nav-dot { background: var(--amber); }
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 0 28px 22px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.sidebar-footer span { padding: 0 4px; color: var(--amber); }
+
+.main {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  width: auto;
+  margin: 0;
+  padding: clamp(26px, 3.2vw, 58px) clamp(24px, 4vw, 72px) 72px;
+}
+
+@media (max-width: 1050px) {
+  .topbar { gap: 24px; padding-inline: 24px; }
+  .sidebar { flex-basis: 200px; width: 200px; }
+  .main { padding-inline: 32px; }
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+  .logo-text { font-size: 15px; }
+  .global-search { order: 3; flex-basis: 100%; }
+  .topbar-right { margin-left: auto; gap: 10px; }
+  .app-frame { min-height: calc(100vh - 120px); }
+  .sidebar {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 90;
+    width: 100%;
+    height: 58px;
+    border-top: 1px solid var(--border-subtle);
+    border-right: 0;
+  }
+  .sidebar-nav {
+    flex-direction: row;
+    gap: 4px;
+    padding: 7px 10px;
+    overflow-x: auto;
+  }
+  .nav-group { flex-direction: row; gap: 4px; }
+  .nav-group:not(:first-child), .nav-group-label, .sidebar-footer { display: none; }
+  .side-nav-item { min-height: 42px; padding: 0 12px; white-space: nowrap; }
+  .main { padding: 24px 16px 82px; }
+}
+
+@media (max-width: 480px) {
+  .tenant-name, .theme-toggle, .env-badge { display: none; }
+  .topbar-right { gap: 6px; }
+  .global-search kbd { display: none; }
 }
 </style>
