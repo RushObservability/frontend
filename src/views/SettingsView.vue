@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { useFeatures } from '../composables/useFeatures'
@@ -9,11 +10,11 @@ import type { ApiKey, ApiKeyCreated, ServiceLink, CustomSkill, Group, Tenant, Te
 import SkillEditDialog from '../components/SkillEditDialog.vue'
 import ChannelForm from '../components/ChannelForm.vue'
 import RegexHelp from '../components/RegexHelp.vue'
-import StatsView from './StatsView.vue'
 import { getAddon } from '../integrations/catalog'
 import { isAddonEnabled, setAddonEnabled, addonNamespace, saveAddonNamespace, namespaceValid } from '../composables/useIntegrationEnabled'
 
 const api = useApi()
+const router = useRouter()
 const { user: currentUser } = useAuth()
 const { features, loadFeatures } = useFeatures()
 const { activeTenantName } = useTenant()
@@ -72,7 +73,7 @@ function saveKubernetes() {
 }
 
 // ── Tab navigation ──
-type TabId = 'keys' | 'auth' | 'links' | 'integrations' | 'agent' | 'tenants' | 'retention' | 'groups' | 'users' | 'alerting' | 'general' | 'firewall' | 'license' | 'stats' | 'config'
+type TabId = 'keys' | 'auth' | 'links' | 'integrations' | 'agent' | 'tenants' | 'retention' | 'groups' | 'users' | 'alerting' | 'general' | 'firewall' | 'license' | 'config'
 type AgentSubtabId = 'access' | 'models' | 'limits' | 'skills'
 interface TabDef {
   id: TabId
@@ -90,7 +91,6 @@ const tabs: TabDef[] = [
   { id: 'groups',       label: 'Groups',        group: 'Access & Identity', hint: 'Manage permission groups that bundle scopes, permissions, and tenant bindings.' },
   { id: 'auth',         label: 'Authentication', group: 'Access & Identity', hint: 'Configure authentication methods — local accounts and single sign-on.' },
   { id: 'keys',         label: 'API Keys',      group: 'Access & Identity', hint: 'Tokens for programmatic access to the Rush API.' },
-  { id: 'stats',        label: 'Stats',         group: 'Data & Routing',    hint: 'Storage, cardinality, and ingest/usage stats across metrics, APM, logs, and tenants.' },
   { id: 'tenants',      label: 'Tenants',       group: 'Data & Routing',    hint: 'Manage tenant isolation boundaries for multi-team or multi-customer deployments.' },
   { id: 'retention',    label: 'Retention',     group: 'Data & Routing',    hint: 'Global data retention caps per signal. Tenants cannot exceed these maximums.' },
   { id: 'links',        label: 'Service Links', group: 'Data & Routing',    hint: 'Map services to GitHub repos for code-aware investigations.' },
@@ -310,6 +310,10 @@ function parseHash(): { tab: TabId | null; sub: string } {
 }
 
 function onHashChange() {
+  if (typeof window !== 'undefined' && window.location.hash.startsWith('#stats')) {
+    router.replace({ name: 'usage' })
+    return
+  }
   const { tab, sub } = parseHash()
   if (!tab) return
   if (tab !== activeTab.value) activeTab.value = tab
@@ -2252,6 +2256,10 @@ function firewallMatchSummary(rule: MetricFirewallRule): string {
 
 onMounted(async () => {
   // Hydrate tab (and integration sub-path) from URL hash if present.
+  if (window.location.hash.startsWith('#stats')) {
+    await router.replace({ name: 'usage' })
+    return
+  }
   const parsed = parseHash()
   if (parsed.tab) {
     activeTab.value = parsed.tab
@@ -3828,16 +3836,6 @@ function formatDate(ts: string): string {
         </div>
       </div>
 
-    </div>
-
-    <!-- Stats Section (Data & Routing) — embeds the former standalone Stats page -->
-    <div
-      v-if="activeTab === 'stats'"
-      id="panel-stats"
-      class="section"
-      role="tabpanel"
-    >
-      <StatsView embedded />
     </div>
 
     <!-- Retention Section (Data & Routing) -->

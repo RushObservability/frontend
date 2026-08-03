@@ -39,7 +39,7 @@ const treemapColors = [
 ]
 
 function goBack() {
-  router.push({ path: '/settings', hash: '#stats' })
+  router.push({ path: '/usage/metrics' })
 }
 </script>
 
@@ -47,7 +47,7 @@ function goBack() {
   <div class="metric-detail">
     <!-- Breadcrumb -->
     <div class="breadcrumb">
-      <button class="bc-link" @click="goBack">&larr; Stats / Metrics</button>
+      <button class="bc-link" @click="goBack">&larr; Usage / Metrics</button>
     </div>
 
     <!-- Header -->

@@ -238,6 +238,8 @@ watch(isAuthenticated, async (authed) => {
           <div class="nav-group">
             <div class="nav-group-label">Control</div>
             <router-link v-if="hasIntegrations" to="/integrations" class="side-nav-item" :class="{ active: typeof currentNav === 'string' && currentNav.startsWith('integration') }"><span class="side-nav-dot"></span>Integrations</router-link>
+            <router-link to="/usage" class="side-nav-item" :class="{ active: currentNav === 'usage' }"><span class="side-nav-dot"></span>Usage</router-link>
+            <router-link v-if="isAdmin" to="/capacity" class="side-nav-item" :class="{ active: currentNav === 'capacity' }"><span class="side-nav-dot"></span>Capacity</router-link>
             <router-link v-if="isAdmin" to="/audit" class="side-nav-item" :class="{ active: currentNav === 'audit' }"><span class="side-nav-dot"></span>Audit</router-link>
             <router-link v-if="isAdmin" to="/settings" class="side-nav-item" :class="{ active: currentNav === 'settings' }"><span class="side-nav-dot"></span>Settings</router-link>
           </div>

@@ -684,6 +684,20 @@ export function useApi() {
 
   // ── Stats API ──
 
+  /** Process-global Prometheus self-metrics for the admin capacity view. */
+  async function getSystemMetrics(): Promise<string> {
+    const { activeTenant } = useTenant()
+    const res = await authenticatedFetch('/metrics', {
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'text/plain',
+        'X-Rush-Tenant': activeTenant.value,
+      },
+    }, { requestKey: `system-metrics:${activeTenant.value}` })
+    if (!res.ok) throw new Error(safeApiErrorMessage(res.status))
+    return await res.text()
+  }
+
   async function getStats(req: {
     time_range?: { from: string; to: string }
   }): Promise<StatsResponse> {
@@ -1632,6 +1646,7 @@ export function useApi() {
     listApiKeys, createApiKey, deleteApiKey,
     listServiceLinks, createServiceLink, deleteServiceLink,
     getStats,
+    getSystemMetrics,
     getStoragePartitions,
     getIngestBuffer,
     getUsage, getLabelBreakdown,

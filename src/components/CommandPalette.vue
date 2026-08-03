@@ -46,7 +46,7 @@ const actions = computed<PaletteAction[]>(() => {
     { title: 'SLOs',       path: '/slos',      icon: '\u25CE' },
     { title: 'Deploys',    path: '/deploys',   icon: '\u2191' },
     { title: 'ArgoCD',     path: '/integrations/argocd/applications',    icon: '\u21BB' },
-    { title: 'Stats',      path: '/settings#stats', icon: '\u2637' },
+    { title: 'Usage',      path: '/usage',          icon: '\u2637' },
     { title: 'Settings',   path: '/settings',  icon: '\u2699' },
     { title: 'Investigate', path: '/investigate', icon: '\u2315' },
   ]

@@ -129,13 +129,20 @@ const router = createRouter({
       props: true,
     },
     {
-      // Stats moved into Settings (admin-only). Redirect old links there.
+      // Legacy stats links now land in the Usage sub-pages.
       path: '/stats/:tab?',
-      redirect: { path: '/settings', hash: '#stats' },
+      redirect: to => ({ name: 'usage', params: { tab: to.params.tab } }),
     },
     {
-      path: '/usage',
-      redirect: { path: '/settings', hash: '#stats' },
+      path: '/usage/:tab?',
+      name: 'usage',
+      component: () => import('./views/UsageView.vue'),
+    },
+    {
+      path: '/capacity',
+      name: 'capacity',
+      component: () => import('./views/CapacityView.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/rum',
