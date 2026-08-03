@@ -13,6 +13,8 @@ const queryApiGaugeNames = [
   'rush_process_open_fds',
   'rush_runtime_alive_tasks',
   'rush_ingest_spool_bytes',
+  'rush_ingest_spool_max_bytes',
+  'rush_ingest_spool_utilization_ratio',
   'rush_ingest_spool_oldest_age_secs',
   'rush_ch_memory_tracking_bytes',
   'rush_ch_memory_resident_bytes',
