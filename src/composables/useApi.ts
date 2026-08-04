@@ -1260,19 +1260,26 @@ export function useApi() {
     await request(`/sso/mappings/${encodeURIComponent(id)}`, { method: 'DELETE' })
   }
 
-  async function createSetupToken(provider?: string, hostname?: string): Promise<SetupToken> {
+  async function createSetupToken(provider?: string): Promise<SetupToken> {
     return await request<SetupToken>('/sso/setup-token', {
       method: 'POST',
-      body: JSON.stringify({ purpose: 'sso_setup', provider: provider || '', hostname: hostname || '' }),
+      body: JSON.stringify({ purpose: 'sso_setup', provider: provider || '' }),
     })
   }
 
-  async function validateSetupToken(token: string): Promise<SetupTokenValidation> {
-    return await request<SetupTokenValidation>(`/sso/setup-token/${encodeURIComponent(token)}/validate`)
+  async function exchangeSetupToken(token: string): Promise<SetupTokenValidation> {
+    return await request<SetupTokenValidation>('/sso/setup-token/exchange', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    })
   }
 
-  async function completeSetupToken(token: string): Promise<void> {
-    await request(`/sso/setup-token/${encodeURIComponent(token)}/complete`, {
+  async function validateSetupSession(): Promise<SetupTokenValidation> {
+    return await request<SetupTokenValidation>('/sso/setup-session')
+  }
+
+  async function completeSetupSession(): Promise<void> {
+    await request('/sso/setup-session/complete', {
       method: 'POST',
     })
   }
@@ -1658,7 +1665,7 @@ export function useApi() {
     getK8sSummary, getK8sNamespaces, getK8sResources, getK8sResource,
     listCustomSkills, getCustomSkill, createCustomSkill, updateCustomSkill, deleteCustomSkill,
     listDetectionRules, getDetectionRule, createDetectionRule, updateDetectionRule, deleteDetectionRule, testDetectionRule, listDetectionEvents,
-    getSsoStatus, listSsoProviders, saveSsoProvider, deleteSsoProvider, listIdpGroupMappings, createIdpGroupMapping, updateIdpGroupMapping, deleteIdpGroupMapping, createSetupToken, validateSetupToken, completeSetupToken,
+    getSsoStatus, listSsoProviders, saveSsoProvider, deleteSsoProvider, listIdpGroupMappings, createIdpGroupMapping, updateIdpGroupMapping, deleteIdpGroupMapping, createSetupToken, exchangeSetupToken, validateSetupSession, completeSetupSession,
     listGroups, createGroup, updateGroup, deleteGroup, setGroupTenants, getUserGroups, setUserGroups,
     listTenants, createTenant, deleteTenant, toggleTenant, setTenantAuthRequired, setTenantIngestAuthRequired, getTenantRetention, setTenantRetention, deleteTenantRetention, getTenantSignals, setTenantSignals, getGlobalRetention, setGlobalRetention,
     listUsers, createUser, deleteUser, changeUserPassword, toggleUser,

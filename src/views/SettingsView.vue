@@ -796,6 +796,7 @@ const wizardErrors = computed(() => {
 
   // SAML-specific
   if (protocol === 'saml' || p === 'google' || p === 'okta' || p === 'azure' || p === 'custom-saml') {
+    if (!wizardIssuerUrl.value.trim()) errors.issuerUrl = 'IdP issuer/entity ID is required'
     if (!wizardSsoUrl.value.trim()) errors.ssoUrl = 'IdP SSO URL is required'
     else if (!isValidHttpsUrl(wizardSsoUrl.value.trim())) errors.ssoUrl = 'IdP SSO URL must start with https://'
     if (!wizardCert.value.trim()) errors.cert = 'IdP Certificate is required'
@@ -817,24 +818,24 @@ const wizardStepValid = computed(() => {
 
   if (p === 'google') {
     if (step === 1) return true // instructional
-    if (step === 2) return !e.ssoUrl && !e.cert // enter IdP details
+    if (step === 2) return !e.issuerUrl && !e.ssoUrl && !e.cert // enter IdP details
     if (step === 3) return true // copy values
     if (step === 4) return true // instructional
-    if (step === 5) return !e.ssoUrl && !e.cert && !e.emailClaim
+    if (step === 5) return !e.issuerUrl && !e.ssoUrl && !e.cert && !e.emailClaim
     return true
   }
   if (p === 'okta') {
     if (step <= 2) return true // create app + configure SAML (one Okta page)
-    if (step === 3) return !e.ssoUrl && !e.cert // enter IdP details
-    if (step === 4) return !e.ssoUrl && !e.cert // review (email/name come from NameID)
+    if (step === 3) return !e.issuerUrl && !e.ssoUrl && !e.cert // enter IdP details
+    if (step === 4) return !e.issuerUrl && !e.ssoUrl && !e.cert // review (email/name come from NameID)
     return true
   }
   if (p === 'azure') {
     if (step === 1) return true
     if (step === 2) return true
     if (step === 3) return true
-    if (step === 4) return !e.ssoUrl && !e.cert
-    if (step === 5) return !e.ssoUrl && !e.cert && !e.emailClaim
+    if (step === 4) return !e.issuerUrl && !e.ssoUrl && !e.cert
+    if (step === 5) return !e.issuerUrl && !e.ssoUrl && !e.cert && !e.emailClaim
     return true
   }
   if (p === 'custom-oidc') {
@@ -845,8 +846,8 @@ const wizardStepValid = computed(() => {
   }
   if (p === 'custom-saml') {
     if (step === 1) return true // copy values
-    if (step === 2) return !e.ssoUrl && !e.cert
-    if (step === 3) return !e.ssoUrl && !e.cert && !e.emailClaim
+    if (step === 2) return !e.issuerUrl && !e.ssoUrl && !e.cert
+    if (step === 3) return !e.issuerUrl && !e.ssoUrl && !e.cert && !e.emailClaim
     return true
   }
   return true
@@ -928,7 +929,7 @@ function selectMethod(method: string) {
 async function generateMagicLink() {
   wizardMethod.value = 'magic'
   try {
-    wizardMagicToken.value = await api.createSetupToken(wizardProvider.value, hostname.value)
+    wizardMagicToken.value = await api.createSetupToken(wizardProvider.value)
     wizardMagicCopied.value = false
   } catch (e: any) {
     alert('Failed to generate setup link: ' + (e.message || e))
@@ -982,6 +983,7 @@ async function wizardSave() {
       data.client_secret = wizardClientSecret.value
       data.oidc_scopes = wizardOidcScopes.value
     } else {
+      data.issuer_url = wizardIssuerUrl.value
       data.saml_idp_sso_url = wizardSsoUrl.value
       data.saml_idp_cert = wizardCert.value
       data.saml_sp_entity_id = hostname.value
@@ -2827,6 +2829,12 @@ function formatDate(ts: string): string {
                 <div class="wizard-title">Enter your IdP details</div>
                 <div class="wizard-instruction">In Google admin, download the certificate and copy the SSO URL, then paste them here:</div>
                 <div class="form-group-inline">
+                  <label class="form-label">IdP Entity ID / Issuer</label>
+                  <input v-model="wizardIssuerUrl" :class="['form-input', 'mono', { 'input-error': wizardTouched.issuerUrl && wizardErrors.issuerUrl }]" placeholder="https://accounts.google.com/o/saml2?idpid=..." @blur="touchField('issuerUrl')" />
+                  <div class="field-hint">Copy the Entity ID from the IdP metadata exactly. Rush verifies the signed assertion issuer against it.</div>
+                  <div v-if="wizardTouched.issuerUrl && wizardErrors.issuerUrl" class="field-error">{{ wizardErrors.issuerUrl }}</div>
+                </div>
+                <div class="form-group-inline">
                   <label class="form-label">IdP Certificate</label>
                   <textarea v-model="wizardCert" class="cert-area" :class="['form-input', 'mono', { 'input-error': wizardTouched.cert && wizardErrors.cert }]" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" @blur="touchField('cert')"></textarea>
                   <div v-if="wizardTouched.cert && wizardErrors.cert" class="field-error">{{ wizardErrors.cert }}</div>
@@ -2896,6 +2904,7 @@ function formatDate(ts: string): string {
                   <div class="wizard-review-row"><span class="wizard-review-label">Provider</span><span>Google Workspace (SAML)</span></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">ACS URL</span><code class="mono">{{ hostname }}/auth/sso/acs</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Entity ID</span><code class="mono">{{ hostname }}</code></div>
+                  <div class="wizard-review-row"><span class="wizard-review-label">IdP Issuer</span><span :class="wizardErrors.issuerUrl ? 'review-invalid' : 'review-valid'">{{ wizardErrors.issuerUrl ? '!' : '' }}</span><code class="mono break-all">{{ wizardIssuerUrl || '(not set)' }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">SSO URL</span><span :class="wizardErrors.ssoUrl ? 'review-invalid' : 'review-valid'">{{ wizardErrors.ssoUrl ? '!' : '' }}</span><code class="mono break-all">{{ wizardSsoUrl || '(not set)' }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Certificate</span><span :class="wizardErrors.cert ? 'review-invalid' : 'review-valid'">{{ wizardErrors.cert ? '!' : '' }}</span><span>{{ wizardCert ? 'Provided' : 'Not set' }}</span></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Email Claim</span><code class="mono">{{ wizardEmailClaim }}</code></div>
@@ -2942,6 +2951,12 @@ function formatDate(ts: string): string {
                 <div class="wizard-title">Enter your IdP details</div>
                 <div class="wizard-instruction">In Okta, on the app's <strong>Sign On</strong> tab, expand the SAML <strong>Metadata details</strong> (or <strong>View SAML setup instructions</strong>) and copy these:</div>
                 <div class="form-group-inline">
+                  <label class="form-label">IdP Entity ID / Issuer</label>
+                  <input v-model="wizardIssuerUrl" :class="['form-input', 'mono', { 'input-error': wizardTouched.issuerUrl && wizardErrors.issuerUrl }]" placeholder="http://www.okta.com/..." @blur="touchField('issuerUrl')" />
+                  <div class="field-hint">Okta's <strong>Issuer</strong> or <strong>Entity ID</strong>. This may be an identifier rather than an HTTPS endpoint.</div>
+                  <div v-if="wizardTouched.issuerUrl && wizardErrors.issuerUrl" class="field-error">{{ wizardErrors.issuerUrl }}</div>
+                </div>
+                <div class="form-group-inline">
                   <label class="form-label">IdP Certificate</label>
                   <textarea v-model="wizardCert" class="cert-area" :class="['form-input', 'mono', { 'input-error': wizardTouched.cert && wizardErrors.cert }]" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" @blur="touchField('cert')"></textarea>
                   <div class="field-hint">Okta's <strong>Signing Certificate</strong> — click <strong>Copy</strong> (or Download the .cert and paste its contents here).</div>
@@ -2961,6 +2976,7 @@ function formatDate(ts: string): string {
                   <div class="wizard-review-row"><span class="wizard-review-label">Provider</span><span>Okta (SAML)</span></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">SSO URL</span><span :class="wizardErrors.ssoUrl ? 'review-invalid' : 'review-valid'">{{ wizardErrors.ssoUrl ? '!' : '' }}</span><code class="mono break-all">{{ wizardSsoUrl || '(not set)' }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Entity ID</span><code class="mono">{{ hostname }}</code></div>
+                  <div class="wizard-review-row"><span class="wizard-review-label">IdP Issuer</span><span :class="wizardErrors.issuerUrl ? 'review-invalid' : 'review-valid'">{{ wizardErrors.issuerUrl ? '!' : '' }}</span><code class="mono break-all">{{ wizardIssuerUrl || '(not set)' }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Certificate</span><span :class="wizardErrors.cert ? 'review-invalid' : 'review-valid'">{{ wizardErrors.cert ? '!' : '' }}</span><span>{{ wizardCert ? 'Provided' : 'Not set' }}</span></div>
                 </div>
               </div>
@@ -3018,6 +3034,12 @@ function formatDate(ts: string): string {
                 <div class="wizard-title">Enter your IdP details</div>
                 <div class="wizard-instruction">Download the Base64 certificate and copy the Login URL from Azure:</div>
                 <div class="form-group-inline">
+                  <label class="form-label">Microsoft Entra Identifier / Issuer</label>
+                  <input v-model="wizardIssuerUrl" :class="['form-input', 'mono', { 'input-error': wizardTouched.issuerUrl && wizardErrors.issuerUrl }]" placeholder="https://sts.windows.net/tenant-id/" @blur="touchField('issuerUrl')" />
+                  <div class="field-hint">Copy the Microsoft Entra Identifier from the SAML setup page exactly.</div>
+                  <div v-if="wizardTouched.issuerUrl && wizardErrors.issuerUrl" class="field-error">{{ wizardErrors.issuerUrl }}</div>
+                </div>
+                <div class="form-group-inline">
                   <label class="form-label">IdP Certificate</label>
                   <textarea v-model="wizardCert" class="cert-area" :class="['form-input', 'mono', { 'input-error': wizardTouched.cert && wizardErrors.cert }]" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" @blur="touchField('cert')"></textarea>
                   <div v-if="wizardTouched.cert && wizardErrors.cert" class="field-error">{{ wizardErrors.cert }}</div>
@@ -3035,6 +3057,7 @@ function formatDate(ts: string): string {
                   <div class="wizard-review-row"><span class="wizard-review-label">Provider</span><span>Azure AD (SAML)</span></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Login URL</span><span :class="wizardErrors.ssoUrl ? 'review-invalid' : 'review-valid'">{{ wizardErrors.ssoUrl ? '!' : '' }}</span><code class="mono break-all">{{ wizardSsoUrl || '(not set)' }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Entity ID</span><code class="mono">{{ hostname }}</code></div>
+                  <div class="wizard-review-row"><span class="wizard-review-label">IdP Issuer</span><span :class="wizardErrors.issuerUrl ? 'review-invalid' : 'review-valid'">{{ wizardErrors.issuerUrl ? '!' : '' }}</span><code class="mono break-all">{{ wizardIssuerUrl || '(not set)' }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Certificate</span><span :class="wizardErrors.cert ? 'review-invalid' : 'review-valid'">{{ wizardErrors.cert ? '!' : '' }}</span><span>{{ wizardCert ? 'Provided' : 'Not set' }}</span></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Email Claim</span><code class="mono">{{ wizardEmailClaim }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">First Name</span><code class="mono">{{ wizardFirstNameClaim }}</code></div>
@@ -3140,6 +3163,12 @@ function formatDate(ts: string): string {
               <div v-if="guidedStepNumber === 2" class="wizard-step-content">
                 <div class="wizard-title">Enter your IdP details</div>
                 <div class="form-group-inline">
+                  <label class="form-label">IdP Entity ID / Issuer</label>
+                  <input v-model="wizardIssuerUrl" :class="['form-input', 'mono', { 'input-error': wizardTouched.issuerUrl && wizardErrors.issuerUrl }]" placeholder="https://idp.example.com/entity-id" @blur="touchField('issuerUrl')" />
+                  <div class="field-hint">Copy the issuer from the IdP metadata exactly; it is matched against the signed assertion.</div>
+                  <div v-if="wizardTouched.issuerUrl && wizardErrors.issuerUrl" class="field-error">{{ wizardErrors.issuerUrl }}</div>
+                </div>
+                <div class="form-group-inline">
                   <label class="form-label">IdP SSO URL</label>
                   <input v-model="wizardSsoUrl" :class="['form-input', 'mono', { 'input-error': wizardTouched.ssoUrl && wizardErrors.ssoUrl }]" placeholder="https://idp.example.com/saml/sso" @blur="touchField('ssoUrl')" />
                   <div v-if="wizardTouched.ssoUrl && wizardErrors.ssoUrl" class="field-error">{{ wizardErrors.ssoUrl }}</div>
@@ -3173,6 +3202,7 @@ function formatDate(ts: string): string {
                   <div class="wizard-review-row"><span class="wizard-review-label">Provider</span><span>Custom SAML</span></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">SSO URL</span><span :class="wizardErrors.ssoUrl ? 'review-invalid' : 'review-valid'">{{ wizardErrors.ssoUrl ? '!' : '' }}</span><code class="mono break-all">{{ wizardSsoUrl || '(not set)' }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Entity ID</span><code class="mono">{{ hostname }}</code></div>
+                  <div class="wizard-review-row"><span class="wizard-review-label">IdP Issuer</span><span :class="wizardErrors.issuerUrl ? 'review-invalid' : 'review-valid'">{{ wizardErrors.issuerUrl ? '!' : '' }}</span><code class="mono break-all">{{ wizardIssuerUrl || '(not set)' }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Certificate</span><span :class="wizardErrors.cert ? 'review-invalid' : 'review-valid'">{{ wizardErrors.cert ? '!' : '' }}</span><span>{{ wizardCert ? 'Provided' : 'Not set' }}</span></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">Email Claim</span><code class="mono">{{ wizardEmailClaim }}</code></div>
                   <div class="wizard-review-row"><span class="wizard-review-label">First Name</span><code class="mono">{{ wizardFirstNameClaim }}</code></div>
