@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
-import { withoutQueryParameter } from '../lib/url'
+import { setupTokenFromFragment, withoutQueryParameter } from '../lib/url'
 
 const route = useRoute()
 const router = useRouter()
@@ -140,15 +140,16 @@ function protocolForProvider(p: string): string {
 }
 
 onMounted(async () => {
-  const fragmentToken = new URLSearchParams(route.hash.slice(1)).get('token') || ''
-  // Query tokens are accepted temporarily for links created by older API
-  // versions, but all new links use a fragment that never reaches the server.
-  const setupToken = fragmentToken || (route.query.token as string) || ''
+  // One-time setup credentials are accepted only from the fragment. Unlike a
+  // query string, the fragment is never sent to web servers or reverse proxies.
+  const setupToken = setupTokenFromFragment(route.hash)
+  const hasLegacyQueryToken = Object.prototype.hasOwnProperty.call(route.query, 'token')
 
   // The setup token is a one-time credential. Remove it from the address bar
   // and browser history immediately after reading it so later navigation,
-  // screenshots, referrers, and copied URLs cannot retain the token.
-  if (fragmentToken || typeof route.query.token === 'string') {
+  // screenshots, referrers, and copied URLs cannot retain the token. Legacy
+  // query tokens are scrubbed but deliberately never exchanged.
+  if (setupToken || hasLegacyQueryToken) {
     try {
       await router.replace({
         path: route.path,
