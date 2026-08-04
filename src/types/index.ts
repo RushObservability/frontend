@@ -1202,6 +1202,7 @@ export interface SsoStatus {
   enabled: boolean
   provider_name: string
   protocol: string
+  local_auth_restricted: boolean
 }
 
 export interface SetupToken {

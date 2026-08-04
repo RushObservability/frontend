@@ -18,12 +18,14 @@ const sessionExpired = computed(() => route.query.expired === '1')
 // SSO status
 const ssoEnabled = ref(false)
 const ssoProviderName = ref('')
+const localAuthRestricted = ref(false)
 
 onMounted(async () => {
   try {
     const status = await api.getSsoStatus()
     ssoEnabled.value = status.enabled
     ssoProviderName.value = status.provider_name
+    localAuthRestricted.value = status.local_auth_restricted
   } catch {
     // SSO status endpoint may not exist yet — no SSO
   }
@@ -80,12 +82,17 @@ async function handleSubmit() {
         </a>
         <div class="sso-divider">
           <span class="sso-divider-line"></span>
-          <span class="sso-divider-text">or sign in locally</span>
+          <span class="sso-divider-text">
+            {{ localAuthRestricted ? 'or use break-glass admin' : 'or sign in locally' }}
+          </span>
           <span class="sso-divider-line"></span>
         </div>
       </div>
 
       <form class="login-form" @submit.prevent="handleSubmit">
+        <p v-if="ssoEnabled && localAuthRestricted" class="local-auth-note">
+          Local sign-in is restricted to the configured break-glass administrator.
+        </p>
         <div class="login-field">
           <label class="login-label" for="username">Username</label>
           <input
@@ -186,6 +193,17 @@ async function handleSubmit() {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+}
+
+.local-auth-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .login-field {
