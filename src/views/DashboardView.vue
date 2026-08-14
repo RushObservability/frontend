@@ -1,0 +1,587 @@
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useApi } from '../composables/useApi'
+import { useAuth } from '../composables/useAuth'
+import { useWidgetData } from '../composables/useWidgetData'
+import { substitute } from '../composables/useVarSubst'
+import { provideChartHover } from '../composables/useChartHover'
+import type { DashboardWithWidgets, Widget, WidgetData, DeployMarker, DashboardVariable } from '../types'
+import { VAR_ALL } from '../types'
+import WidgetWrapper from '../components/widgets/WidgetWrapper.vue'
+import CounterWidget from '../components/widgets/CounterWidget.vue'
+import BarWidget from '../components/widgets/BarWidget.vue'
+import TableWidget from '../components/widgets/TableWidget.vue'
+import TimeseriesWidget from '../components/widgets/TimeseriesWidget.vue'
+import WidgetEditor from '../components/widgets/WidgetEditor.vue'
+import VariableEditor from '../components/widgets/VariableEditor.vue'
+import TimePicker from '../components/TimePicker.vue'
+import { usePollingTask } from '../composables/usePollingTask'
+
+const props = defineProps<{ id: string }>()
+
+const api = useApi()
+const { canWrite } = useAuth()
+const router = useRouter()
+const route = useRoute()
+const { fetchWidgetData } = useWidgetData()
+
+// Share a single crosshair time across every widget on this dashboard, so
+// hovering one chart draws an aligned vertical line on all the others.
+provideChartHover()
+
+const dashboard = ref<DashboardWithWidgets | null>(null)
+const widgetDataMap = ref<Record<string, WidgetData>>({})
+const widgetLoadingMap = ref<Record<string, boolean>>({})
+const widgetErrorMap = ref<Record<string, string | null>>({})
+const editMode = ref(false)
+// Dashboard-level time range (drives every widget); seeded from ?t= or 1h.
+const initT = Number(route.query.t)
+const dashMinutes = ref(initT > 0 ? initT : 60)
+const showAddWidget = ref(false)
+const showVarEditor = ref(false)
+const editingWidget = ref<Widget | null>(null)
+const deploys = ref<DeployMarker[]>([])
+const lastRefreshedAt = ref<Date | null>(null)
+
+// ── Template variables ──
+const variables = computed<DashboardVariable[]>(() => dashboard.value?.variables || [])
+const varValues = ref<Record<string, string>>({})       // name → selected value (VAR_ALL = "All")
+const varOptions = ref<Record<string, string[]>>({})     // name → dropdown options (query/static)
+
+function varLabel(v: DashboardVariable): string { return v.label || v.name }
+function titleFor(w: Widget): string { return substitute(w.title, varValues.value) }
+
+// Initialise selected values from the URL (?var-<name>=) or the variable's default.
+function initVarValues() {
+  const next: Record<string, string> = {}
+  for (const v of variables.value) {
+    const fromUrl = route.query[`var-${v.name}`]
+    if (typeof fromUrl === 'string' && fromUrl.length) {
+      next[v.name] = fromUrl
+    } else if (v.default) {
+      next[v.name] = v.default
+    } else if (v.include_all) {
+      next[v.name] = VAR_ALL
+    } else {
+      next[v.name] = (varOptions.value[v.name] || [])[0] || ''
+    }
+  }
+  varValues.value = next
+}
+
+// Load dropdown options for query/static variables.
+async function loadVarOptions() {
+  const opts: Record<string, string[]> = {}
+  for (const v of variables.value) {
+    if (v.type === 'static') {
+      opts[v.name] = v.options || []
+    } else if (v.type === 'query' && v.field) {
+      try { opts[v.name] = await api.suggestValues(v.field) } catch { opts[v.name] = [] }
+    }
+  }
+  varOptions.value = opts
+}
+
+// Dashboard time range → reload every widget, and reflect in the URL.
+watch(dashMinutes, (m) => {
+  router.replace({ query: { ...route.query, t: String(m) } })
+  loadAllWidgetData()
+})
+
+function onVarChange(name: string, value: string) {
+  varValues.value = { ...varValues.value, [name]: value }
+  // Reflect in the URL for shareable links.
+  const q = { ...route.query, [`var-${name}`]: value }
+  router.replace({ query: q })
+  loadAllWidgetData()
+}
+
+const refreshOptions = [
+  { label: 'Off', value: 0 },
+  { label: '30s', value: 30 },
+  { label: '1m', value: 60 },
+  { label: '5m', value: 300 },
+]
+const refreshInterval = ref(0)
+const refreshLoop = usePollingTask({ category: 'dashboard', intervalMs: 1_000, run: ({ signal }) => refreshAllWidgetData(true, signal) })
+let widgetRefreshRequest: Promise<void> | null = null
+
+const isAutoRefreshing = computed(() => refreshInterval.value > 0)
+const refreshLabel = computed(() => {
+  if (!lastRefreshedAt.value) return 'Waiting for data'
+  return `Updated ${lastRefreshedAt.value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+})
+
+function visibilityLabel(value: string): string {
+  if (value === 'private') return 'Private'
+  if (value === 'global') return 'Global'
+  return 'Team'
+}
+
+// ═══ Share link ═══
+const shareCopied = ref(false)
+
+async function shareLink() {
+  const url = window.location.href
+  try {
+    await navigator.clipboard.writeText(url)
+    shareCopied.value = true
+    setTimeout(() => { shareCopied.value = false }, 2000)
+  } catch { /* fallback: ignore */ }
+}
+
+// ═══ Drag-and-drop ═══
+const gridRef = ref<HTMLElement | null>(null)
+const draggingWidgetId = ref<string | null>(null)
+const dragGhost = ref<{ col: number; row: number; colSpan: number; rowSpan: number } | null>(null)
+const resizingWidgetId = ref<string | null>(null)
+const resizeGhost = ref<{ col: number; row: number; colSpan: number; rowSpan: number } | null>(null)
+
+function getGridMetrics() {
+  const el = gridRef.value
+  if (!el) return null
+  const rect = el.getBoundingClientRect()
+  const gap = 12 // var(--sp-3) = 12px
+  const cols = 12
+  const colWidth = (rect.width - gap * (cols - 1)) / cols
+  const rowHeight = 80
+  return { rect, gap, cols, colWidth, rowHeight }
+}
+
+function onDragStart(widget: Widget, e: PointerEvent) {
+  const metrics = getGridMetrics()
+  if (!metrics) return
+  draggingWidgetId.value = widget.id
+  const pos = widget.position
+  dragGhost.value = { col: pos.col, row: pos.row, colSpan: pos.col_span, rowSpan: pos.row_span }
+  const startX = e.clientX
+  const startY = e.clientY
+  const startCol = pos.col
+  const startRow = pos.row
+
+  function onMove(ev: PointerEvent) {
+    const m = getGridMetrics()
+    if (!m || !dragGhost.value) return
+    const dx = ev.clientX - startX
+    const dy = ev.clientY - startY
+    const dCol = Math.round(dx / (m.colWidth + m.gap))
+    const dRow = Math.round(dy / (m.rowHeight + m.gap))
+    const newCol = Math.max(1, Math.min(m.cols - pos.col_span + 1, startCol + dCol))
+    const newRow = Math.max(1, startRow + dRow)
+    dragGhost.value.col = newCol
+    dragGhost.value.row = newRow
+  }
+
+  function onUp() {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    if (dragGhost.value && dashboard.value) {
+      const w = dashboard.value.widgets.find(w => w.id === widget.id)
+      if (w && (w.position.col !== dragGhost.value.col || w.position.row !== dragGhost.value.row)) {
+        w.position.col = dragGhost.value.col
+        w.position.row = dragGhost.value.row
+        api.updateWidget(props.id, widget.id, {
+          title: w.title,
+          widget_type: w.widget_type,
+          query_config: w.query_config,
+          position: w.position,
+        })
+      }
+    }
+    draggingWidgetId.value = null
+    dragGhost.value = null
+  }
+
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+}
+
+function onResizeStart(widget: Widget, e: PointerEvent) {
+  const metrics = getGridMetrics()
+  if (!metrics) return
+  resizingWidgetId.value = widget.id
+  const pos = widget.position
+  resizeGhost.value = { col: pos.col, row: pos.row, colSpan: pos.col_span, rowSpan: pos.row_span }
+  const startX = e.clientX
+  const startY = e.clientY
+  const startColSpan = pos.col_span
+  const startRowSpan = pos.row_span
+
+  function onMove(ev: PointerEvent) {
+    const m = getGridMetrics()
+    if (!m || !resizeGhost.value) return
+    const dx = ev.clientX - startX
+    const dy = ev.clientY - startY
+    const dCol = Math.round(dx / (m.colWidth + m.gap))
+    const dRow = Math.round(dy / (m.rowHeight + m.gap))
+    const newColSpan = Math.max(1, Math.min(m.cols - pos.col + 1, startColSpan + dCol))
+    const newRowSpan = Math.max(1, startRowSpan + dRow)
+    resizeGhost.value.colSpan = newColSpan
+    resizeGhost.value.rowSpan = newRowSpan
+  }
+
+  function onUp() {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    if (resizeGhost.value && dashboard.value) {
+      const w = dashboard.value.widgets.find(w => w.id === widget.id)
+      if (w && (w.position.col_span !== resizeGhost.value.colSpan || w.position.row_span !== resizeGhost.value.rowSpan)) {
+        w.position.col_span = resizeGhost.value.colSpan
+        w.position.row_span = resizeGhost.value.rowSpan
+        api.updateWidget(props.id, widget.id, {
+          title: w.title,
+          widget_type: w.widget_type,
+          query_config: w.query_config,
+          position: w.position,
+        })
+      }
+    }
+    resizingWidgetId.value = null
+    resizeGhost.value = null
+  }
+
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+}
+
+function ghostStyle(g: { col: number; row: number; colSpan: number; rowSpan: number }) {
+  return {
+    gridColumn: `${g.col} / span ${g.colSpan}`,
+    gridRow: `${g.row} / span ${g.rowSpan}`,
+  }
+}
+
+onMounted(async () => {
+  await loadDashboard()
+})
+
+onUnmounted(() => {
+  refreshLoop.stop()
+})
+
+async function loadDashboard() {
+  try {
+    dashboard.value = await api.getDashboard(props.id)
+    await loadVarOptions()
+    initVarValues()
+    await loadAllWidgetData()
+    await loadDeploys()
+  } catch {
+    // error in api.error
+  }
+}
+
+async function loadDeploys() {
+  try {
+    const res = await api.listDeploys()
+    deploys.value = res.deploys
+  } catch {
+    // non-critical
+  }
+}
+
+async function loadAllWidgetData() {
+  await refreshAllWidgetData(false)
+}
+
+async function refreshAllWidgetData(rethrow: boolean, signal?: AbortSignal) {
+  if (!dashboard.value) return
+  if (widgetRefreshRequest) return widgetRefreshRequest
+  const run = (async () => {
+    await Promise.all(dashboard.value!.widgets.map(widget => loadSingleWidget(widget, rethrow, signal)))
+    lastRefreshedAt.value = new Date()
+  })()
+  widgetRefreshRequest = run
+  try {
+    await run
+  } finally {
+    if (widgetRefreshRequest === run) widgetRefreshRequest = null
+  }
+}
+
+async function loadSingleWidget(widget: Widget, rethrow = false, signal?: AbortSignal) {
+  widgetLoadingMap.value[widget.id] = true
+  widgetErrorMap.value[widget.id] = null
+  try {
+    widgetDataMap.value[widget.id] = await fetchWidgetData(widget, varValues.value, dashMinutes.value, signal)
+  } catch (e: any) {
+    if (signal?.aborted) return
+    widgetErrorMap.value[widget.id] = e.message
+    if (rethrow) throw e
+  } finally {
+    widgetLoadingMap.value[widget.id] = false
+  }
+}
+
+function setRefresh(secs: number) {
+  refreshInterval.value = secs
+  refreshLoop.stop()
+  if (secs > 0) {
+    refreshLoop.setIntervalMs(secs * 1000)
+    refreshLoop.start()
+  }
+}
+
+async function handleSaveWidget(data: any) {
+  if (!dashboard.value) return
+  try {
+    if (editingWidget.value) {
+      const updated = await api.updateWidget(props.id, editingWidget.value.id, data)
+      const idx = dashboard.value.widgets.findIndex(w => w.id === editingWidget.value!.id)
+      if (idx >= 0) dashboard.value.widgets[idx] = updated
+      loadSingleWidget(updated)
+    } else {
+      // Append new widgets below existing ones rather than stacking at (1,1).
+      const bottom = dashboard.value.widgets.reduce((m, w) => Math.max(m, w.position.row + w.position.row_span), 1)
+      const placed = { ...data, position: { ...data.position, col: 1, row: bottom } }
+      const widget = await api.createWidget(props.id, placed)
+      dashboard.value.widgets.push(widget)
+      loadSingleWidget(widget)
+    }
+  } catch {
+    // error in api.error
+  }
+  showAddWidget.value = false
+  editingWidget.value = null
+}
+
+async function removeWidget(wid: string) {
+  if (!dashboard.value) return
+  try {
+    await api.deleteWidget(props.id, wid)
+    dashboard.value.widgets = dashboard.value.widgets.filter(w => w.id !== wid)
+    delete widgetDataMap.value[wid]
+  } catch {
+    // error in api.error
+  }
+}
+
+async function duplicateWidget(widget: Widget) {
+  if (!dashboard.value) return
+  try {
+    const created = await api.createWidget(props.id, {
+      title: `${widget.title} (copy)`,
+      widget_type: widget.widget_type,
+      query_config: widget.query_config,
+      position: { ...widget.position, row: widget.position.row + widget.position.row_span },
+      display_config: widget.display_config || {},
+    })
+    dashboard.value.widgets.push(created)
+    loadSingleWidget(created)
+  } catch { /* error in api.error */ }
+}
+
+async function saveVariables(vars: DashboardVariable[]) {
+  if (!dashboard.value) return
+  try {
+    await api.updateDashboard(props.id, {
+      name: dashboard.value.name,
+      description: dashboard.value.description,
+      visibility: dashboard.value.visibility,
+      tags: dashboard.value.tags,
+      variables: vars,
+    })
+    dashboard.value.variables = vars
+    showVarEditor.value = false
+    await loadVarOptions()
+    initVarValues()
+    loadAllWidgetData()
+  } catch { /* error in api.error */ }
+}
+
+function editWidget(widget: Widget) {
+  editingWidget.value = widget
+  showAddWidget.value = true
+}
+
+function openAddWidget() {
+  editingWidget.value = null
+  showAddWidget.value = true
+}
+
+function widgetStyle(widget: Widget) {
+  const pos = widget.position
+  return {
+    gridColumn: `${pos.col} / span ${pos.col_span}`,
+    gridRow: `${pos.row} / span ${pos.row_span}`,
+  }
+}
+</script>
+
+<template>
+  <div class="dashboard-page">
+    <header class="dashboard-header">
+      <div class="dashboard-heading">
+        <router-link to="/dashboards" class="back-link"><span aria-hidden="true">←</span> All dashboards</router-link>
+        <div class="dashboard-title-row">
+          <h1 class="page-title">{{ dashboard?.name || 'Loading dashboard…' }}</h1>
+          <span v-if="dashboard" class="dashboard-scope" :class="`dashboard-scope--${dashboard.visibility}`">
+            <span class="scope-dot"></span>{{ visibilityLabel(dashboard.visibility) }}
+          </span>
+          <span v-if="dashboard" class="widget-count mono">{{ dashboard.widgets.length }} panels</span>
+        </div>
+        <p v-if="dashboard?.description" class="page-desc">{{ dashboard.description }}</p>
+      </div>
+      <div class="dashboard-primary-actions">
+        <button class="share-btn" @click="shareLink" :title="shareCopied ? 'Copied!' : 'Copy a link with the current time and variables'">
+          {{ shareCopied ? '✓ Link copied' : 'Share view' }}
+        </button>
+        <button v-if="canWrite" class="btn-edit" :class="{ active: editMode }" @click="editMode = !editMode">
+          {{ editMode ? 'Finish editing' : 'Edit dashboard' }}
+        </button>
+      </div>
+    </header>
+
+    <section class="dashboard-control-deck" aria-label="Dashboard time and refresh controls">
+      <div class="control-cluster time-control">
+        <span class="control-label">TIME RANGE</span>
+        <TimePicker v-model="dashMinutes" />
+      </div>
+      <div class="control-divider"></div>
+      <div class="control-cluster refresh-control">
+        <span class="control-label">REFRESH</span>
+        <select
+          class="refresh-select mono"
+          :value="refreshInterval"
+          aria-label="Auto-refresh interval"
+          @change="setRefresh(Number(($event.target as HTMLSelectElement).value))"
+        >
+          <option v-for="opt in refreshOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+        <button class="refresh-now" title="Refresh all widgets now" aria-label="Refresh all widgets now" @click="loadAllWidgetData">↻</button>
+      </div>
+      <div class="refresh-status mono" :class="{ live: isAutoRefreshing }">
+        <span class="refresh-dot"></span>
+        {{ isAutoRefreshing ? `Live · ${refreshLabel}` : refreshLabel }}
+      </div>
+    </section>
+
+    <div v-if="editMode" class="edit-mode-bar">
+      <div class="edit-mode-copy">
+        <span class="edit-mode-mark">EDIT</span>
+        <span>Drag panels to move them. Use the corner handle to resize.</span>
+      </div>
+      <div class="edit-mode-actions">
+        <button class="btn-edit" @click="showVarEditor = true">Manage variables</button>
+        <button class="btn-add" @click="openAddWidget">+ Add panel</button>
+      </div>
+    </div>
+
+    <!-- ── Template variable bar ── -->
+    <div v-if="variables.length" class="dash-var-bar">
+      <span class="control-label variable-heading">FILTERS</span>
+      <div v-for="v in variables" :key="v.name" class="dash-var">
+        <label class="dash-var-label">{{ varLabel(v) }}</label>
+        <select
+          v-if="v.type !== 'textbox'"
+          class="dash-var-select mono"
+          :value="varValues[v.name]"
+          @change="onVarChange(v.name, ($event.target as HTMLSelectElement).value)"
+        >
+          <option v-if="v.include_all" :value="VAR_ALL">All</option>
+          <option v-for="opt in (varOptions[v.name] || [])" :key="opt" :value="opt">{{ opt }}</option>
+        </select>
+        <input
+          v-else
+          class="dash-var-select mono"
+          :value="varValues[v.name]"
+          @change="onVarChange(v.name, ($event.target as HTMLInputElement).value)"
+          :placeholder="v.name"
+        />
+      </div>
+    </div>
+
+    <div v-if="api.error.value" class="empty-state card">
+      <div class="empty-state-icon" style="color: var(--error)">!</div>
+      <div>{{ api.error.value }}</div>
+    </div>
+
+    <div v-else-if="dashboard && dashboard.widgets.length === 0" class="empty-state card">
+      <div class="empty-state-icon">+</div>
+      <strong>This dashboard is ready for its first signal</strong>
+      <div class="text-secondary" style="font-size: 11px">Add a time series, stat, bar chart, or table to start answering an operational question.</div>
+      <button v-if="canWrite" class="btn-add empty-add" @click="editMode = true; openAddWidget()">Add first panel</button>
+    </div>
+
+    <div v-else ref="gridRef" class="widget-grid">
+      <div
+        v-for="widget in dashboard?.widgets || []"
+        :key="widget.id"
+        class="widget-cell"
+        :style="widgetStyle(widget)"
+        :class="{ 'widget-dragging': draggingWidgetId === widget.id || resizingWidgetId === widget.id }"
+      >
+        <WidgetWrapper
+          :title="titleFor(widget)"
+          :type="widget.widget_type"
+          :description="(widget.display_config?.description as string) || ''"
+          :unit="(widget.display_config?.unit as string) || ''"
+          :loading="widgetLoadingMap[widget.id]"
+          :error="widgetErrorMap[widget.id]"
+          :edit-mode="editMode"
+          @edit="editWidget(widget)"
+          @duplicate="duplicateWidget(widget)"
+          @remove="removeWidget(widget.id)"
+          @dragstart="onDragStart(widget, $event)"
+          @resizestart="onResizeStart(widget, $event)"
+        >
+          <CounterWidget
+            v-if="widget.widget_type === 'counter' && widgetDataMap[widget.id]"
+            :value="widgetDataMap[widget.id]!.count || 0"
+            :label="widget.title"
+          />
+          <BarWidget
+            v-else-if="widget.widget_type === 'bar' && widgetDataMap[widget.id]"
+            :groups="widgetDataMap[widget.id]!.groups || []"
+          />
+          <TableWidget
+            v-else-if="widget.widget_type === 'table' && widgetDataMap[widget.id]"
+            :rows="(widgetDataMap[widget.id]!.rows || []) as Record<string, unknown>[]"
+          />
+          <TimeseriesWidget
+            v-else-if="widget.widget_type === 'timeseries' && widgetDataMap[widget.id]"
+            :buckets="widgetDataMap[widget.id]!.buckets || []"
+            :series="widgetDataMap[widget.id]!.series"
+            :deploys="deploys"
+            :unit="(widget.display_config?.unit as string) || ''"
+          />
+        </WidgetWrapper>
+      </div>
+      <!-- Drag ghost -->
+      <div v-if="dragGhost" class="widget-ghost" :style="ghostStyle(dragGhost)"></div>
+      <!-- Resize ghost -->
+      <div v-if="resizeGhost" class="widget-ghost widget-ghost-resize" :style="ghostStyle(resizeGhost)"></div>
+    </div>
+
+    <button v-if="editMode && dashboard?.widgets.length" class="add-panel-zone" @click="openAddWidget">
+      <span class="add-panel-glyph">+</span>
+      <span class="add-panel-copy">
+        <strong>Add visualization</strong>
+        <small>Build a panel from spans, logs, or metrics</small>
+      </span>
+      <span class="add-panel-types mono">TIME SERIES · STAT · BAR · TABLE</span>
+    </button>
+
+    <WidgetEditor
+      v-if="showAddWidget"
+      :widget="editingWidget"
+      :dashboard-id="id"
+      :variables="variables"
+      :var-values="varValues"
+      @save="handleSaveWidget"
+      @cancel="showAddWidget = false; editingWidget = null"
+    />
+
+    <VariableEditor
+      v-if="showVarEditor"
+      :variables="variables"
+      @save="saveVariables"
+      @cancel="showVarEditor = false"
+    />
+  </div>
+</template>
+
+<style scoped src="../styles/views/DashboardView.css"></style>

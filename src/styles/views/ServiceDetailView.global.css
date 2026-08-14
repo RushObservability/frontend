@@ -1,0 +1,23 @@
+/* Chart expand modal (unscoped — Teleport renders outside component) */
+.chart-modal-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
+.chart-modal { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--r-lg, 8px); width: 80vw; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4); }
+.chart-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--border-default); }
+.chart-modal-title { font-size: 14px; font-weight: 600; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em; }
+.chart-modal-close { background: none; border: none; font-size: 24px; color: var(--text-muted); cursor: pointer; padding: 0 4px; line-height: 1; transition: color 0.15s; }
+.chart-modal-close:hover { color: var(--text-primary); }
+.chart-modal-body { padding: 20px; }
+.modal-chart-body { cursor: crosshair; }
+.modal-chart-svg { width: 100%; height: 300px; }
+.modal-chart-time { padding: 0 20px 16px; display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+.modal-map-svg { width: 100%; height: 300px; }
+.modal-map-label { fill: var(--text-secondary); font-size: 11px; font-family: var(--font-mono); }
+.modal-map-center { fill: var(--amber); font-size: 11px; font-weight: 600; font-family: var(--font-mono); }
+.chart-modal-body .chart-body { display: flex; gap: 0; }
+.chart-modal-body .chart-y { display: flex; flex-direction: column; justify-content: space-between; width: 38px; flex-shrink: 0; padding: 2px 0; }
+.chart-modal-body .y-label { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); text-align: right; padding-right: 6px; line-height: 1; }
+.chart-modal-body .chart-area { flex: 1; position: relative; min-width: 0; }
+.chart-modal-body .grid-line { stroke: var(--border-subtle); stroke-width: 1; stroke-dasharray: 4 3; }
+.chart-modal-body .crosshair { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text-muted); opacity: 0.4; pointer-events: none; transform: translateX(-50%); }
+.chart-modal-body .chart-tip { position: absolute; bottom: calc(100% + 6px); transform: translateX(-50%); background: var(--bg-overlay); border: 1px solid var(--border-default); border-radius: var(--r-sm, 4px); padding: 4px 8px; pointer-events: none; white-space: nowrap; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 1px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+.chart-modal-body .tip-val { font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text-primary); }
+.chart-modal-body .tip-time { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }

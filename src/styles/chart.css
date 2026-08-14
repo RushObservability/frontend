@@ -1,0 +1,88 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Shared chart styling — one cohesive look across dashboard widgets, SLO
+   charts, metric/PromQL charts and previews.
+
+   Principles (refined observability charts, à la Grafana/Vercel/Tremor):
+   - thin, CRISP strokes that never bloat when the SVG scales
+     (vector-effect: non-scaling-stroke is the key fix for the old "bulky" look)
+   - smooth monotone curves (see lib/chart.ts) instead of jagged segments
+   - vertical gradient area fills (series color → transparent)
+   - quiet, horizontal-only grid; small mono axis labels
+   - a single tasteful draw-in on mount
+   ────────────────────────────────────────────────────────────────────────── */
+
+.ch-svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+
+/* Series line — color comes from `color`/currentColor so one class serves
+   every palette entry. */
+.ch-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25; /* Grafana default ~1px */
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.ch-line--thin { stroke-width: 1; }
+.ch-line--dashed {
+  stroke-dasharray: 4 4;
+  opacity: 0.7;
+}
+
+/* Flat (NO gradient) area fill — a single low-opacity wash of the series color.
+   Color comes from `color`/currentColor so one class serves every series. */
+.ch-area {
+  stroke: none;
+  fill: currentColor;
+  fill-opacity: 0.08;
+}
+
+/* Grafana-style grid: a faint full crosshatch (both vertical + horizontal).
+   Apply .ch-grid to BOTH horizontal value lines and vertical time lines. */
+.ch-grid {
+  stroke: var(--border-subtle);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.45;
+}
+.ch-grid--baseline { opacity: 0.8; }
+
+/* Axis tick labels. */
+.ch-axis {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+/* Threshold / target reference line (SLO target, alert threshold). */
+.ch-threshold {
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+}
+.ch-threshold-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Hover crosshair + marker. */
+.ch-crosshair {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+.ch-dot {
+  stroke: var(--bg-void);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+/* (No entrance animation — Grafana renders charts instantly.) */

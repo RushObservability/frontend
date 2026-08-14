@@ -1,0 +1,102 @@
+.ts-widget {
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+/* Plot box holds the SVG + the hover overlay; the legend sits below it. The
+   crosshair/tooltip are positioned in % of this box (= the SVG box). */
+.ts-plot {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ts-svg {
+  width: 100%;
+  height: 100%;
+}
+/* The SVG stretches to fill the cell (preserveAspectRatio="none"), which also
+   magnifies viewBox-unit text ~1.5-2x. Shrink axis labels here so they read at
+   a normal size on the dashboard without touching the shared .ch-axis (used at
+   1:1 elsewhere). */
+.ts-svg .ch-axis { font-size: 6px; }
+.ts-svg .ch-threshold-label { font-size: 6px; font-family: var(--font-mono); }
+/* line/area/grid/axis come from the shared .ch-* classes (chart.css).
+   The widget stretches to fill its cell via preserveAspectRatio="none";
+   non-scaling-stroke keeps the line crisp despite the stretch. */
+.deploy-line {
+  stroke: var(--text-secondary);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  opacity: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.deploy-label {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  fill: var(--text-secondary);
+}
+
+/* Multi-series (metrics/PromQL) legend */
+.ts-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 4px 6px 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.ts-legend-item { display: inline-flex; align-items: center; gap: 5px; max-width: 240px; overflow: hidden; white-space: nowrap; }
+.ts-legend-dot { width: 8px; height: 3px; border-radius: 1px; flex-shrink: 0; }
+.ts-legend-name { overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
+.ts-legend-val { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+/* ── Shared crosshair + hover tooltip ── */
+.ts-crosshair {
+  position: absolute;
+  width: 1px;
+  background: var(--text-secondary);
+  opacity: 0.55;
+  pointer-events: none;
+  transform: translateX(-0.5px);
+  z-index: 2;
+}
+.ts-tooltip {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3;
+  transform: translate(8px, 0);
+  min-width: 88px;
+  max-width: 220px;
+  padding: 5px 7px;
+  background: color-mix(in srgb, var(--bg-surface, #15181d) 94%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm, 4px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+}
+/* Flip to the left of the crosshair when near the right edge. */
+.ts-tooltip--flip { transform: translate(-100%, 0) translateX(-8px); }
+.ts-tt-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+  letter-spacing: 0.02em;
+}
+.ts-tt-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.ts-tt-dot { width: 8px; height: 3px; border-radius: 1px; flex-shrink: 0; }
+.ts-tt-name {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+.ts-tt-val { margin-left: auto; color: var(--text-primary); font-variant-numeric: tabular-nums; }
