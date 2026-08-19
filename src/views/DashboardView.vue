@@ -14,6 +14,7 @@ import VariableEditor from '../components/widgets/VariableEditor.vue'
 import TimePicker from '../components/TimePicker.vue'
 import { usePollingTask } from '../composables/usePollingTask'
 import { defaultPanelCaption, formatPanelRange, formatPanelSource } from '../components/panels/panelPresentation'
+import { applyTimeRangeOverride, useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const props = defineProps<{ id: string }>()
 
@@ -34,7 +35,8 @@ const widgetErrorMap = ref<Record<string, string | null>>({})
 const editMode = ref(false)
 // Dashboard-level time range (drives every widget); seeded from ?t= or 1h.
 const initT = Number(route.query.t)
-const dashMinutes = ref(initT > 0 ? initT : 60)
+const dashMinutes = useTimeRangePreference()
+if (initT > 0) applyTimeRangeOverride(initT)
 const showAddWidget = ref(false)
 const showVarEditor = ref(false)
 const editingWidget = ref<Widget | null>(null)
