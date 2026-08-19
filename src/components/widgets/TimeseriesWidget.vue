@@ -6,6 +6,7 @@ let chartIdSeq = 0
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CountBucket, DeployMarker } from '../../types'
+import type { TimeSeriesPanelSeries } from '../panels/types'
 import { straightLinePath, straightAreaPath, fmtAxis, type Pt } from '../../lib/chart'
 import { useChartHover } from '../../composables/useChartHover'
 
@@ -13,7 +14,7 @@ const props = defineProps<{
   buckets: CountBucket[]
   deploys?: DeployMarker[]
   /** Multi-series mode (PromQL/metrics source). When present, takes precedence over buckets. */
-  series?: Array<{ name: string; points: [number, number][]; color?: string; ref_id?: string; axis?: 'left' | 'right'; legendValue?: number }>
+  series?: TimeSeriesPanelSeries[]
   /** Optional horizontal reference lines (e.g. monitor alert thresholds). */
   thresholds?: Array<{ value: number; color: string; label: string }>
   /** Optional unit suffix for axis labels, the legend last-value, and the tooltip. */
@@ -137,7 +138,14 @@ const seriesPaths = computed(() => {
       padLeft + ((t - minT) / span) * plotWidth,
       padTop + plotHeight - (v / axisMax) * plotHeight,
     ] as Pt)
-    return { d: straightLinePath(pts), color: s.color || SERIES_COLORS[i % SERIES_COLORS.length]!, name: s.name, axis: s.axis || 'left' }
+    return {
+      d: straightLinePath(pts),
+      color: s.color || SERIES_COLORS[i % SERIES_COLORS.length]!,
+      name: s.name,
+      axis: s.axis || 'left',
+      lineStyle: s.lineStyle || 'solid',
+      opacity: s.opacity ?? 1,
+    }
   })
 })
 
@@ -173,11 +181,15 @@ const seriesXLabels = computed(() => {
 })
 
 const deployLines = computed(() => {
-  if (!props.deploys || props.deploys.length === 0 || props.buckets.length < 2) return []
-  const firstTime = new Date(props.buckets[0]!.bucket).getTime()
-  const lastTime = new Date(props.buckets[props.buckets.length - 1]!.bucket).getTime()
+  if (!props.deploys || props.deploys.length === 0) return []
+  const firstTime = seriesMode.value
+    ? seriesBounds.value.minT * 1000
+    : (props.buckets.length >= 2 ? new Date(props.buckets[0]!.bucket).getTime() : NaN)
+  const lastTime = seriesMode.value
+    ? seriesBounds.value.maxT * 1000
+    : (props.buckets.length >= 2 ? new Date(props.buckets[props.buckets.length - 1]!.bucket).getTime() : NaN)
   const range = lastTime - firstTime
-  if (range <= 0) return []
+  if (!Number.isFinite(range) || range <= 0) return []
   return props.deploys
     .map(d => {
       const t = new Date(d.deployed_at).getTime()
@@ -229,7 +241,7 @@ const hoverModel = computed<{ minT: number; maxT: number; series: HSeries[] }>((
 // ── Always-on compact legend (single- and multi-series) ──
 // Each entry: ● name  lastValue<unit>, using the same colors as the lines.
 const legendItems = computed(() => {
-  return hoverModel.value.series.slice(0, 6).map((s) => {
+  return hoverModel.value.series.slice(0, 8).map((s) => {
     const last = s.legendValue ?? (s.pts.length ? s.pts[s.pts.length - 1]![1] : null)
     return {
       name: s.name,
@@ -309,11 +321,29 @@ function onLeave() { hover.set(null) }
         <text v-for="tick in seriesRightYTicks" :key="'syr' + tick.value" :x="svgWidth - padRight + 6" :y="tick.y + 3" class="ch-axis ts-axis-right" text-anchor="start">{{ tick.label }}</text>
         <line v-for="xl in seriesXLabels" :key="'sv' + xl.x" :x1="xl.x" :y1="padTop" :x2="xl.x" :y2="padTop + plotHeight" class="ch-grid" />
         <text v-for="xl in seriesXLabels" :key="'sx' + xl.x" :x="xl.x" :y="svgHeight - 4" class="ch-axis" text-anchor="middle">{{ xl.label }}</text>
-        <path v-for="(sp, i) in seriesPaths" :key="'sp' + i" :d="sp.d" class="ch-line ts-line" :style="{ color: sp.color }" />
+        <path
+          v-for="(sp, i) in seriesPaths"
+          :key="'sp' + i"
+          :d="sp.d"
+          class="ch-line ts-line"
+          :stroke-dasharray="sp.lineStyle === 'dashed' ? '4 3' : undefined"
+          :style="{ color: sp.color, opacity: sp.opacity }"
+        />
         <!-- Threshold reference lines -->
         <g v-for="(th, i) in thresholdLines" :key="'th' + i">
           <line :x1="padLeft" :y1="th.y" :x2="svgWidth - padRight" :y2="th.y" :stroke="th.color" stroke-width="1" stroke-dasharray="5,4" vector-effect="non-scaling-stroke" />
           <text :x="padLeft + 4" :y="th.y - 3" :fill="th.color" class="ch-threshold-label">{{ th.label }}</text>
+        </g>
+        <g v-for="(dl, i) in deployLines" :key="'sd' + i">
+          <line
+            :x1="dl.x" :y1="padTop"
+            :x2="dl.x" :y2="padTop + plotHeight"
+            class="deploy-line"
+          />
+          <text
+            :x="dl.x + 3" :y="padTop + 10"
+            class="deploy-label"
+          >{{ dl.label }}</text>
         </g>
       </svg>
 

@@ -229,6 +229,7 @@
   display: flex;
   flex-direction: column;
 }
+.svc-charts-grid .svc-chart-card :deep(.ts-widget) { min-height: 168px; }
 .svc-chart-svg { width: 100%; height: 100px; }
 .svc-chart-time { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 4px; }
 
@@ -272,6 +273,7 @@
    so this overrides PanelCard's default border-strong hover. */
 .svc-chart-card.chart-clickable { cursor: pointer; }
 .svc-chart-card.chart-clickable:hover { border-color: var(--amber-muted); box-shadow: 0 0 0 1px var(--amber-dim); }
+.svc-chart-card.chart-clickable:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 
 /* ═══ BubbleUp Button ═══ */
 .btn-bubbleup {
@@ -1160,9 +1162,7 @@ button.dep-red-row:hover { background: var(--bg-hover, rgba(255,255,255,0.04)); 
 /* Transaction time series: an operational line chart keeps traffic volume
    separate from latency composition by plotting average time per request. */
 .svc-time-series-card :deep(.panel-body) { gap: var(--sp-4); }
-.svc-time-series { display: flex; flex-direction: column; gap: var(--sp-3); }
-.svc-time-series-chart { height: 216px; min-height: 0; }
-.svc-time-series-chart :deep(.ts-widget) { height: 100%; }
+.svc-time-series-card :deep(.ts-widget) { min-height: 216px; }
 .svc-time-series-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--text-muted); font-size: 10px; }
 .svc-time-series-meta b { color: var(--text-secondary); font-family: var(--font-mono); font-weight: 600; }
 .svc-time-databases { border-top: 1px solid var(--border-subtle); padding-top: var(--sp-3); }
@@ -1174,7 +1174,6 @@ button.dep-red-row:hover { background: var(--bg-hover, rgba(255,255,255,0.04)); 
 .svc-time-database-name { display: flex; flex-direction: column; min-width: 0; text-align: left !important; }
 .svc-time-database-name b { overflow: hidden; color: var(--text-primary); font-family: var(--font-mono); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .svc-time-database-name small { color: var(--text-muted); font-size: 9px; }
-.svc-time-note { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.45; }
 @media (max-width: 600px) {
   .svc-time-series-meta { gap: 5px 12px; }
   .svc-time-database-head, .svc-time-database-row { grid-template-columns: minmax(0, 1fr) 54px 70px; }

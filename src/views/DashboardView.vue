@@ -9,14 +9,12 @@ import { provideChartHover } from '../composables/useChartHover'
 import type { DashboardWithWidgets, Widget, WidgetData, DeployMarker, DashboardVariable } from '../types'
 import { VAR_ALL } from '../types'
 import WidgetWrapper from '../components/widgets/WidgetWrapper.vue'
-import CounterWidget from '../components/widgets/CounterWidget.vue'
-import BarWidget from '../components/widgets/BarWidget.vue'
-import TableWidget from '../components/widgets/TableWidget.vue'
-import TimeseriesWidget from '../components/widgets/TimeseriesWidget.vue'
 import WidgetEditor from '../components/widgets/WidgetEditor.vue'
 import VariableEditor from '../components/widgets/VariableEditor.vue'
 import TimePicker from '../components/TimePicker.vue'
 import { usePollingTask } from '../composables/usePollingTask'
+import { defaultPanelCaption, formatPanelRange, formatPanelSource } from '../components/panels/panelPresentation'
+import { applyTimeRangeOverride, useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const props = defineProps<{ id: string }>()
 
@@ -37,7 +35,8 @@ const widgetErrorMap = ref<Record<string, string | null>>({})
 const editMode = ref(false)
 // Dashboard-level time range (drives every widget); seeded from ?t= or 1h.
 const initT = Number(route.query.t)
-const dashMinutes = ref(initT > 0 ? initT : 60)
+const dashMinutes = useTimeRangePreference()
+if (initT > 0) applyTimeRangeOverride(initT)
 const showAddWidget = ref(false)
 const showVarEditor = ref(false)
 const editingWidget = ref<Widget | null>(null)
@@ -51,6 +50,17 @@ const varOptions = ref<Record<string, string[]>>({})     // name → dropdown op
 
 function varLabel(v: DashboardVariable): string { return v.label || v.name }
 function titleFor(w: Widget): string { return substitute(w.title, varValues.value) }
+const panelRangeLabel = computed(() => formatPanelRange(dashMinutes.value))
+
+function panelSourceLabel(widget: Widget): string {
+  return formatPanelSource(widget.query_config)
+}
+
+function panelCaption(widget: Widget): string {
+  return (widget.display_config?.caption as string)
+    || (widget.display_config?.description as string)
+    || defaultPanelCaption(widget.widget_type)
+}
 
 // Initialise selected values from the URL (?var-<name>=) or the variable's default.
 function initVarValues() {
@@ -518,7 +528,12 @@ function widgetStyle(widget: Widget) {
           :title="titleFor(widget)"
           :type="widget.widget_type"
           :description="(widget.display_config?.description as string) || ''"
+          :caption="panelCaption(widget)"
+          :source-label="panelSourceLabel(widget)"
+          :range-label="panelRangeLabel"
           :unit="(widget.display_config?.unit as string) || ''"
+          :data="widgetDataMap[widget.id]"
+          :deploys="deploys"
           :loading="widgetLoadingMap[widget.id]"
           :error="widgetErrorMap[widget.id]"
           :edit-mode="editMode"
@@ -527,28 +542,7 @@ function widgetStyle(widget: Widget) {
           @remove="removeWidget(widget.id)"
           @dragstart="onDragStart(widget, $event)"
           @resizestart="onResizeStart(widget, $event)"
-        >
-          <CounterWidget
-            v-if="widget.widget_type === 'counter' && widgetDataMap[widget.id]"
-            :value="widgetDataMap[widget.id]!.count || 0"
-            :label="widget.title"
-          />
-          <BarWidget
-            v-else-if="widget.widget_type === 'bar' && widgetDataMap[widget.id]"
-            :groups="widgetDataMap[widget.id]!.groups || []"
-          />
-          <TableWidget
-            v-else-if="widget.widget_type === 'table' && widgetDataMap[widget.id]"
-            :rows="(widgetDataMap[widget.id]!.rows || []) as Record<string, unknown>[]"
-          />
-          <TimeseriesWidget
-            v-else-if="widget.widget_type === 'timeseries' && widgetDataMap[widget.id]"
-            :buckets="widgetDataMap[widget.id]!.buckets || []"
-            :series="widgetDataMap[widget.id]!.series"
-            :deploys="deploys"
-            :unit="(widget.display_config?.unit as string) || ''"
-          />
-        </WidgetWrapper>
+        />
       </div>
       <!-- Drag ghost -->
       <div v-if="dragGhost" class="widget-ghost" :style="ghostStyle(dragGhost)"></div>

@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTenant } from '../composables/useTenant'
+import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const props = defineProps<{
   open: boolean
@@ -13,6 +14,7 @@ const emit = defineEmits<{
 
 const router = useRouter()
 const { tenants, activeTenant, setTenant } = useTenant()
+const timeRangeMinutes = useTimeRangePreference()
 
 const query = ref('')
 const selectedIndex = ref(0)
@@ -129,9 +131,10 @@ const actions = computed<PaletteAction[]>(() => {
       category: 'Time Range',
       icon: '\u25F7',
       action: () => {
-        // Update URL with time range, keeping current route
+        timeRangeMinutes.value = tr.minutes
+        // Keep shareable pages in sync with the global preference.
         const currentQuery = { ...router.currentRoute.value.query }
-        currentQuery.minutes = String(tr.minutes)
+        currentQuery.t = String(tr.minutes)
         router.replace({ query: currentQuery })
         close()
       },

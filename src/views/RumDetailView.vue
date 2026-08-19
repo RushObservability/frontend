@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import type { RumVitalsSummary, RumPageStats, RumErrorGroup, RumSessionSummary, RumRecord, Filter } from '../types'
 import TimePicker from '../components/TimePicker.vue'
+import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const props = defineProps<{ appName: string }>()
 
@@ -12,7 +13,7 @@ const route = useRoute()
 const api = useApi()
 
 // ═══ Controls ═══
-const selectedPreset = ref(60)
+const selectedPreset = useTimeRangePreference()
 
 const timeRange = computed(() => {
   const to = new Date()
@@ -63,10 +64,10 @@ function formatCompact(n: number): string {
 }
 
 function rangeLabel(minutes: number): string {
-  if (minutes >= 10080) return '7d'
-  if (minutes >= 1440) return '24h'
-  if (minutes >= 360) return '6h'
-  return '1h'
+  if (minutes < 60) return `${minutes}m`
+  if (minutes < 1440) return `${minutes / 60}h`
+  if (minutes === 1440) return '24h'
+  return `${minutes / 1440}d`
 }
 
 function formatDuration(ms: number | null | undefined): string {

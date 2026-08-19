@@ -241,7 +241,6 @@ watch(isAuthenticated, async (authed) => {
             <router-link v-if="isAdmin" to="/settings" class="side-nav-item" :class="{ active: currentNav === 'settings' }"><span class="side-nav-dot"></span>Settings</router-link>
           </div>
         </nav>
-        <div class="sidebar-footer">RUSH <span>/</span> CONTROL ROOM</div>
       </aside>
       <main id="main-content" class="main" tabindex="-1">
         <router-view />
@@ -1240,8 +1239,7 @@ button {
 
 .nav-group { display: flex; flex-direction: column; gap: 5px; }
 
-.nav-group-label,
-.sidebar-footer {
+.nav-group-label {
   padding: 0 12px 8px;
   color: #8491a9;
   font-family: var(--font-mono);
@@ -1299,15 +1297,6 @@ button {
 
 .side-nav-item.active .side-nav-dot { background: var(--amber); }
 
-.sidebar-footer {
-  margin-top: auto;
-  padding: 0 28px 22px;
-  font-size: 9px;
-  letter-spacing: 0.08em;
-}
-
-.sidebar-footer span { padding: 0 4px; color: var(--amber); }
-
 .main {
   flex: 1 1 auto;
   min-width: 0;
@@ -1351,7 +1340,7 @@ button {
     overflow-x: auto;
   }
   .nav-group { flex-direction: row; gap: 4px; }
-  .nav-group:not(:first-child), .nav-group-label, .sidebar-footer { display: none; }
+  .nav-group:not(:first-child), .nav-group-label { display: none; }
   .side-nav-item { min-height: 42px; padding: 0 12px; white-space: nowrap; }
   .main { padding: 24px 16px 82px; }
 }

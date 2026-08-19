@@ -6,6 +6,7 @@ import { useFeatures } from '../composables/useFeatures'
 import type { LogRecord, Filter, CountBucket } from '../types'
 import TimePicker from '../components/TimePicker.vue'
 import VirtualTable from '../components/VirtualTable.vue'
+import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const router = useRouter()
 
@@ -13,7 +14,7 @@ const api = useApi()
 const { features } = useFeatures()
 
 // ═══ Time range ═══
-const selectedPreset = ref(60)
+const selectedPreset = useTimeRangePreference()
 
 const timeRange = computed(() => {
   const to = new Date()
