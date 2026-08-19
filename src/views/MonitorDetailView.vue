@@ -3,8 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
-import TimeseriesWidget from '../components/widgets/TimeseriesWidget.vue'
-import PanelCard from '../components/PanelCard.vue'
+import { PanelCard, TablePanel, TimeSeriesPanel } from '../components/panels'
 import type { Monitor, MonitorEvent, MonitorPreview } from '../types'
 
 const props = defineProps<{
@@ -30,15 +29,19 @@ const lookbackOptions = [
 ]
 const lookbackSecs = ref(10800) // default 3h
 const previewLoading = ref(false)
+const previewError = ref<string | null>(null)
 
 async function loadPreview() {
   const m = monitor.value
   if (!m || m.type === 'composite') return
   previewLoading.value = true
+  previewError.value = null
   try {
     // Override eval_window_secs so the graph spans the chosen lookback window.
     preview.value = await api.previewMonitor({ ...m.query_config, eval_window_secs: lookbackSecs.value })
-  } catch { /* preview optional */ }
+  } catch (error) {
+    previewError.value = error instanceof Error ? error.message : 'Preview data is unavailable.'
+  }
   finally { previewLoading.value = false }
 }
 
@@ -110,8 +113,8 @@ function formatGroupKey(key: string): string {
   return key.trim() || 'All traffic'
 }
 
-// ── Live graph (standard TimeseriesWidget) ──
-// Map the preview timeseries to the widget's [epoch-seconds, value] series shape.
+// ── Live graph (reusable TimeSeriesPanel) ──
+// Map the preview timeseries to the panel's [epoch-seconds, value] series shape.
 const previewSeries = computed(() => {
   if (!preview.value || !preview.value.timeseries.length) return []
   const points = preview.value.timeseries.map((p, i) => {
@@ -129,6 +132,10 @@ const previewThresholds = computed(() => {
   if (m.warning != null) out.push({ value: m.warning, color: 'var(--warning)', label: `warn ${m.warning}` })
   return out
 })
+
+const monitorSourceLabel = computed(() => monitor.value ? typeLabel(monitor.value.type) : 'Monitor')
+const groupPanelRows = computed<Record<string, unknown>[]>(() => groupEntries.value.map(group => ({ ...group })))
+const eventPanelRows = computed<Record<string, unknown>[]>(() => events.value.map(event => ({ ...event })))
 
 // State timeline segments
 const timelineSegments = computed(() => {
@@ -192,11 +199,23 @@ async function deleteMonitor() {
 
 <template>
   <div class="monitor-detail-page">
-    <div v-if="loading" class="empty-state card">
-      <div class="text-muted">Loading monitor...</div>
-    </div>
+    <PanelCard
+      v-if="loading"
+      class="detail-section monitor-loading-panel"
+      title="Alert details"
+      description="Loading the alert definition, live evaluation, and recent state changes."
+      :loading="true"
+    />
 
-    <template v-if="!loading && monitor">
+    <PanelCard
+      v-else-if="api.error.value && !monitor"
+      class="detail-section"
+      title="Alert details"
+      description="The alert detail view could not be loaded."
+      :error="api.error.value"
+    />
+
+    <template v-else-if="monitor">
       <!-- Header -->
       <div class="detail-header">
         <div class="detail-header-left">
@@ -240,10 +259,18 @@ async function deleteMonitor() {
       </div>
 
       <!-- Live graph -->
-      <PanelCard
+      <TimeSeriesPanel
         class="detail-section"
         title="Live"
         description="The monitor's evaluated metric over the selected lookback, with alert thresholds drawn as reference lines."
+        caption="Evaluation signal with warning and critical thresholds."
+        :source-label="monitorSourceLabel"
+        :series="previewSeries"
+        :thresholds="previewThresholds"
+        :loading="previewLoading"
+        :error="previewError"
+        empty-title="No preview data"
+        empty-message="This alert has not returned evaluation data for the selected lookback."
       >
         <template #actions>
           <div class="lookback-toggle" role="group" aria-label="Lookback window">
@@ -256,20 +283,18 @@ async function deleteMonitor() {
             >{{ opt.label }}</button>
           </div>
         </template>
-        <div v-if="previewSeries.length" class="detail-chart" :class="{ 'is-loading': previewLoading }">
-          <TimeseriesWidget :buckets="[]" :series="previewSeries" :thresholds="previewThresholds" />
-        </div>
-        <div v-else class="detail-chart detail-chart-empty text-muted">
-          {{ previewLoading ? 'Loading…' : 'No preview data available' }}
-        </div>
-      </PanelCard>
+      </TimeSeriesPanel>
 
       <!-- State timeline -->
       <PanelCard
-        v-if="timelineSegments.length > 0"
         class="detail-section"
         title="State Timeline"
         description="Monitor state (OK / alerting / no-data) across the evaluated window."
+        caption="Recorded state changes from the earliest event through now."
+        source-label="Monitor events"
+        :empty="timelineSegments.length === 0"
+        empty-title="No state changes yet"
+        empty-message="The timeline will appear after this alert records its first transition."
       >
         <div class="state-timeline">
           <div
@@ -288,55 +313,63 @@ async function deleteMonitor() {
 
       <!-- Grouped monitors: current groups with a compact event rail alongside -->
       <div v-if="hasGroupBy" class="grouped-activity-layout">
-        <section class="detail-section card group-breakdown">
-          <div class="section-heading">
-            <div>
-              <div class="section-title">Group Breakdown</div>
-              <p class="section-description">Current state for each evaluated group.</p>
-            </div>
+        <TablePanel
+          class="detail-section group-breakdown"
+          title="Group Breakdown"
+          description="Current state for each evaluated group."
+          caption="Groups are ordered by alert severity, then name."
+          source-label="Monitor state"
+          range-label="Current"
+          :rows="groupPanelRows"
+          empty-title="No evaluated groups"
+          empty-message="Group states will appear after the first grouped evaluation."
+        >
+          <template #actions>
             <div class="group-fields" aria-label="Group by fields">
               <span class="group-fields-label">Group by</span>
               <span v-for="field in monitor.group_by" :key="field" class="group-field mono">{{ field }}</span>
             </div>
-          </div>
+          </template>
 
-          <div v-if="groupEntries.length === 0" class="groups-empty text-muted">
-            Waiting for the first grouped evaluation
+          <div class="detail-table-scroll">
+            <table class="groups-table">
+              <thead>
+                <tr>
+                  <th>Group</th>
+                  <th>State</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="g in groupEntries" :key="g.key">
+                  <td class="mono group-key-cell">{{ formatGroupKey(g.key) }}</td>
+                  <td>
+                    <span class="group-state-badge" :style="{ color: stateColor(g.state) }">
+                      <span class="group-state-dot" :style="{ background: stateColor(g.state) }"></span>
+                      {{ stateLabel(g.state) }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <table v-else class="groups-table">
-            <thead>
-              <tr>
-                <th>Group</th>
-                <th>State</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="g in groupEntries" :key="g.key">
-                <td class="mono group-key-cell">{{ formatGroupKey(g.key) }}</td>
-                <td>
-                  <span class="group-state-badge" :style="{ color: stateColor(g.state) }">
-                    <span class="group-state-dot" :style="{ background: stateColor(g.state) }"></span>
-                    {{ stateLabel(g.state) }}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
+        </TablePanel>
 
-        <aside class="detail-section card grouped-events" aria-label="Grouped monitor events">
-          <div class="section-heading event-rail-heading">
-            <div>
-              <div class="section-title">Events</div>
-              <p class="section-description">Recent state changes by group.</p>
-            </div>
+        <PanelCard
+          class="detail-section grouped-events"
+          title="Events"
+          description="Recent state changes by group."
+          caption="Newest recorded transitions for this alert."
+          source-label="Monitor events"
+          :empty="events.length === 0"
+          empty-title="No transitions yet"
+          empty-message="State changes will appear here after this alert first transitions."
+          aria-label="Grouped monitor events"
+        >
+          <template #actions>
             <span class="event-count mono">{{ events.length }}</span>
-          </div>
+          </template>
 
-          <div v-if="events.length === 0" class="events-empty text-muted">
-            No state transition events yet
-          </div>
-          <div v-else class="event-rail">
+          <div class="event-rail">
             <article v-for="ev in events" :key="ev.id" class="event-rail-item">
               <div class="event-rail-meta">
                 <span class="event-state-dot" :style="{ background: stateColor(ev.new_state) }"></span>
@@ -358,44 +391,52 @@ async function deleteMonitor() {
               <p v-if="ev.message" class="event-message" :title="ev.message">{{ ev.message }}</p>
             </article>
           </div>
-        </aside>
+        </PanelCard>
       </div>
 
       <!-- Ungrouped monitors keep the scan-friendly full-width event table -->
-      <div v-else class="detail-section card">
-        <div class="section-title">Events</div>
-        <div v-if="events.length === 0" class="events-empty text-muted">
-          No state transition events yet
+      <TablePanel
+        v-else
+        class="detail-section"
+        title="Events"
+        description="Recent state changes with evaluated values and thresholds."
+        caption="Newest alert transitions first."
+        source-label="Monitor events"
+        :rows="eventPanelRows"
+        empty-title="No transitions yet"
+        empty-message="State changes will appear here after this alert first transitions."
+      >
+        <div class="detail-table-scroll">
+          <table class="events-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Transition</th>
+                <th>Value</th>
+                <th>Threshold</th>
+                <th>Group</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="ev in events" :key="ev.id">
+                <td class="mono text-muted">{{ formatDate(ev.created_at) }}</td>
+                <td>
+                  <span class="transition-badge">
+                    <span :style="{ color: stateColor(ev.prev_state) }">{{ stateLabel(ev.prev_state) }}</span>
+                    <span class="transition-arrow">&rarr;</span>
+                    <span :style="{ color: stateColor(ev.new_state) }">{{ stateLabel(ev.new_state) }}</span>
+                  </span>
+                </td>
+                <td class="mono">{{ formatEventNumber(ev.value) }}</td>
+                <td class="mono text-muted">{{ formatEventNumber(ev.threshold) }}</td>
+                <td class="mono text-muted">{{ ev.group_key || '-' }}</td>
+                <td class="event-message-cell text-secondary">{{ ev.message || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <table v-else class="events-table">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Transition</th>
-              <th>Value</th>
-              <th>Threshold</th>
-              <th>Group</th>
-              <th>Message</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="ev in events" :key="ev.id">
-              <td class="mono text-muted">{{ formatDate(ev.created_at) }}</td>
-              <td>
-                <span class="transition-badge">
-                  <span :style="{ color: stateColor(ev.prev_state) }">{{ stateLabel(ev.prev_state) }}</span>
-                  <span class="transition-arrow">&rarr;</span>
-                  <span :style="{ color: stateColor(ev.new_state) }">{{ stateLabel(ev.new_state) }}</span>
-                </span>
-              </td>
-              <td class="mono">{{ formatEventNumber(ev.value) }}</td>
-              <td class="mono text-muted">{{ formatEventNumber(ev.threshold) }}</td>
-              <td class="mono text-muted">{{ ev.group_key || '-' }}</td>
-              <td class="text-secondary" style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ ev.message || '-' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      </TablePanel>
     </template>
   </div>
 </template>
@@ -555,51 +596,18 @@ async function deleteMonitor() {
   color: var(--text-secondary);
 }
 
-/* ── Sections ── */
-/* Plain card sections (Group breakdown, Events) keep their own padding. */
-.detail-section.card {
-  padding: var(--sp-4);
-}
-/* PanelCard-based sections get padding from the panel body, not the root. */
+/* ── Reusable panels ── */
 .detail-section.panel-card {
   padding: 0;
 }
-.section-title {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  margin-bottom: var(--sp-3);
+.monitor-loading-panel {
+  min-height: 220px;
 }
-.section-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-3);
-}
-.section-heading .section-title {
-  margin-bottom: 3px;
-}
-.section-description {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.45;
+.detail-section :deep(.ts-widget) {
+  min-height: clamp(280px, 38vw, 450px);
 }
 
 /* ── Chart ── */
-.live-graph-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-3);
-}
-.live-graph-head .section-title {
-  margin-bottom: 0;
-}
 .lookback-toggle {
   display: inline-flex;
   gap: 2px;
@@ -628,22 +636,6 @@ async function deleteMonitor() {
 .lookback-btn.active {
   background: var(--amber);
   color: var(--text-inverse);
-}
-.detail-chart {
-  width: 100%;
-  height: 450px;
-  transition: opacity 0.15s;
-}
-.detail-chart.is-loading {
-  opacity: 0.5;
-}
-.detail-chart-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--r-md);
 }
 
 /* ── State Timeline ── */
@@ -693,13 +685,9 @@ async function deleteMonitor() {
   border-radius: var(--r-sm);
   font-size: 10px;
 }
-.groups-empty {
-  display: grid;
-  place-items: center;
-  min-height: 160px;
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--r-md);
-  font-size: 12px;
+.detail-table-scroll {
+  width: 100%;
+  overflow-x: auto;
 }
 .groups-table {
   width: 100%;
@@ -747,10 +735,6 @@ async function deleteMonitor() {
 /* ── Grouped event rail ── */
 .grouped-events {
   min-width: 0;
-}
-.event-rail-heading {
-  padding-bottom: var(--sp-3);
-  border-bottom: 1px solid var(--border-subtle);
 }
 .event-count {
   display: inline-flex;
@@ -847,12 +831,8 @@ async function deleteMonitor() {
 }
 
 /* ── Events table ── */
-.events-empty {
-  font-size: 12px;
-  padding: var(--sp-4);
-  text-align: center;
-}
 .events-table {
+  min-width: 760px;
   width: 100%;
   border-collapse: collapse;
   font-size: 11px;
@@ -873,6 +853,12 @@ async function deleteMonitor() {
 }
 .events-table tr:hover {
   background: var(--bg-hover);
+}
+.event-message-cell {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .transition-badge {
   display: inline-flex;
@@ -903,10 +889,6 @@ async function deleteMonitor() {
   .detail-actions {
     width: 100%;
     flex-wrap: wrap;
-  }
-
-  .section-heading {
-    flex-direction: column;
   }
 
   .group-fields {

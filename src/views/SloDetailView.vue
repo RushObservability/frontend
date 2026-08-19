@@ -7,6 +7,8 @@ import { useFeatures } from '../composables/useFeatures'
 import { useAuth } from '../composables/useAuth'
 import type { Slo, SloEvent, NotificationChannel, TimeseriesBucket } from '../types'
 import SloForm from '../components/SloForm.vue'
+import { PanelCard, StatPanel, TimeSeriesPanel } from '../components/panels'
+import type { PanelTone, TimeSeriesPanelSeries } from '../components/panels'
 import { usePollingTask } from '../composables/usePollingTask'
 
 const props = defineProps<{ sloId: string }>()
@@ -26,6 +28,7 @@ const formError = ref<string | null>(null)
 // ── Chart data ──
 const chartBuckets = ref<TimeseriesBucket[]>([])
 const chartLoading = ref(false)
+const chartError = ref<string | null>(null)
 
 // Live refresh: the SLO engine re-evaluates on its interval, so poll for updated
 // error/total counts and budget instead of leaving the page frozen at load time.
@@ -83,7 +86,10 @@ async function loadChannels() {
 
 async function loadChartData(rethrow = false, signal?: AbortSignal) {
   if (!slo.value) return
-  chartLoading.value = true
+  if (!rethrow) {
+    chartLoading.value = true
+    chartError.value = null
+  }
   try {
     const windowMins = windowMinutes(slo.value.window_type)
     const now = new Date()
@@ -99,10 +105,13 @@ async function loadChartData(rethrow = false, signal?: AbortSignal) {
     chartBuckets.value = (res.buckets || []) as TimeseriesBucket[]
   } catch (error) {
     if (signal?.aborted) return
-    chartBuckets.value = []
+    if (!rethrow) {
+      chartBuckets.value = []
+      chartError.value = error instanceof Error ? error.message : 'SLO chart data is unavailable.'
+    }
     if (rethrow) throw error
   } finally {
-    chartLoading.value = false
+    if (!rethrow) chartLoading.value = false
   }
 }
 
@@ -150,6 +159,11 @@ const budgetSeverity = computed(() => {
   if (budgetPct.value > 10) return 'warning'
   return 'critical'
 })
+
+const sloSourceLabel = computed(() => slo.value?.slo_type === 'metric' ? 'Metrics' : 'Spans')
+const sloRangeLabel = computed(() => slo.value ? windowLabel(slo.value.window_type) : '')
+const sloPanelTone = computed<PanelTone>(() => slo.value?.state === 'breaching' ? 'danger' : slo.value?.state === 'compliant' ? 'positive' : 'default')
+const budgetPanelTone = computed<PanelTone>(() => budgetSeverity.value === 'critical' ? 'danger' : budgetSeverity.value === 'warning' ? 'warning' : budgetSeverity.value === 'healthy' ? 'positive' : 'default')
 
 function windowMinutes(wt: string): number {
   switch (wt) {
@@ -223,6 +237,7 @@ const chartHover = ref<{ idx: number } | null>(null)
 // ── Expand-to-modal ──
 type ChartKey = 'rate' | 'error' | 'sli'
 const expanded = ref<ChartKey | null>(null)
+const chartKeys: ChartKey[] = ['rate', 'error', 'sli']
 
 interface ChartDef {
   key: ChartKey
@@ -279,6 +294,24 @@ const sliValues = computed(() => chartBuckets.value.map(b => {
 function parseBucketUtc(bucket: string): number {
   const iso = bucket.replace(' ', 'T').replace(/(\.\d{3})\d*$/, '$1') + 'Z'
   return new Date(iso).getTime()
+}
+
+function chartPanelSeries(def: ChartDef): TimeSeriesPanelSeries[] {
+  const points = chartBuckets.value
+    .map((bucket, index) => [parseBucketUtc(bucket.bucket) / 1000, def.values[index] ?? 0] as [number, number])
+    .filter(([timestamp, value]) => Number.isFinite(timestamp) && Number.isFinite(value))
+  return [{
+    name: def.title,
+    points,
+    color: def.color,
+    legendValue: points.length ? points[points.length - 1]![1] : undefined,
+  }]
+}
+
+function chartCaption(key: ChartKey): string {
+  if (key === 'rate') return 'Evaluated request volume across the SLO window.'
+  if (key === 'error') return 'Requests classified as errors by this SLO definition.'
+  return 'Success percentage compared with the configured SLO target.'
 }
 
 function valuesToPoints(values: number[], maxVal?: number, geo: Geo = geoSmall): Pt[] {
@@ -440,41 +473,88 @@ function targetLineY(geo: Geo = geoSmall): number {
 
     <!-- Hero: State + SLI + Budget -->
     <div class="sd-hero" v-if="!showEdit">
-      <div class="sd-hero-card card">
-        <div class="sd-hero-label">Status</div>
+      <PanelCard
+        class="sd-hero-card"
+        title="Status"
+        description="Current compliance state reported by the SLO evaluator."
+        :caption="slo.enabled ? 'Evaluation enabled.' : 'Evaluation disabled.'"
+        source-label="SLO engine"
+        variant="stat"
+        :tone="sloPanelTone"
+      >
         <div class="sd-state-row">
           <div class="sd-state-dot" :class="'sd-dot-' + slo.state"></div>
           <span class="sd-state-text" :class="'sd-text-' + slo.state">{{ stateLabel(slo.state) }}</span>
         </div>
-        <div class="sd-hero-sub mono">{{ slo.enabled ? 'Enabled' : 'Disabled' }}</div>
-      </div>
+      </PanelCard>
 
-      <div class="sd-hero-card sd-hero-sli card">
-        <div class="sd-hero-label">Current SLO</div>
-        <div class="sd-sli-big mono" :class="'sd-text-' + slo.state">
-          {{ successRateStr }}<span class="sd-sli-unit" v-if="successRate !== null">%</span>
-        </div>
-        <div class="sd-hero-sub mono">target {{ slo.target_percentage }}%</div>
-      </div>
+      <StatPanel
+        v-if="successRate !== null"
+        class="sd-hero-card sd-hero-sli"
+        title="Current SLO"
+        description="Successful requests as a percentage of evaluated requests."
+        :value="successRate"
+        :precision="3"
+        unit="%"
+        :label="`Target ${slo.target_percentage}%`"
+        :range-label="sloRangeLabel"
+        :source-label="sloSourceLabel"
+        :tone="sloPanelTone"
+      />
+      <PanelCard
+        v-else
+        class="sd-hero-card"
+        title="Current SLO"
+        description="Successful requests as a percentage of evaluated requests."
+        :empty="true"
+        empty-title="No SLI data"
+        empty-message="This SLO has not evaluated enough requests yet."
+        variant="stat"
+      />
 
-      <div class="sd-hero-card card">
-        <div class="sd-hero-label">Error Budget Remaining</div>
-        <div class="sd-budget-big mono" :class="'sd-budget-' + budgetSeverity">
-          {{ slo.error_budget_remaining !== null ? budgetPct.toFixed(1) + '%' : '-' }}
-        </div>
-        <div class="sd-budget-bar-wrap">
-          <div class="sd-budget-track">
-            <div class="sd-budget-fill" :class="'sd-budgetbar-' + budgetSeverity" :style="{ width: budgetPct + '%' }"></div>
+      <StatPanel
+        v-if="slo.error_budget_remaining !== null"
+        class="sd-hero-card"
+        title="Error Budget"
+        description="Share of the configured error budget still available."
+        :value="budgetPct"
+        :precision="1"
+        unit="%"
+        :label="`${(slo.error_budget_remaining * 100).toFixed(3)}% raw budget`"
+        :range-label="sloRangeLabel"
+        :source-label="sloSourceLabel"
+        :tone="budgetPanelTone"
+      >
+        <template #details>
+          <div class="sd-budget-details">
+            <div class="sd-budget-track" aria-hidden="true">
+              <div class="sd-budget-fill" :class="'sd-budgetbar-' + budgetSeverity" :style="{ width: budgetPct + '%' }"></div>
+            </div>
+            <router-link v-if="budgetBurning" :to="sloAnalyzeUrl" class="btn-bubbleup">
+              ⬡ Analyze with BubbleUp
+            </router-link>
           </div>
-          <div class="sd-budget-pct mono">{{ slo.error_budget_remaining !== null ? (slo.error_budget_remaining * 100).toFixed(3) + '% raw budget' : '' }}</div>
-        </div>
-        <router-link v-if="budgetBurning" :to="sloAnalyzeUrl" class="btn-bubbleup" style="margin-top:8px">
-          ⬡ Analyze with BubbleUp
-        </router-link>
-      </div>
+        </template>
+      </StatPanel>
+      <PanelCard
+        v-else
+        class="sd-hero-card"
+        title="Error Budget"
+        description="Share of the configured error budget still available."
+        :empty="true"
+        empty-title="No budget data"
+        empty-message="Budget will appear after the first successful evaluation."
+        variant="stat"
+      />
 
-      <div class="sd-hero-card card">
-        <div class="sd-hero-label">Request Counts</div>
+      <PanelCard
+        class="sd-hero-card"
+        title="Request Counts"
+        description="Error and total requests evaluated for the current SLO window."
+        :range-label="sloRangeLabel"
+        :source-label="sloSourceLabel"
+        variant="stat"
+      >
         <div class="sd-counts-grid">
           <div class="sd-count-item">
             <div class="sd-count-val mono sd-count-err">{{ slo.error_count !== null ? slo.error_count.toLocaleString() : '-' }}</div>
@@ -485,114 +565,81 @@ function targetLineY(geo: Geo = geoSmall): number {
             <div class="sd-count-label">Total</div>
           </div>
         </div>
-      </div>
+      </PanelCard>
     </div>
 
     <!-- ═══ Charts ═══ -->
-    <div class="sd-charts card" v-if="!showEdit && chartBuckets.length > 0">
-      <div class="sd-charts-row">
-        <!-- Request Rate -->
-        <div class="sd-chart-panel sd-chart-clickable" @click="openChart('rate')" title="Click to expand">
-          <div class="sd-chart-title">
-            Request Rate
-            <svg class="sd-expand-ico" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M5 1H1v4M8 12h4V8M1 12l4.5-4.5M12 1L7.5 5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </div>
+    <div class="sd-charts-row" v-if="!showEdit">
+      <TimeSeriesPanel
+        v-for="key in chartKeys"
+        :key="key"
+        class="sd-chart-panel"
+        :title="chartDefs[key].title"
+        description="SLO evaluation trend for the current rolling window."
+        :caption="chartCaption(key)"
+        :source-label="sloSourceLabel"
+        :range-label="sloRangeLabel"
+        :series="chartPanelSeries(chartDefs[key])"
+        :loading="chartLoading"
+        :error="chartError"
+        empty-title="No chart data"
+        empty-message="This SLO has not produced time-series buckets for its current window."
+      >
+        <template #actions>
+          <button
+            type="button"
+            class="sd-expand-btn"
+            :aria-label="`Expand ${chartDefs[key].title} chart`"
+            @click.stop="openChart(key)"
+          >
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true"><path d="M5 1H1v4M8 12h4V8M1 12l4.5-4.5M12 1L7.5 5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </template>
+        <div
+          class="sd-chart-canvas"
+          @click="openChart(key)"
+        >
           <svg :viewBox="`0 0 ${CW} ${CH}`" class="ch-svg sd-chart-svg" @mousemove="chartMouseMove" @mouseleave="chartMouseLeave">
-            <template v-for="tick in yTicks(rateValues)" :key="'ry'+tick.label">
+            <template v-for="tick in yTicks(chartDefs[key].values, chartDefs[key].tickFixed)" :key="key + '-y-' + tick.label">
               <line :x1="pad.left" :y1="tick.y" :x2="CW - pad.right" :y2="tick.y" class="sd-grid-line ch-grid" />
-              <text :x="pad.left - 4" :y="tick.y + 3" class="sd-axis-label ch-axis" text-anchor="end">{{ tick.label }}</text>
+              <text :x="pad.left - 4" :y="tick.y + 3" class="sd-axis-label ch-axis" text-anchor="end">{{ tick.label }}{{ chartDefs[key].tickSuffix }}</text>
             </template>
-            <template v-for="lbl in xLabels()" :key="'rx'+lbl.label">
+            <template v-for="lbl in xLabels()" :key="key + '-x-' + lbl.label">
               <line :x1="lbl.x" :y1="pad.top" :x2="lbl.x" :y2="CH - pad.bottom" class="ch-grid" />
               <text :x="lbl.x" :y="CH - 2" class="sd-axis-label ch-axis" text-anchor="middle">{{ lbl.label }}</text>
             </template>
-            <path :d="areaPath(rateValues)" class="ch-area" style="color: var(--amber)" />
-            <path :d="linePath(rateValues)" class="sd-line sd-c-rate ch-line" />
+            <template v-if="chartDefs[key].showTarget">
+              <line :x1="pad.left" :y1="targetLineY()" :x2="CW - pad.right" :y2="targetLineY()" class="sd-target-line ch-threshold" />
+              <text :x="CW - pad.right + 2" :y="targetLineY() + 3" class="sd-target-label">{{ slo.target_percentage }}%</text>
+            </template>
+            <path :d="areaPath(chartDefs[key].values, chartDefs[key].maxVal)" class="ch-area" :style="{ color: chartDefs[key].color }" />
+            <path :d="linePath(chartDefs[key].values, chartDefs[key].maxVal)" class="sd-line ch-line" :class="chartDefs[key].lineClass" />
             <template v-if="chartHover">
-              <line :x1="hoverX(chartHover.idx, rateValues.length)" :y1="pad.top" :x2="hoverX(chartHover.idx, rateValues.length)" :y2="CH - pad.bottom" class="sd-hover-line" />
-              <circle :cx="hoverX(chartHover.idx, rateValues.length)" :cy="dotY(chartHover.idx, rateValues)" r="3" class="sd-hover-dot sd-c-rate" />
+              <line :x1="hoverX(chartHover.idx, chartDefs[key].values.length)" :y1="pad.top" :x2="hoverX(chartHover.idx, chartDefs[key].values.length)" :y2="CH - pad.bottom" class="sd-hover-line" />
+              <circle :cx="hoverX(chartHover.idx, chartDefs[key].values.length)" :cy="dotY(chartHover.idx, chartDefs[key].values, chartDefs[key].maxVal)" r="3" class="sd-hover-dot" :class="chartDefs[key].lineClass" />
             </template>
             <rect :x="pad.left" :y="pad.top" :width="innerW" :height="innerH" fill="transparent" style="cursor: crosshair" />
           </svg>
-          <div v-if="chartHover" class="sd-tooltip" :style="{ left: (hoverX(chartHover.idx, rateValues.length) / CW * 100) + '%' }">
+          <div v-if="chartHover" class="sd-tooltip" :style="{ left: (hoverX(chartHover.idx, chartDefs[key].values.length) / CW * 100) + '%' }">
             <div class="sd-tooltip-time">{{ hoverTime() }}</div>
-            <div class="sd-tooltip-val">{{ rateValues[chartHover.idx]?.toLocaleString() }} req</div>
+            <div class="sd-tooltip-val">{{ chartDefs[key].fmtVal(chartDefs[key].values[chartHover.idx] ?? 0) }}</div>
           </div>
         </div>
-
-        <!-- Error Rate -->
-        <div class="sd-chart-panel sd-chart-clickable" @click="openChart('error')" title="Click to expand">
-          <div class="sd-chart-title">
-            Error Rate
-            <svg class="sd-expand-ico" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M5 1H1v4M8 12h4V8M1 12l4.5-4.5M12 1L7.5 5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </div>
-          <svg :viewBox="`0 0 ${CW} ${CH}`" class="ch-svg sd-chart-svg" @mousemove="chartMouseMove" @mouseleave="chartMouseLeave">
-            <template v-for="tick in yTicks(errorValues)" :key="'ey'+tick.label">
-              <line :x1="pad.left" :y1="tick.y" :x2="CW - pad.right" :y2="tick.y" class="sd-grid-line ch-grid" />
-              <text :x="pad.left - 4" :y="tick.y + 3" class="sd-axis-label ch-axis" text-anchor="end">{{ tick.label }}</text>
-            </template>
-            <template v-for="lbl in xLabels()" :key="'ex'+lbl.label">
-              <line :x1="lbl.x" :y1="pad.top" :x2="lbl.x" :y2="CH - pad.bottom" class="ch-grid" />
-              <text :x="lbl.x" :y="CH - 2" class="sd-axis-label ch-axis" text-anchor="middle">{{ lbl.label }}</text>
-            </template>
-            <path :d="areaPath(errorValues)" class="ch-area" style="color: var(--error)" />
-            <path :d="linePath(errorValues)" class="sd-line sd-c-error ch-line" />
-            <template v-if="chartHover">
-              <line :x1="hoverX(chartHover.idx, errorValues.length)" :y1="pad.top" :x2="hoverX(chartHover.idx, errorValues.length)" :y2="CH - pad.bottom" class="sd-hover-line" />
-              <circle :cx="hoverX(chartHover.idx, errorValues.length)" :cy="dotY(chartHover.idx, errorValues)" r="3" class="sd-hover-dot sd-c-error" />
-            </template>
-            <rect :x="pad.left" :y="pad.top" :width="innerW" :height="innerH" fill="transparent" style="cursor: crosshair" />
-          </svg>
-          <div v-if="chartHover" class="sd-tooltip" :style="{ left: (hoverX(chartHover.idx, errorValues.length) / CW * 100) + '%' }">
-            <div class="sd-tooltip-time">{{ hoverTime() }}</div>
-            <div class="sd-tooltip-val">{{ errorValues[chartHover.idx]?.toLocaleString() }} errors</div>
-          </div>
-        </div>
-
-        <!-- SLO % -->
-        <div class="sd-chart-panel sd-chart-clickable" @click="openChart('sli')" title="Click to expand">
-          <div class="sd-chart-title">
-            SLO
-            <span class="sd-chart-legend">
-              <span class="sd-legend-dot" style="background: var(--ok)"></span> SLO
-              <span class="sd-legend-dot" style="background: var(--amber); opacity: 0.5"></span> target
-            </span>
-            <svg class="sd-expand-ico" width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M5 1H1v4M8 12h4V8M1 12l4.5-4.5M12 1L7.5 5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </div>
-          <svg :viewBox="`0 0 ${CW} ${CH}`" class="ch-svg sd-chart-svg" @mousemove="chartMouseMove" @mouseleave="chartMouseLeave">
-            <template v-for="tick in yTicks(sliValues, 1)" :key="'sy'+tick.label">
-              <line :x1="pad.left" :y1="tick.y" :x2="CW - pad.right" :y2="tick.y" class="sd-grid-line ch-grid" />
-              <text :x="pad.left - 4" :y="tick.y + 3" class="sd-axis-label ch-axis" text-anchor="end">{{ tick.label }}%</text>
-            </template>
-            <template v-for="lbl in xLabels()" :key="'sx'+lbl.label">
-              <line :x1="lbl.x" :y1="pad.top" :x2="lbl.x" :y2="CH - pad.bottom" class="ch-grid" />
-              <text :x="lbl.x" :y="CH - 2" class="sd-axis-label ch-axis" text-anchor="middle">{{ lbl.label }}</text>
-            </template>
-            <!-- Target line -->
-            <line :x1="pad.left" :y1="targetLineY()" :x2="CW - pad.right" :y2="targetLineY()" class="sd-target-line ch-threshold" />
-            <text :x="CW - pad.right + 2" :y="targetLineY() + 3" class="sd-target-label">{{ slo.target_percentage }}%</text>
-            <path :d="areaPath(sliValues, 100)" class="ch-area" style="color: var(--ok)" />
-            <path :d="linePath(sliValues, 100)" class="sd-line sd-c-sli ch-line" />
-            <template v-if="chartHover">
-              <line :x1="hoverX(chartHover.idx, sliValues.length)" :y1="pad.top" :x2="hoverX(chartHover.idx, sliValues.length)" :y2="CH - pad.bottom" class="sd-hover-line" />
-              <circle :cx="hoverX(chartHover.idx, sliValues.length)" :cy="dotY(chartHover.idx, sliValues, 100)" r="3" class="sd-hover-dot sd-c-sli" />
-            </template>
-            <rect :x="pad.left" :y="pad.top" :width="innerW" :height="innerH" fill="transparent" style="cursor: crosshair" />
-          </svg>
-          <div v-if="chartHover" class="sd-tooltip" :style="{ left: (hoverX(chartHover.idx, sliValues.length) / CW * 100) + '%' }">
-            <div class="sd-tooltip-time">{{ hoverTime() }}</div>
-            <div class="sd-tooltip-val">{{ sliValues[chartHover.idx]?.toFixed(2) }}%</div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div v-else-if="!showEdit && chartLoading" class="sd-charts-loading card">
-      <div class="sd-loading-bar"></div>
+      </TimeSeriesPanel>
     </div>
 
     <!-- Configuration -->
-    <div class="sd-config card" v-if="!showEdit">
-      <div class="sd-config-strip">
+    <PanelCard
+      v-if="!showEdit"
+      class="sd-config-panel"
+      title="SLO Configuration"
+      description="Indicator, rolling window, evaluation cadence, and matching filters."
+      :range-label="sloRangeLabel"
+      :source-label="sloSourceLabel"
+      caption="Configuration currently used by the SLO evaluator."
+    >
+      <div class="sd-config">
+        <div class="sd-config-strip">
         <div class="sd-config-kv">
           <span class="sd-kv-k">Type</span>
           <span class="sv-type-badge" :class="slo.slo_type === 'metric' ? 'sv-type-metric' : 'sv-type-trace'">{{ slo.slo_type || 'trace' }}</span>
@@ -639,35 +686,42 @@ function targetLineY(geo: Geo = geoSmall): number {
             <span class="sd-kv-v mono sd-text-breaching">{{ formatDate(slo.last_breached_at) }}</span>
           </div>
         </template>
-      </div>
+        </div>
 
-      <!-- Filters -->
-      <div class="sd-filters-row" v-if="slo.error_filters.length > 0 || slo.total_filters.length > 0">
-        <div class="sd-filter-group" v-if="slo.error_filters.length > 0">
-          <span class="sd-filter-badge sd-badge-error">error</span>
-          <span v-for="(f, i) in slo.error_filters" :key="'e'+i" class="sd-filter-chip mono">
-            {{ f.field }} {{ f.op }} {{ f.value }}
-          </span>
-        </div>
-        <div class="sd-filter-group" v-if="slo.total_filters.length > 0">
-          <span class="sd-filter-badge sd-badge-total">total</span>
-          <span v-for="(f, i) in slo.total_filters" :key="'t'+i" class="sd-filter-chip mono">
-            {{ f.field }} {{ f.op }} {{ f.value }}
-          </span>
+        <!-- Filters -->
+        <div class="sd-filters-row" v-if="slo.error_filters.length > 0 || slo.total_filters.length > 0">
+          <div class="sd-filter-group" v-if="slo.error_filters.length > 0">
+            <span class="sd-filter-badge sd-badge-error">error</span>
+            <span v-for="(f, i) in slo.error_filters" :key="'e'+i" class="sd-filter-chip mono">
+              {{ f.field }} {{ f.op }} {{ f.value }}
+            </span>
+          </div>
+          <div class="sd-filter-group" v-if="slo.total_filters.length > 0">
+            <span class="sd-filter-badge sd-badge-total">total</span>
+            <span v-for="(f, i) in slo.total_filters" :key="'t'+i" class="sd-filter-chip mono">
+              {{ f.field }} {{ f.op }} {{ f.value }}
+            </span>
+          </div>
         </div>
       </div>
-    </div>
+    </PanelCard>
 
     <!-- Events Timeline -->
-    <div class="sd-section card" v-if="!showEdit">
-      <div class="sd-section-title">
-        Event History
-        <span class="sd-event-count mono" v-if="events.length">{{ events.length }}</span>
-      </div>
-      <div v-if="events.length === 0" class="sd-events-empty">
-        No state change events recorded yet
-      </div>
-      <div v-else class="sd-timeline">
+    <PanelCard
+      v-if="!showEdit"
+      class="sd-section-panel"
+      title="Event History"
+      description="Compliance state transitions recorded by the SLO evaluator."
+      caption="Newest state transitions for this SLO."
+      source-label="SLO events"
+      :empty="events.length === 0"
+      empty-title="No state changes yet"
+      empty-message="Transitions will appear after this SLO first changes compliance state."
+    >
+      <template #actions>
+        <span class="sd-event-count mono">{{ events.length }}</span>
+      </template>
+      <div class="sd-timeline">
         <div
           v-for="ev in events"
           :key="ev.id"
@@ -690,7 +744,7 @@ function targetLineY(geo: Geo = geoSmall): number {
           </div>
         </div>
       </div>
-    </div>
+    </PanelCard>
 
     <!-- Expanded chart modal -->
     <Teleport to="body">
@@ -767,9 +821,13 @@ function targetLineY(geo: Geo = geoSmall): number {
   </div>
 
   <!-- Loading -->
-  <div v-else-if="loading" class="sd-loading">
-    <div class="sd-loading-spinner"></div>
-  </div>
+  <PanelCard
+    v-else-if="loading"
+    class="sd-loading-panel"
+    title="SLO details"
+    description="Loading SLO status, budget, charts, and history."
+    :loading="true"
+  />
 </template>
 
 <style scoped src="../styles/views/SloDetailView.css"></style>

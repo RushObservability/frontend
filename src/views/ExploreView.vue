@@ -1460,6 +1460,14 @@ const scatterDragging = ref(false)
 const scatterExpanded = ref(false)
 const scatterMode = ref<'dots' | 'density'>('density')
 const compareModeActive = ref(false)
+const scatterRangeLabel = computed(() => {
+  if (customRange.value) return 'Custom'
+  const minutes = selectedPreset.value
+  if (minutes < 60) return `${minutes}m`
+  if (minutes < 1440) return `${minutes / 60}h`
+  if (minutes === 1440) return '24h'
+  return `${minutes / 1440}d`
+})
 
 type ScatterPoint = { row: RushEvent; x: number; y: number; error: boolean }
 type ScatterSelection = {
@@ -4962,32 +4970,38 @@ onMounted(async () => {
         </div>
 
         <!-- Latency over time: inspect spans, select a cohort, then run BubbleUp. -->
-        <div v-if="viewMode === 'spans' && apmResultMode === 'individual' && scatterStats.count" class="scatter-card card fade-in" :class="{ collapsed: !scatterExpanded }">
-          <button
-            class="scatter-disclosure"
-            type="button"
-            :aria-expanded="scatterExpanded"
-            aria-controls="latency-over-time-chart"
-            @click="toggleScatterExpanded"
-          >
-            <span class="scatter-disclosure-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M3 17l4.5-5 3.5 3 4.5-8 5.5 4"/><circle cx="7.5" cy="12" r="1.5"/><circle cx="15.5" cy="7" r="1.5"/></svg>
-            </span>
-            <span class="scatter-heading">
-              <span class="scatter-title">Latency over time</span>
-              <span class="scatter-subtitle">Inspect individual spans and compare slow cohorts.</span>
-            </span>
-            <span class="scatter-summary" aria-label="Loaded latency percentiles">
+        <PanelCard
+          v-if="viewMode === 'spans' && apmResultMode === 'individual' && scatterStats.count"
+          class="scatter-panel fade-in"
+          :class="{ 'is-collapsed': !scatterExpanded }"
+          title="Latency over time"
+          description="Inspect span latency, isolate slow or error cohorts, and compare them with the query baseline."
+          :caption="scatterExpanded ? 'Loaded results only · scroll the table to sample up to 500 spans.' : ''"
+          :source-label="scatterExpanded ? 'Spans' : ''"
+          :range-label="scatterRangeLabel"
+        >
+          <template #actions>
+            <button
+              class="scatter-panel-toggle"
+              type="button"
+              :aria-expanded="scatterExpanded"
+              aria-controls="latency-over-time-chart"
+              :aria-label="scatterExpanded ? 'Hide latency over time chart' : 'Show latency over time chart'"
+              @click="toggleScatterExpanded"
+            >
+              <span>{{ scatterExpanded ? 'Hide' : 'Show' }}</span>
+              <svg :class="{ expanded: scatterExpanded }" viewBox="0 0 12 8" aria-hidden="true"><path d="M1 1.5L6 6.5 11 1.5"/></svg>
+            </button>
+          </template>
+
+          <template #summary>
+            <div class="scatter-summary" aria-label="Loaded latency percentiles">
               <span><small>P50</small><strong class="mono">{{ formatDuration(scatterStats.p50) }}</strong></span>
               <span><small>P95</small><strong class="mono">{{ formatDuration(scatterStats.p95) }}</strong></span>
               <span><small>P99</small><strong class="mono">{{ formatDuration(scatterStats.p99) }}</strong></span>
               <span v-if="scatterStats.errors" class="scatter-error-count"><small>Errors</small><strong class="mono">{{ scatterStats.errors }}</strong></span>
-            </span>
-            <span class="scatter-disclosure-action">
-              {{ scatterExpanded ? 'Hide chart' : 'Show chart' }}
-              <svg :class="{ expanded: scatterExpanded }" viewBox="0 0 12 8" aria-hidden="true"><path d="M1 1.5L6 6.5 11 1.5"/></svg>
-            </span>
-          </button>
+            </div>
+          </template>
 
           <div v-if="scatterExpanded" id="latency-over-time-chart" class="scatter-content">
             <div class="scatter-actions">
@@ -5114,7 +5128,6 @@ onMounted(async () => {
                 <span><i class="legend-dot selected" /> selected</span>
               </div>
             </div>
-            <span>Chart uses loaded results; scroll the table to load up to 500 spans.</span>
           </div>
 
             <div v-if="scatterPendingSelection && scatterSelectionSummary" class="scatter-review" aria-live="polite">
@@ -5136,7 +5149,7 @@ onMounted(async () => {
             </div>
             </div>
           </div>
-        </div>
+        </PanelCard>
 
         <!-- ═══ Histogram: waiting / loading / ready ═══ -->
         <div v-if="histogramPhase === 'waiting'" class="histo card" style="min-height:90px;display:flex;align-items:center;justify-content:center">

@@ -3,7 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import InvestigationPanel from '../components/InvestigationPanel.vue'
-import PanelCard from '../components/PanelCard.vue'
+import { PanelCard, TablePanel, TimeSeriesPanel } from '../components/panels'
+import type { TimeSeriesPanelSeries } from '../components/panels'
 import type { AnomalyRule, AnomalyEvent, CorrelationResponse, LogRecord, RushEvent, TimeseriesBucket } from '../types'
 
 const props = defineProps<{ ruleId: string }>()
@@ -16,6 +17,8 @@ const rule = ref<AnomalyRule | null>(null)
 const events = ref<AnomalyEvent[]>([])
 const loading = ref(true)
 const chartData = ref<ChartSeries[]>([])
+const chartLoading = ref(false)
+const chartError = ref<string | null>(null)
 const focusedEventId = ref<string | null>(route.query.event as string | null)
 const individualEvent = ref<AnomalyEvent | null>(null) // fetched when not in events list
 const cursorFraction = ref<number | null>(null)
@@ -111,6 +114,20 @@ async function loadRule() {
 
 async function fetchChart() {
   if (!rule.value) return
+  chartLoading.value = true
+  chartError.value = null
+  try {
+    await loadChartData()
+  } catch (error) {
+    chartData.value = []
+    chartError.value = error instanceof Error ? error.message : 'Anomaly chart data is unavailable.'
+  } finally {
+    chartLoading.value = false
+  }
+}
+
+async function loadChartData() {
+  if (!rule.value) return
 
   const focusedEvent = focusedEventId.value
     ? (events.value.find(e => e.id === focusedEventId.value) || individualEvent.value)
@@ -183,8 +200,9 @@ async function fetchChart() {
       })
     }
     chartData.value = series
-  } catch {
+  } catch (error) {
     chartData.value = []
+    throw error
   }
 }
 
@@ -228,8 +246,9 @@ async function fetchApmChart(start: number, end: number, windowSeconds: number) 
       maxVal,
       anomalyCount: countAnomalyStreaks(bands.anomalies),
     }]
-  } catch {
+  } catch (error) {
     chartData.value = []
+    throw error
   }
 }
 
@@ -271,6 +290,16 @@ const filteredEvents = computed(() => {
   if (!fe || !fe.metric) return events.value
   return events.value.filter(e => e.metric === fe.metric)
 })
+
+const eventPanelRows = computed<Record<string, unknown>[]>(() => filteredEvents.value.map(event => ({ ...event })))
+const ruleSourceLabel = computed(() => {
+  const source = rule.value?.source
+  if (!source) return 'Anomaly detection'
+  return source.toLowerCase() === 'apm' ? 'APM' : source.charAt(0).toUpperCase() + source.slice(1)
+})
+const chartCaption = computed(() => focusedEvent.value
+  ? 'Evaluation window centered on the selected anomaly event.'
+  : 'Most recent evaluation window for this anomaly rule.')
 
 // ═══ Chart geometry (larger than list view) ═══
 const W = 900, H = 320
@@ -423,6 +452,16 @@ function formatSeriesName(name: string, labels?: Record<string, string>): string
   return pairs ? `${name}{${pairs}}` : name
 }
 
+function panelSeries(series: ChartSeries, index: number): TimeSeriesPanelSeries[] {
+  const points = series.timestamps.map((timestamp, pointIndex) => [timestamp / 1000, series.values[pointIndex] ?? 0] as [number, number])
+  return [{
+    name: formatSeriesName(series.name, series.labels),
+    points,
+    color: seriesColor(index),
+    legendValue: points.length ? points[points.length - 1]![1] : undefined,
+  }]
+}
+
 // ═══ Colors ═══
 const PALETTE = ['#3b82f6', '#e5584f', '#9b7dd4', '#47b881', '#5b8dd9', '#e0965c', '#6bc9c4', '#d47da0']
 
@@ -531,6 +570,16 @@ interface CorrChartData {
   maxVal: number
   anomalyCount: number
   total: number
+}
+
+function correlationPanelSeries(series: CorrChartData, index: number): TimeSeriesPanelSeries[] {
+  const points = series.timestamps.map((timestamp, pointIndex) => [timestamp / 1000, series.values[pointIndex] ?? 0] as [number, number])
+  return [{
+    name: series.name,
+    points,
+    color: seriesColor(index),
+    legendValue: points.length ? points[points.length - 1]![1] : undefined,
+  }]
 }
 
 function cBandPath(upper: number[], lower: number[], mx: number): string {
@@ -657,6 +706,7 @@ interface SuspectedLogEntry {
 
 const suspectedLogs = ref<SuspectedLogEntry[]>([])
 const suspectedLogsLoading = ref(false)
+const suspectedLogPanelRows = computed<Record<string, unknown>[]>(() => suspectedLogs.value.map(log => ({ ...log })))
 
 function tsToMs(ts: number): number {
   if (ts > 1e18) return ts / 1_000_000  // nanoseconds
@@ -876,44 +926,73 @@ onMounted(async () => {
       </div>
     </div>
 
+    <PanelCard
+      v-if="loading"
+      class="anomaly-loading-panel"
+      title="Anomaly rule"
+      description="Loading the rule, its evaluation chart, and anomaly history."
+      :loading="true"
+    />
+
+    <PanelCard
+      v-else-if="!rule"
+      title="Anomaly rule"
+      description="The requested anomaly rule could not be loaded."
+      :error="api.error.value || 'Rule not found.'"
+    />
+
     <!-- Rule info -->
-    <div class="rule-meta card" v-if="rule">
-      <div class="meta-row">
-        <span class="meta-label">Source</span>
-        <span class="meta-value mono">{{ rule.source }}</span>
+    <PanelCard
+      v-if="rule"
+      title="Rule configuration"
+      description="Signal source and EWMA settings used to evaluate this anomaly rule."
+      :source-label="ruleSourceLabel"
+    >
+      <div class="rule-meta">
+        <div class="meta-row">
+          <span class="meta-label">Source</span>
+          <span class="meta-value mono">{{ rule.source }}</span>
+        </div>
+        <div class="meta-row" v-if="rule.pattern">
+          <span class="meta-label">Pattern</span>
+          <span class="meta-value mono">{{ rule.pattern }}</span>
+        </div>
+        <div class="meta-row" v-if="rule.service_name">
+          <span class="meta-label">Service</span>
+          <span class="meta-value mono">{{ rule.service_name }}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Sensitivity</span>
+          <span class="meta-value mono">{{ rule.sensitivity.toFixed(1) }}σ</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Alpha</span>
+          <span class="meta-value mono">{{ rule.alpha.toFixed(2) }}</span>
+        </div>
+        <div class="meta-row" v-if="rule.split_labels?.length">
+          <span class="meta-label">Split by</span>
+          <span class="meta-value mono">{{ rule.split_labels.join(', ') }}</span>
+        </div>
+        <div class="meta-row" v-if="rule.last_eval_at">
+          <span class="meta-label">Last eval</span>
+          <span class="meta-value mono">{{ formatEventTime(rule.last_eval_at) }}</span>
+        </div>
       </div>
-      <div class="meta-row" v-if="rule.pattern">
-        <span class="meta-label">Pattern</span>
-        <span class="meta-value mono">{{ rule.pattern }}</span>
-      </div>
-      <div class="meta-row" v-if="rule.service_name">
-        <span class="meta-label">Service</span>
-        <span class="meta-value mono">{{ rule.service_name }}</span>
-      </div>
-      <div class="meta-row">
-        <span class="meta-label">Sensitivity</span>
-        <span class="meta-value mono">{{ rule.sensitivity.toFixed(1) }}σ</span>
-      </div>
-      <div class="meta-row">
-        <span class="meta-label">Alpha</span>
-        <span class="meta-value mono">{{ rule.alpha.toFixed(2) }}</span>
-      </div>
-      <div class="meta-row" v-if="rule.split_labels?.length">
-        <span class="meta-label">Split by</span>
-        <span class="meta-value mono">{{ rule.split_labels.join(', ') }}</span>
-      </div>
-      <div class="meta-row" v-if="rule.last_eval_at">
-        <span class="meta-label">Last eval</span>
-        <span class="meta-value mono">{{ formatEventTime(rule.last_eval_at) }}</span>
-      </div>
-    </div>
+    </PanelCard>
 
     <!-- Focused event context -->
-    <div class="focused-event card" v-if="focusedEvent">
-      <div class="focused-header">
+    <PanelCard
+      v-if="focusedEvent"
+      class="focused-event"
+      title="Selected event"
+      description="Observed and expected values for the event anchoring this investigation."
+      source-label="Anomaly events"
+      :tone="focusedEvent.state === 'anomalous' ? 'danger' : 'positive'"
+    >
+      <template #actions>
         <span class="sev-badge" :class="focusedEvent.state === 'anomalous' ? 'critical' : 'resolved'">{{ focusedEvent.state }}</span>
         <span class="focused-time mono">{{ formatEventTime(focusedEvent.created_at) }}</span>
-      </div>
+      </template>
       <div class="focused-stats">
         <div class="focused-stat">
           <span class="stat-label">Metric</span>
@@ -932,10 +1011,10 @@ onMounted(async () => {
           <span class="stat-value mono">{{ focusedEvent.deviation.toFixed(1) }}σ</span>
         </div>
       </div>
-    </div>
+    </PanelCard>
 
     <!-- Time range selector -->
-    <div class="range-bar" v-if="rule">
+    <div class="range-bar" v-if="rule" role="group" aria-label="Evaluation window">
       <button
         v-for="(r, ri) in TIME_RANGES" :key="r.label"
         class="range-btn" :class="{ active: selectedRange === ri }"
@@ -944,13 +1023,18 @@ onMounted(async () => {
     </div>
 
     <!-- Charts -->
-    <div class="charts-section" v-if="chartData.length">
-      <PanelCard
+    <div class="charts-section" v-if="rule">
+      <TimeSeriesPanel
         v-for="(m, mi) in chartData"
         :key="formatSeriesName(m.name, m.labels)"
         class="chart-card"
         :title="formatSeriesName(m.name, m.labels)"
         description="Observed metric (line) vs. EWMA baseline and ±band; shaded regions mark detected anomalies."
+        :caption="chartCaption"
+        :source-label="ruleSourceLabel"
+        :series="panelSeries(m, mi)"
+        :loading="chartLoading"
+        :error="chartError"
       >
         <template #actions>
           <span class="chart-color-dot" :style="{ background: seriesColor(mi) }"></span>
@@ -1003,12 +1087,21 @@ onMounted(async () => {
             <circle :cx="cursorX" :cy="dotY(m.values, m.maxVal)" r="3.5" class="crosshair-dot" :style="{ fill: seriesColor(mi), stroke: 'var(--bg-surface)' }" />
           </template>
         </svg>
-      </PanelCard>
-    </div>
+      </TimeSeriesPanel>
 
-    <div class="empty-chart card" v-else-if="!loading && rule">
-      <div class="empty-icon">&#9676;</div>
-      <div class="empty-text">No chart data available</div>
+      <TimeSeriesPanel
+        v-if="chartData.length === 0"
+        class="chart-card"
+        :title="rule.name || rule.pattern || 'Anomaly signal'"
+        description="Observed metric vs. EWMA baseline and sensitivity band."
+        :caption="chartCaption"
+        :source-label="ruleSourceLabel"
+        :series="[]"
+        :loading="chartLoading"
+        :error="chartError"
+        empty-title="No evaluation data"
+        empty-message="This rule has no chartable data for the selected window."
+      />
     </div>
 
     <!-- Suspected Services -->
@@ -1018,12 +1111,15 @@ onMounted(async () => {
         <span class="section-subtitle mono" v-if="correlations">HTTP {{ correlations.status_code }} &middot; {{ formatCorrelationTime(correlations.window_from) }}–{{ formatCorrelationTime(correlations.window_to) }}</span>
       </div>
       <div class="corr-charts">
-        <PanelCard
+        <TimeSeriesPanel
           v-for="(svc, si) in corrChartSeries"
           :key="svc.name"
           class="corr-chart-card"
           :title="svc.name"
           description="Suspected service's request volume vs. EWMA baseline and ±band; shaded regions mark detected anomalies."
+          caption="Correlated request volume around the selected anomaly event."
+          source-label="Metrics"
+          :series="correlationPanelSeries(svc, si)"
         >
           <template #actions>
             <span class="chart-color-dot" :style="{ background: seriesColor(si) }"></span>
@@ -1080,18 +1176,26 @@ onMounted(async () => {
               <circle :cx="corrCursorX" :cy="corrDotY(svc.values, svc.maxVal)" r="3.5" class="crosshair-dot" :style="{ fill: seriesColor(si), stroke: 'var(--bg-surface)' }" />
             </template>
           </svg>
-        </PanelCard>
+        </TimeSeriesPanel>
       </div>
     </div>
 
     <!-- Suspected Service Logs -->
     <div class="corr-logs-section" v-if="corrChartSeries.length">
-      <div class="section-title">
-        Suspected Service Logs
-        <span class="section-subtitle mono" v-if="suspectedLogsLoading">loading...</span>
-        <span class="section-subtitle mono" v-else>&pm;5min &middot; {{ suspectedLogs.length }} entries</span>
-      </div>
-      <div class="corr-logs-table card" v-if="suspectedLogs.length">
+      <TablePanel
+        title="Suspected Service Logs"
+        description="Logs, spans, and span events near the selected anomaly."
+        caption="Entries collected within five minutes of the selected event."
+        source-label="Logs + Spans"
+        :rows="suspectedLogPanelRows"
+        :loading="suspectedLogsLoading"
+        empty-title="No related telemetry"
+        empty-message="No logs or spans were found for the suspected services in this event window."
+      >
+        <template #actions>
+          <span class="section-subtitle mono">&pm;5min &middot; {{ suspectedLogs.length }} entries</span>
+        </template>
+        <div class="corr-logs-table">
         <div class="corr-logs-thead">
           <span class="cl-col cl-time">Time</span>
           <span class="cl-col cl-src">Source</span>
@@ -1115,19 +1219,26 @@ onMounted(async () => {
             </span>
           </div>
         </div>
-      </div>
-      <div class="empty-chart card" v-else-if="!suspectedLogsLoading">
-        <div class="empty-text">No logs or spans found for suspected services in the &pm;5min window</div>
-      </div>
+        </div>
+      </TablePanel>
     </div>
 
     <!-- Events table -->
-    <div class="events-section" v-if="filteredEvents.length">
-      <div class="section-title">
-        Event History
+    <TablePanel
+      v-if="rule"
+      class="events-section"
+      title="Event History"
+      description="Anomaly transitions with observed, expected, and deviation values."
+      caption="Select an event to center the charts and load correlated telemetry."
+      source-label="Anomaly events"
+      :rows="eventPanelRows"
+      empty-title="No anomaly events"
+      empty-message="Events will appear after this rule records its first state transition."
+    >
+      <template #actions>
         <span class="section-title-filter mono" v-if="focusedEvent?.metric">{{ focusedEvent.metric }}</span>
-      </div>
-      <div class="events-table card">
+      </template>
+      <div class="events-table">
         <div class="events-thead">
           <span class="ev-col ev-time">Time</span>
           <span class="ev-col ev-sev">State</span>
@@ -1154,7 +1265,7 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-    </div>
+    </TablePanel>
 
     <!-- SRE Investigation Drawer -->
     <Teleport to="body">
