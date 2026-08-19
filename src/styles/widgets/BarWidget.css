@@ -1,42 +1,48 @@
 .bar-widget {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
-  padding: var(--sp-2) 0;
+  gap: 9px;
+  padding: 4px 0;
   overflow-y: auto;
 }
 .bar-row {
   display: grid;
-  grid-template-columns: 120px 1fr 60px 48px;
+  grid-template-columns: minmax(92px, .8fr) 1.4fr 58px 42px;
   align-items: center;
-  gap: var(--sp-2);
-  padding: 2px var(--sp-2);
+  gap: 10px;
+  min-height: 24px;
+  padding: 0 4px;
 }
 .bar-label {
-  font-size: 11px;
   overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-primary);
 }
 .bar-track {
-  height: 14px;
+  height: 7px;
   background: var(--bg-raised);
   border-radius: 2px;
   overflow: hidden;
 }
 .bar-fill {
   height: 100%;
-  background: var(--amber-glow);
+  background: var(--amber);
   border-radius: 2px;
   transition: width 0.4s ease;
 }
 .bar-count {
-  font-size: 11px;
-  text-align: right;
   color: var(--text-primary);
+  font-size: 9px;
+  text-align: right;
 }
 .bar-pct {
-  font-size: 10px;
+  font-size: 8px;
   text-align: right;
+}
+
+@container (max-width: 360px) {
+  .bar-row { grid-template-columns: minmax(76px, .7fr) 1fr 48px; }
+  .bar-pct { display: none; }
 }
