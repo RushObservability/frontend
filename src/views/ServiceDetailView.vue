@@ -8,7 +8,8 @@ import SpanLogTable from '../components/SpanLogTable.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 import TimePicker from '../components/TimePicker.vue'
 import PanelCard from '../components/PanelCard.vue'
-import TimeseriesWidget from '../components/widgets/TimeseriesWidget.vue'
+import { HistogramPanel, TimeSeriesPanel } from '../components/panels'
+import type { TimeSeriesPanelSeries } from '../components/panels'
 import type { GraphNode, GraphEdge, TimeseriesBucket, RushEvent, Filter, Funnel, FunnelResult, FunnelStep, DeployMarker, Monitor, Slo, AnomalyRule, LatencyHistogram, EndpointRow, ErrorGroup, ServiceTimeBreakdown, ServiceTimeBreakdownTimeseries } from '../types'
 
 const route = useRoute()
@@ -64,11 +65,8 @@ const serviceStatus = ref<'checking' | 'found' | 'missing' | 'error'>('checking'
 const initMinutes = Number(route.query.t)
 const minutes = ref(initMinutes > 0 ? initMinutes : 60)
 
-// Deploy markers (overlaid on charts). The exact query window is captured per
-// load so marker x-positions align with the chart's time axis.
+// Deploy markers are overlaid by the reusable time-series panels.
 const deploys = ref<DeployMarker[]>([])
-const loadedFrom = ref(0)
-const loadedTo = ref(0)
 
 // "Attached to this service": monitors, SLOs, and anomaly rules scoped to this
 // service. Monitors are Rush's current alerting primitive (the /alerts nav opens
@@ -242,10 +240,7 @@ function setServiceTab(t: 'endpoints' | 'errors') {
 // health verdict, and primary chart lines — everything above the fold.
 async function loadData() {
   loading.value = true
-  const { now, fromDate, from, to } = windowRange()
-  // Capture the exact window so deploy markers map onto the same axis as the charts.
-  loadedFrom.value = fromDate.getTime()
-  loadedTo.value = now.getTime()
+  const { from, to } = windowRange()
   const filters = svcFilters()
 
   try {
@@ -583,32 +578,6 @@ function parseTs(s: string): number {
   return Date.parse(s.includes('T') ? s : s.replace(' ', 'T') + (s.includes('Z') ? '' : 'Z'))
 }
 
-// Deploy markers positioned on the chart's x-axis. Empty when the feature is
-// off or the window is degenerate. Each marker carries the CHART_W-space x plus
-// display fields for the hover tooltip; markers outside the window are dropped.
-const deployMarkers = computed(() => {
-  if (features.value.deploy_markers === false) return []
-  const span = loadedTo.value - loadedFrom.value
-  if (span <= 0) return []
-  const innerW = CHART_W - CHART_PAD * 2
-  return deploys.value
-    .map((d) => {
-      const t = parseTs(d.deployed_at)
-      const frac = (t - loadedFrom.value) / span
-      return { d, frac, x: CHART_PAD + frac * innerW }
-    })
-    .filter((m) => Number.isFinite(m.frac) && m.frac >= 0 && m.frac <= 1)
-})
-
-function deployTooltip(d: DeployMarker): string {
-  const when = new Date(parseTs(d.deployed_at))
-  const t = `${when.getHours().toString().padStart(2, '0')}:${when.getMinutes().toString().padStart(2, '0')}`
-  const parts = [d.version ? `v${d.version}` : 'deploy', t]
-  if (d.deployed_by) parts.push(`by ${d.deployed_by}`)
-  if (d.environment) parts.push(d.environment)
-  return parts.join(' · ')
-}
-
 function lineChartArea(values: number[], sharedMax?: number): string {
   if (values.length === 0) return ''
   const pts = lineChartPoints(values, sharedMax)
@@ -642,14 +611,52 @@ const humanWindow = computed(() => {
   return `${m}m`
 })
 
+// The reusable time-series panels use epoch-second points. Previous-period
+// values are deliberately aligned to the current bucket timestamps so the
+// comparison remains an overlay instead of extending the chart domain.
+function alignedSeriesPoints(values: number[]): [number, number][] {
+  return timeseries.value
+    .slice(0, values.length)
+    .map((bucket, index) => [parseTs(bucket.bucket) / 1000, values[index] ?? 0] as [number, number])
+    .filter(([timestamp]) => Number.isFinite(timestamp))
+}
+
+function comparisonSeries(name: string, values: number[], color = 'var(--text-muted)'): TimeSeriesPanelSeries {
+  return {
+    name: `${name} · previous`,
+    points: alignedSeriesPoints(values),
+    color,
+    lineStyle: 'dashed',
+    opacity: 0.38,
+  }
+}
+
+const serviceChartDeploys = computed(() => features.value.deploy_markers === false ? [] : deploys.value)
+const requestChartSeries = computed<TimeSeriesPanelSeries[]>(() => [
+  { name: 'Requests', points: alignedSeriesPoints(requestCounts.value), color: 'var(--amber)' },
+  ...(cmpOn.value ? [comparisonSeries('Requests', requestCountsPrev.value)] : []),
+])
+const errorChartSeries = computed<TimeSeriesPanelSeries[]>(() => [
+  { name: 'Errors', points: alignedSeriesPoints(errorCounts.value), color: 'var(--error)' },
+  ...(cmpOn.value ? [comparisonSeries('Errors', errorCountsPrev.value)] : []),
+])
+const latencyChartSeries = computed<TimeSeriesPanelSeries[]>(() => [
+  { name: 'P50', points: alignedSeriesPoints(p50.value), color: 'var(--amber)' },
+  { name: 'P95', points: alignedSeriesPoints(p95.value), color: 'var(--ok)' },
+  { name: 'P99', points: alignedSeriesPoints(p99.value), color: 'var(--error)' },
+  { name: 'Average', points: alignedSeriesPoints(avg.value), color: 'var(--text-secondary)', lineStyle: 'dashed' },
+  ...(cmpOn.value ? [
+    comparisonSeries('P50', p50Prev.value, 'var(--amber)'),
+    comparisonSeries('P95', p95Prev.value, 'var(--ok)'),
+    comparisonSeries('P99', p99Prev.value, 'var(--error)'),
+  ] : []),
+])
+
 // Shared Y-scale: when comparing, both periods must use the same max or the
 // overlay is meaningless. Falls back to the current series alone when off.
 function cmpMax(cur: number[], prev: number[]): number {
   return cmpOn.value ? Math.max(...cur, ...prev, 1) : Math.max(...cur, 1)
 }
-const reqMax = computed(() => cmpMax(requestCounts.value, requestCountsPrev.value))
-const errMax = computed(() => cmpMax(errorCounts.value, errorCountsPrev.value))
-
 // Previous value + signed delta% at a bucket index, for the hover tooltips.
 function prevAt(prev: number[], idx: number): number {
   return prev[idx] ?? 0
@@ -730,6 +737,24 @@ function histHoverLabel(idx: number): string {
 // X-axis end labels (lowest / highest bucket bound).
 const histMinLabel = computed(() => hasHist.value ? fmtDur(Math.pow(2, histBars.value.minExp)) : '')
 const histMaxLabel = computed(() => hasHist.value ? fmtDur(Math.pow(2, histBars.value.maxExp + 1)) : '')
+const latencyDistributionBins = computed(() => hasHist.value
+  ? histBars.value.bars.map(bar => ({ key: histRangeLabel(bar.exp), count: bar.count }))
+  : [])
+const latencyDistributionMarkers = computed(() => {
+  const histogram = latencyHist.value
+  const { bars, minExp } = histBars.value
+  if (!histogram || !hasHist.value || bars.length === 0) return []
+  return [
+    { label: 'P50', ms: histogram.p50_ms, color: 'var(--amber)' },
+    { label: 'P95', ms: histogram.p95_ms, color: 'var(--ok)' },
+    { label: 'P99', ms: histogram.p99_ms, color: 'var(--error)' },
+  ].map(marker => ({
+    label: marker.label,
+    value: fmtDur(marker.ms),
+    color: marker.color,
+    position: Math.max(0, Math.min(1, (Math.log2(Math.max(marker.ms, Number.EPSILON)) - minExp) / bars.length)),
+  }))
+})
 
 type ServiceSummary = { total: number; errors: number; errorRate: number; avgMs: number; p50: number; p95: number; p99: number }
 
@@ -750,7 +775,7 @@ const previousSummary = computed(() => summarizeBuckets(timeseriesPrev.value))
 
 const timeBreakdownBuckets = computed(() => timeBreakdownSeries.value?.buckets ?? [])
 const timeBreakdownDatabases = computed(() => timeBreakdown.value?.databases ?? [])
-const timeBreakdownChartSeries = computed(() => {
+const timeBreakdownChartSeries = computed<TimeSeriesPanelSeries[]>(() => {
   const requestCount = timeBreakdown.value?.request_count ?? 0
   const windowAverage = (field: 'application_time_ms' | 'database_time_ms') => {
     if (requestCount <= 0 || !timeBreakdown.value) return undefined
@@ -1051,9 +1076,6 @@ const timeLabels = computed(() => {
 // ═══ Chart interactivity ═══
 const activeChart = ref<string | null>(null)
 const hoverIdx = ref(-1)
-const DATA_CHART_KEYS = ['req', 'err', 'latency', 'p50', 'p95', 'avg', 'p99', 'hist']
-const anyChartHovered = computed(() => activeChart.value !== null && DATA_CHART_KEYS.includes(activeChart.value))
-
 function chartMax(values: number[]): number {
   return Math.max(...values, 1)
 }
@@ -1531,196 +1553,95 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
 
       <!-- Charts grid -->
       <div class="svc-charts-grid">
-        <!-- Requests (bar) -->
-        <PanelCard
+        <TimeSeriesPanel
           class="svc-chart-card chart-clickable"
           title="Requests"
           description="Request volume per bucket over the selected range. Click to expand."
+          caption="Traffic trend across the selected service window."
+          source-label="Spans"
+          :range-label="humanWindow"
           unit="req"
+          :series="requestChartSeries"
+          :deploys="serviceChartDeploys"
+          :loading="loading"
+          role="button"
+          tabindex="0"
           @click="openChart('req')"
-        >
-          <div class="chart-body" @mousemove="onChartMove($event, 'req', requestCounts.length)" @mouseleave="onChartLeave">
-            <div class="chart-y">
-              <span class="y-label">{{ fmtAxis(reqMax, false) }}</span>
-              <span class="y-label">{{ fmtAxis(reqMax / 2, false) }}</span>
-              <span class="y-label">0</span>
-            </div>
-            <div class="chart-area">
-              <svg :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="none" class="svc-chart-svg">
-                <line x1="0" :x2="CHART_W" :y1="CHART_H / 2" :y2="CHART_H / 2" class="grid-line" />
-                <polyline v-if="cmpOn" :points="lineChartPoints(requestCountsPrev, reqMax)" class="cmp-line" />
-                <rect v-for="(bar, i) in barChartBars(requestCounts, reqMax)" :key="i" :x="bar.x" :y="bar.y" :width="bar.w" :height="bar.h" fill="var(--amber)" :opacity="anyChartHovered && hoverIdx === i ? 1 : 0.7" rx="1" />
-                <g v-for="(m, mi) in deployMarkers" :key="'dep-req-' + mi">
-                  <line :x1="m.x" :x2="m.x" y1="0" :y2="CHART_H" class="deploy-marker-line" />
-                  <polygon :points="`${m.x - 2.5},0 ${m.x + 2.5},0 ${m.x},4`" class="deploy-marker-flag" />
-                  <rect :x="m.x - 4" y="0" width="8" :height="CHART_H" fill="transparent"><title>{{ deployTooltip(m.d) }}</title></rect>
-                </g>
-              </svg>
-              <div v-if="anyChartHovered" class="crosshair" :style="{ left: hoverLeft(requestCounts.length) }" />
-              <div v-if="activeChart === 'req' && hoverIdx >= 0 && hoverIdx < requestCounts.length" class="chart-tip" :style="{ left: hoverLeft(requestCounts.length) }">
-                <span class="tip-val">{{ formatCount(requestCounts[hoverIdx] ?? 0) }}</span>
-                <template v-if="cmpOn">
-                  <span class="tip-prev">prev {{ formatCount(prevAt(requestCountsPrev, hoverIdx)) }}</span>
-                  <span v-if="deltaPct(requestCounts[hoverIdx] ?? 0, prevAt(requestCountsPrev, hoverIdx))" class="tip-delta" :class="deltaPct(requestCounts[hoverIdx] ?? 0, prevAt(requestCountsPrev, hoverIdx))!.cls">{{ deltaPct(requestCounts[hoverIdx] ?? 0, prevAt(requestCountsPrev, hoverIdx))!.txt }}</span>
-                </template>
-                <span class="tip-time">{{ fmtBucketTime(hoverIdx) }}</span>
-              </div>
-            </div>
-          </div>
-          <div class="svc-chart-time"><span>{{ timeLabels.first }}</span><span>{{ timeLabels.last }}</span></div>
-        </PanelCard>
+          @keydown.enter="openChart('req')"
+          @keydown.space.prevent="openChart('req')"
+        />
 
-        <!-- Errors (bar) -->
-        <PanelCard
+        <TimeSeriesPanel
           class="svc-chart-card chart-clickable"
           title="Errors"
           description="Count of error responses per bucket over the selected range. Click to expand."
+          caption="Failed requests across the selected service window."
+          source-label="Spans"
+          :range-label="humanWindow"
           unit="errors"
+          :series="errorChartSeries"
+          :deploys="serviceChartDeploys"
+          :loading="loading"
+          role="button"
+          tabindex="0"
           @click="openChart('err')"
-        >
-          <div class="chart-body" @mousemove="onChartMove($event, 'err', errorCounts.length)" @mouseleave="onChartLeave">
-            <div class="chart-y">
-              <span class="y-label">{{ fmtAxis(errMax, false) }}</span>
-              <span class="y-label">{{ fmtAxis(errMax / 2, false) }}</span>
-              <span class="y-label">0</span>
-            </div>
-            <div class="chart-area">
-              <svg :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="none" class="svc-chart-svg">
-                <line x1="0" :x2="CHART_W" :y1="CHART_H / 2" :y2="CHART_H / 2" class="grid-line" />
-                <polyline v-if="cmpOn" :points="lineChartPoints(errorCountsPrev, errMax)" class="cmp-line" />
-                <rect v-for="(bar, i) in barChartBars(errorCounts, errMax)" :key="i" :x="bar.x" :y="bar.y" :width="bar.w" :height="bar.h" fill="var(--error)" :opacity="anyChartHovered && hoverIdx === i ? 1 : 0.7" rx="1" />
-                <g v-for="(m, mi) in deployMarkers" :key="'dep-err-' + mi">
-                  <line :x1="m.x" :x2="m.x" y1="0" :y2="CHART_H" class="deploy-marker-line" />
-                  <polygon :points="`${m.x - 2.5},0 ${m.x + 2.5},0 ${m.x},4`" class="deploy-marker-flag" />
-                  <rect :x="m.x - 4" y="0" width="8" :height="CHART_H" fill="transparent"><title>{{ deployTooltip(m.d) }}</title></rect>
-                </g>
-              </svg>
-              <div v-if="anyChartHovered" class="crosshair" :style="{ left: hoverLeft(errorCounts.length) }" />
-              <div v-if="activeChart === 'err' && hoverIdx >= 0 && hoverIdx < errorCounts.length" class="chart-tip" :style="{ left: hoverLeft(errorCounts.length) }">
-                <span class="tip-val">{{ formatCount(errorCounts[hoverIdx] ?? 0) }}</span>
-                <template v-if="cmpOn">
-                  <span class="tip-prev">prev {{ formatCount(prevAt(errorCountsPrev, hoverIdx)) }}</span>
-                  <span v-if="deltaPct(errorCounts[hoverIdx] ?? 0, prevAt(errorCountsPrev, hoverIdx))" class="tip-delta" :class="deltaPct(errorCounts[hoverIdx] ?? 0, prevAt(errorCountsPrev, hoverIdx))!.cls">{{ deltaPct(errorCounts[hoverIdx] ?? 0, prevAt(errorCountsPrev, hoverIdx))!.txt }}</span>
-                </template>
-                <span class="tip-time">{{ fmtBucketTime(hoverIdx) }}</span>
-              </div>
-            </div>
-          </div>
-          <div class="svc-chart-time"><span>{{ timeLabels.first }}</span><span>{{ timeLabels.last }}</span></div>
-        </PanelCard>
+          @keydown.enter="openChart('err')"
+          @keydown.space.prevent="openChart('err')"
+        />
 
-        <!-- Combined Latency (all percentiles on one graph) -->
-        <PanelCard
+        <TimeSeriesPanel
           class="svc-chart-card chart-clickable"
           title="Latency"
           description="Request latency percentiles (P50/P95/P99) and average per bucket. Click to expand."
+          caption="Percentiles and average request duration by interval."
+          source-label="Spans"
+          :range-label="humanWindow"
           unit="ms"
+          :series="latencyChartSeries"
+          :deploys="serviceChartDeploys"
+          :loading="loading"
+          role="button"
+          tabindex="0"
           @click="openChart('latency')"
-        >
-          <div class="latency-legend">
-            <span class="latency-legend-item"><span class="latency-dot" style="background:var(--amber)"></span>P50</span>
-            <span class="latency-legend-item"><span class="latency-dot" style="background:var(--ok)"></span>P95</span>
-            <span class="latency-legend-item"><span class="latency-dot" style="background:var(--error)"></span>P99</span>
-            <span class="latency-legend-item"><span class="latency-dot" style="background:var(--text-secondary)"></span>Avg</span>
-          </div>
-          <div class="chart-body" style="height:120px" @mousemove="onChartMove($event, 'latency', p50.length)" @mouseleave="onChartLeave">
-            <div class="chart-y">
-              <span class="y-label">{{ fmtAxis(latencyMax, true) }}</span>
-              <span class="y-label">{{ fmtAxis(latencyMax / 2, true) }}</span>
-              <span class="y-label">0</span>
-            </div>
-            <div class="chart-area">
-              <svg :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="none" class="svc-chart-svg">
-                <line x1="0" :x2="CHART_W" :y1="CHART_H / 2" :y2="CHART_H / 2" class="grid-line" />
-                <!-- Previous-period ghosts (behind current lines) -->
-                <template v-if="cmpOn">
-                  <polyline :points="lineChartPoints(p99Prev, latencyMax)" fill="none" stroke="var(--error)" stroke-width="1" stroke-dasharray="2,2" opacity="0.3" stroke-linejoin="round" />
-                  <polyline :points="lineChartPoints(p95Prev, latencyMax)" fill="none" stroke="var(--ok)" stroke-width="1" stroke-dasharray="2,2" opacity="0.3" stroke-linejoin="round" />
-                  <polyline :points="lineChartPoints(p50Prev, latencyMax)" fill="none" stroke="var(--amber)" stroke-width="1" stroke-dasharray="2,2" opacity="0.3" stroke-linejoin="round" />
-                </template>
-                <!-- P99 area (back) -->
-                <path :d="lineChartArea(p99, latencyMax)" fill="var(--error)" opacity="0.05" />
-                <polyline :points="lineChartPoints(p99, latencyMax)" fill="none" stroke="var(--error)" stroke-width="1.5" stroke-linejoin="round" />
-                <!-- P95 -->
-                <polyline :points="lineChartPoints(p95, latencyMax)" fill="none" stroke="var(--ok)" stroke-width="1.5" stroke-linejoin="round" />
-                <!-- P50 -->
-                <path :d="lineChartArea(p50, latencyMax)" fill="var(--amber)" opacity="0.08" />
-                <polyline :points="lineChartPoints(p50, latencyMax)" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linejoin="round" />
-                <!-- Avg (dashed) -->
-                <polyline :points="lineChartPoints(avg, latencyMax)" fill="none" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="4,3" stroke-linejoin="round" />
-                <g v-for="(m, mi) in deployMarkers" :key="'dep-lat-' + mi">
-                  <line :x1="m.x" :x2="m.x" y1="0" :y2="CHART_H" class="deploy-marker-line" />
-                  <polygon :points="`${m.x - 2.5},0 ${m.x + 2.5},0 ${m.x},4`" class="deploy-marker-flag" />
-                  <rect :x="m.x - 4" y="0" width="8" :height="CHART_H" fill="transparent"><title>{{ deployTooltip(m.d) }}</title></rect>
-                </g>
-              </svg>
-              <div v-if="anyChartHovered" class="crosshair" :style="{ left: hoverLeft(p50.length) }" />
-              <div v-if="activeChart === 'latency' && hoverIdx >= 0 && hoverIdx < p50.length" class="chart-tip chart-tip-multi" :style="{ left: hoverLeft(p50.length) }">
-                <span class="tip-time">{{ fmtBucketTime(hoverIdx) }}</span>
-                <span class="tip-row"><span class="latency-dot" style="background:var(--amber)"></span>P50 {{ formatMs(p50[hoverIdx] ?? 0) }}<span v-if="cmpOn" class="tip-row-prev">/ {{ formatMs(prevAt(p50Prev, hoverIdx)) }}</span></span>
-                <span class="tip-row"><span class="latency-dot" style="background:var(--ok)"></span>P95 {{ formatMs(p95[hoverIdx] ?? 0) }}<span v-if="cmpOn" class="tip-row-prev">/ {{ formatMs(prevAt(p95Prev, hoverIdx)) }}</span></span>
-                <span class="tip-row"><span class="latency-dot" style="background:var(--error)"></span>P99 {{ formatMs(p99[hoverIdx] ?? 0) }}<span v-if="cmpOn" class="tip-row-prev">/ {{ formatMs(prevAt(p99Prev, hoverIdx)) }}</span></span>
-                <span class="tip-row"><span class="latency-dot" style="background:var(--text-secondary)"></span>Avg {{ formatMs(avg[hoverIdx] ?? 0) }}<span v-if="cmpOn" class="tip-row-prev">/ {{ formatMs(prevAt(avgPrev, hoverIdx)) }}</span></span>
-                <span v-if="cmpOn" class="tip-prev-note">now / prev {{ humanWindow }}</span>
-              </div>
-            </div>
-          </div>
-          <div class="svc-chart-time"><span>{{ timeLabels.first }}</span><span>{{ timeLabels.last }}</span></div>
-        </PanelCard>
+          @keydown.enter="openChart('latency')"
+          @keydown.space.prevent="openChart('latency')"
+        />
 
-        <!-- Latency Distribution (histogram of request durations) -->
-        <PanelCard
+        <HistogramPanel
           class="svc-chart-card chart-clickable"
           title="Latency Distribution"
           description="Distribution of request durations across latency buckets. Click to expand."
-          unit="count"
+          caption="Request count grouped into logarithmic duration ranges."
+          source-label="Spans"
+          :range-label="humanWindow"
+          unit="requests"
+          :bins="latencyDistributionBins"
+          :markers="latencyDistributionMarkers"
+          :min-label="histMinLabel"
+          :max-label="histMaxLabel"
+          :loading="timeBreakdownLoading && !latencyHist"
+          role="button"
+          tabindex="0"
           @click="openChart('hist')"
-        >
-          <div v-if="!hasHist" class="svc-map-empty text-muted">No latency data</div>
-          <template v-else>
-            <div class="chart-body" @mousemove="onChartMove($event, 'hist', histCounts.length)" @mouseleave="onChartLeave">
-              <div class="chart-y">
-                <span class="y-label">{{ fmtAxis(chartMax(histCounts), false) }}</span>
-                <span class="y-label">{{ fmtAxis(chartMax(histCounts) / 2, false) }}</span>
-                <span class="y-label">0</span>
-              </div>
-              <div class="chart-area">
-                <svg :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="none" class="svc-chart-svg">
-                  <line x1="0" :x2="CHART_W" :y1="CHART_H / 2" :y2="CHART_H / 2" class="grid-line" />
-                  <rect v-for="(bar, i) in barChartBars(histCounts)" :key="i" :x="bar.x" :y="bar.y" :width="bar.w" :height="bar.h" fill="var(--purple, #8b5cf6)" :opacity="anyChartHovered && hoverIdx === i ? 1 : 0.6" rx="1" />
-                  <line v-for="(m, mi) in histMarkers" :key="'hm-' + mi" :x1="m.x" :x2="m.x" y1="0" :y2="CHART_H" :stroke="m.color" stroke-width="1" stroke-dasharray="2,2" opacity="0.85" vector-effect="non-scaling-stroke" />
-                </svg>
-                <div v-if="anyChartHovered" class="crosshair" :style="{ left: hoverLeft(histCounts.length) }" />
-                <div v-if="activeChart === 'hist' && hoverIdx >= 0 && hoverIdx < histCounts.length" class="chart-tip" :style="{ left: hoverLeft(histCounts.length) }">
-                  <span class="tip-val">{{ formatCount(histCounts[hoverIdx] ?? 0) }}</span>
-                  <span class="tip-time">{{ histHoverLabel(hoverIdx) }}</span>
-                </div>
-              </div>
-            </div>
-            <div class="svc-chart-time hist-axis">
-              <span>{{ histMinLabel }}</span>
-              <span class="hist-legend">
-                <span v-for="(m, mi) in histMarkers" :key="'hl-' + mi" class="hist-legend-item"><span class="latency-dot" :style="{ background: m.color }"></span>{{ m.label }}</span>
-              </span>
-              <span>{{ histMaxLabel }}</span>
-            </div>
-          </template>
-        </PanelCard>
+          @keydown.enter="openChart('hist')"
+          @keydown.space.prevent="openChart('hist')"
+        />
       </div>
 
       <!-- Topology: who calls this service and what it depends on -->
       <div class="svc-overview-grid">
-        <PanelCard
+        <TimeSeriesPanel
           class="svc-chart-card svc-time-series-card"
           title="Application vs database time"
           description="Average time per request in each interval. Database time is capped per transaction to represent wall-clock impact."
+          caption="Application time excludes database child spans; parallel calls can make raw database time higher."
+          source-label="Spans"
+          :range-label="humanWindow"
+          :series="timeBreakdownChartSeries"
+          :loading="timeBreakdownLoading"
+          unit="ms"
         >
-          <div v-if="timeBreakdownLoading && !timeBreakdownSeries" class="svc-map-empty text-muted">Loading time series…</div>
-          <div v-else-if="!timeBreakdownSeries || timeBreakdownBuckets.length === 0" class="svc-map-empty text-muted">No transaction breakdown in this window</div>
-          <div v-else class="svc-time-series">
-            <div class="svc-time-series-chart">
-              <TimeseriesWidget :buckets="[]" :series="timeBreakdownChartSeries" unit="ms" />
-            </div>
+          <template #details>
             <div class="svc-time-series-meta">
               <span><b>{{ timeBreakdown ? fmtDur(timeBreakdown.application_time_ms) : '-' }}</b> total application time</span>
               <span><b>{{ timeBreakdown ? fmtDur(timeBreakdown.database_time_ms) : '-' }}</b> total database impact</span>
@@ -1745,9 +1666,8 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
                 <span class="mono">{{ formatMs(database.p95_ms) }}</span>
               </div>
             </div>
-            <p class="svc-time-note">Application time is server-span time minus database child spans. Raw database call time can be higher when calls run in parallel.</p>
-          </div>
-        </PanelCard>
+          </template>
+        </TimeSeriesPanel>
         <PanelCard
           class="svc-chart-card chart-clickable svc-map-card"
           title="Service Map"

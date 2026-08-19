@@ -11,6 +11,8 @@ import { useQueryHistory } from '../composables/useQueryHistory'
 import { authenticatedFetch } from '../composables/authSession'
 import type { HistoryEntry } from '../composables/useQueryHistory'
 import VirtualTable from '../components/VirtualTable.vue'
+import { TablePanel, TimeSeriesPanel, formatPanelRange } from '../components/panels'
+import type { TimeSeriesPanelSeries } from '../components/panels'
 
 interface MetricsHistoryQuery {
   query: string
@@ -333,68 +335,10 @@ function vectorResultKeyAt(index: number): string {
   return result ? JSON.stringify(result.metric) : `metric:${index}`
 }
 
-// ═══ Chart constants ═══
-const chartW = 900
-const chartH = 300
-const pad = { top: 16, right: 16, bottom: 32, left: 64 }
-const innerW = chartW - pad.left - pad.right
-const innerH = chartH - pad.top - pad.bottom
-
 const palette = [
   '#3b82f6', '#47b881', '#5b8def', '#e5584f',
   '#a78bfa', '#f59e0b', '#06b6d4', '#ec4899',
 ]
-
-// ═══ Chart computeds ═══
-const yMax = computed(() => {
-  let max = 0
-  for (const series of matrixResults.value) {
-    for (const [, v] of series.values) {
-      const n = parseFloat(v)
-      if (n > max) max = n
-    }
-  }
-  return max || 1
-})
-
-const timeExtent = computed(() => {
-  const nowSecs = Math.floor(Date.now() / 1000)
-  const startSecs = nowSecs - selectedPreset.value * 60
-  return { min: startSecs, max: nowSecs }
-})
-
-function scaleX(t: number): number {
-  const { min, max } = timeExtent.value
-  const range = max - min || 1
-  return pad.left + ((t - min) / range) * innerW
-}
-
-function scaleY(v: number): number {
-  return pad.top + innerH - (v / yMax.value) * innerH
-}
-
-function seriesPath(series: PromMatrixResult): string {
-  if (!series.values.length) return ''
-  let d = ''
-  for (let i = 0; i < series.values.length; i++) {
-    const [t, v] = series.values[i]!
-    const x = scaleX(t)
-    const y = scaleY(parseFloat(v))
-    d += i === 0 ? `M${x},${y}` : ` L${x},${y}`
-  }
-  return d
-}
-
-function seriesAreaPath(series: PromMatrixResult): string {
-  if (!series.values.length) return ''
-  const baseline = pad.top + innerH
-  let d = `M${scaleX(series.values[0]![0])},${baseline}`
-  for (const [t, v] of series.values) {
-    d += ` L${scaleX(t)},${scaleY(parseFloat(v))}`
-  }
-  d += ` L${scaleX(series.values[series.values.length - 1]![0])},${baseline} Z`
-  return d
-}
 
 function seriesLabel(metric: Record<string, string>): string {
   const parts: string[] = []
@@ -407,119 +351,24 @@ function seriesLabel(metric: Record<string, string>): string {
   return name ? `${name}{${parts.join(', ')}}` : `{${parts.join(', ')}}`
 }
 
-const yTicks = computed(() => {
-  const max = yMax.value
-  const ticks: Array<{ label: string; y: number }> = []
-  const steps = [0, 0.25, 0.5, 0.75, 1]
-  for (const s of steps) {
-    const val = max * s
-    ticks.push({ label: formatCompact(val), y: scaleY(val) })
+const metricChartSeries = computed<TimeSeriesPanelSeries[]>(() => matrixResults.value.map((series, index) => {
+  const points = series.values
+    .map(([timestamp, value]) => [timestamp, Number.parseFloat(value)] as [number, number])
+    .filter(([, value]) => Number.isFinite(value))
+  return {
+    name: seriesLabel(series.metric),
+    points,
+    color: palette[index % palette.length],
+    legendValue: points.length ? points[points.length - 1]![1] : undefined,
   }
-  return ticks
-})
+}))
 
-const xLabels = computed(() => {
-  const { min, max } = timeExtent.value
-  if (min === max) return []
-  const labels: Array<{ label: string; x: number }> = []
-  const count = 6
-  for (let i = 0; i <= count; i++) {
-    const t = min + (i / count) * (max - min)
-    const d = new Date(t * 1000)
-    const h = d.getHours().toString().padStart(2, '0')
-    const m = d.getMinutes().toString().padStart(2, '0')
-    labels.push({ label: `${h}:${m}`, x: scaleX(t) })
-  }
-  return labels
-})
-
-function formatCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  if (n >= 1) return n.toFixed(1)
-  if (n > 0) return n.toFixed(3)
-  return '0'
-}
-
-// ═══ Hover tooltip ═══
-const chartContainer = ref<HTMLElement | null>(null)
-const hoverVisible = ref(false)
-const hoverX = ref(0)          // SVG x coordinate for crosshair
-const hoverTime = ref(0)       // Unix timestamp at cursor
-const hoverTooltipX = ref(0)   // pixel x for tooltip div
-const hoverTooltipY = ref(0)   // pixel y for tooltip div
-const hoverValues = ref<Array<{ label: string; value: string; color: string; y: number }>>([])
-const hoverTimeLabel = ref('')
-const tooltipFlipped = ref(false)
-const chartContainerWidth = ref(0)
-
-function handleChartMouseMove(e: MouseEvent) {
-  const svg = (chartContainer.value?.querySelector('.metrics-chart') as SVGSVGElement | null)
-  if (!svg || !matrixResults.value.length) return
-
-  const rect = svg.getBoundingClientRect()
-  const mouseX = e.clientX - rect.left
-  const svgX = (mouseX / rect.width) * chartW
-
-  // Clamp to chart area
-  if (svgX < pad.left || svgX > chartW - pad.right) {
-    hoverVisible.value = false
-    return
-  }
-
-  // Convert SVG x back to time
-  const { min, max } = timeExtent.value
-  const range = max - min || 1
-  const t = min + ((svgX - pad.left) / innerW) * range
-
-  hoverX.value = svgX
-  hoverTime.value = t
-
-  // Format time
-  const d = new Date(t * 1000)
-  const hh = d.getHours().toString().padStart(2, '0')
-  const mm = d.getMinutes().toString().padStart(2, '0')
-  const ss = d.getSeconds().toString().padStart(2, '0')
-  hoverTimeLabel.value = `${hh}:${mm}:${ss}`
-
-  // Find nearest value for each series
-  const vals: Array<{ label: string; value: string; color: string; y: number }> = []
-  for (let si = 0; si < matrixResults.value.length; si++) {
-    const series = matrixResults.value[si]!
-    if (!series.values.length) continue
-    // Binary search for nearest timestamp
-    let lo = 0, hi = series.values.length - 1
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1
-      if (series.values[mid]![0] < t) lo = mid + 1
-      else hi = mid
-    }
-    // Check neighbors to find closest
-    let best = lo
-    if (best > 0 && Math.abs(series.values[best - 1]![0] - t) < Math.abs(series.values[best]![0] - t)) {
-      best = best - 1
-    }
-    const v = parseFloat(series.values[best]![1])
-    vals.push({
-      label: seriesLabel(series.metric),
-      value: formatCompact(v),
-      color: palette[si % palette.length]!,
-      y: scaleY(v),
-    })
-  }
-  hoverValues.value = vals
-
-  // Position tooltip in pixel space, flip if near right edge
-  hoverTooltipX.value = e.clientX - rect.left
-  hoverTooltipY.value = e.clientY - rect.top
-  chartContainerWidth.value = rect.width
-  tooltipFlipped.value = hoverTooltipX.value > rect.width * 0.65
-  hoverVisible.value = true
-}
-
-function handleChartMouseLeave() {
-  hoverVisible.value = false
-}
+const metricTableRows = computed<Record<string, unknown>[]>(() => vectorResults.value.map(result => ({
+  metric: result.metric,
+  value: result.value,
+})))
+const resultsRangeLabel = computed(() => formatPanelRange(selectedPreset.value))
+const resultsCaption = computed(() => query.value.trim() || 'Run a PromQL expression to inspect metric data.')
 
 // ═══ Table helpers ═══
 function labelBadges(metric: Record<string, string>): Array<{ key: string; value: string }> {
@@ -1086,100 +935,55 @@ watch(viewMode, () => {
       </button>
     </div>
 
-    <!-- ═══ Error ═══ -->
-    <div v-if="metricsEnabled && viewMode === 'query' && errorMsg" class="error-banner card">
-      <span class="error-icon">&#9888;</span>
-      <span class="mono">{{ errorMsg }}</span>
-    </div>
-
     <!-- ═══ Graph Tab ═══ -->
-    <div v-if="metricsEnabled && viewMode === 'query' && activeTab === 'graph'" class="results-panel card">
-      <div v-if="!hasResults" class="empty-state">
-        <div class="empty-state-icon">&#9707;</div>
-        <div>Enter a PromQL query and click Execute</div>
-      </div>
-      <div v-else-if="!matrixResults.length" class="empty-state">
-        <div class="empty-state-icon">&#9676;</div>
-        <div>No data returned</div>
-      </div>
-      <template v-else>
-        <div ref="chartContainer" class="chart-container" @mousemove="handleChartMouseMove" @mouseleave="handleChartMouseLeave">
-          <svg :viewBox="`0 0 ${chartW} ${chartH}`" class="metrics-chart" preserveAspectRatio="xMidYMid meet">
-            <!-- Grid lines -->
-            <template v-for="tick in yTicks" :key="'yt' + tick.label">
-              <line :x1="pad.left" :y1="tick.y" :x2="chartW - pad.right" :y2="tick.y" class="grid-line" />
-              <text :x="pad.left - 6" :y="tick.y + 3" class="axis-label" text-anchor="end">{{ tick.label }}</text>
-            </template>
-            <!-- X labels -->
-            <template v-for="lbl in xLabels" :key="'xl' + lbl.label">
-              <text :x="lbl.x" :y="chartH - 4" class="axis-label" text-anchor="middle">{{ lbl.label }}</text>
-            </template>
-            <!-- Series -->
-            <template v-for="(series, idx) in matrixResults" :key="'s' + idx">
-              <path :d="seriesAreaPath(series)" :fill="palette[idx % palette.length]" fill-opacity="0.08" />
-              <path :d="seriesPath(series)" fill="none" :stroke="palette[idx % palette.length]" stroke-width="1.5" />
-            </template>
-            <!-- Crosshair + dots -->
-            <template v-if="hoverVisible">
-              <line :x1="hoverX" :y1="pad.top" :x2="hoverX" :y2="pad.top + innerH" class="crosshair-line" />
-              <circle
-                v-for="(v, vi) in hoverValues"
-                :key="'dot' + vi"
-                :cx="hoverX"
-                :cy="v.y"
-                r="3.5"
-                :fill="v.color"
-                stroke="var(--bg-surface)"
-                stroke-width="1.5"
-                class="crosshair-dot"
-              />
-            </template>
-          </svg>
-          <!-- Tooltip -->
-          <div
-            v-if="hoverVisible"
-            class="chart-tooltip"
-            :class="{ 'tooltip-left': tooltipFlipped }"
-            :style="{
-              left: tooltipFlipped ? undefined : hoverTooltipX + 12 + 'px',
-              right: tooltipFlipped ? (chartContainerWidth - hoverTooltipX + 12) + 'px' : undefined,
-              top: hoverTooltipY - 10 + 'px',
-            }"
+    <TimeSeriesPanel
+      v-if="metricsEnabled && viewMode === 'query' && activeTab === 'graph'"
+      class="metrics-results-panel"
+      title="PromQL results"
+      description="Time-series values returned by the current PromQL expression. Hover to compare series at the same timestamp."
+      :caption="resultsCaption"
+      source-label="Metrics"
+      :range-label="resultsRangeLabel"
+      :series="metricChartSeries"
+      :loading="executing"
+      :error="errorMsg || null"
+      :empty-title="hasResults ? 'No samples returned' : 'Run a PromQL query'"
+      :empty-message="hasResults ? 'Try another expression or a wider time range.' : 'Enter an expression above, then select Execute.'"
+    >
+      <template v-if="matrixResults.length" #details>
+        <div class="metric-series-actions" aria-label="Create an alert from a result series">
+          <span class="metric-series-actions-label">Alert from series</span>
+          <button
+            v-for="(series, idx) in matrixResults"
+            :key="`alert-${seriesLabel(series.metric)}-${idx}`"
+            class="metric-series-action"
+            :title="`Create alert for ${seriesLabel(series.metric)}`"
+            @click="createAlertFromSeries(series.metric)"
           >
-            <div class="tooltip-time mono">{{ hoverTimeLabel }}</div>
-            <div v-for="v in hoverValues" :key="v.label" class="tooltip-row">
-              <span class="tooltip-swatch" :style="{ background: v.color }"></span>
-              <span class="tooltip-label mono">{{ v.label }}</span>
-              <span class="tooltip-value mono">{{ v.value }}</span>
-            </div>
-          </div>
-        </div>
-        <!-- Legend -->
-        <div class="chart-legend">
-          <div v-for="(series, idx) in matrixResults" :key="'l' + idx" class="legend-item">
-            <span class="legend-swatch" :style="{ background: palette[idx % palette.length] }"></span>
-            <span class="legend-text mono">{{ seriesLabel(series.metric) }}</span>
-            <button
-              class="legend-alert-btn"
-              title="Create alert for this series"
-              @click.stop="createAlertFromSeries(series.metric)"
-            >&#9888; Alert</button>
-          </div>
+            <span class="metric-series-action-swatch" :style="{ background: palette[idx % palette.length] }"></span>
+            <span class="metric-series-action-name mono">{{ seriesLabel(series.metric) }}</span>
+            <span aria-hidden="true">&#9888;</span>
+          </button>
         </div>
       </template>
-    </div>
+    </TimeSeriesPanel>
 
     <!-- ═══ Table Tab ═══ -->
-    <div v-if="metricsEnabled && viewMode === 'query' && activeTab === 'table'" class="results-panel card">
-      <div v-if="!hasResults" class="empty-state">
-        <div class="empty-state-icon">&#9707;</div>
-        <div>Enter a PromQL query and click Execute</div>
-      </div>
-      <div v-else-if="!vectorResults.length" class="empty-state">
-        <div class="empty-state-icon">&#9676;</div>
-        <div>No data returned</div>
-      </div>
-      <div v-else class="result-table">
+    <TablePanel
+      v-if="metricsEnabled && viewMode === 'query' && activeTab === 'table'"
+      class="metrics-results-panel metrics-results-table"
+      title="Instant query results"
+      description="Current values and label sets returned by the PromQL expression."
+      :caption="resultsCaption"
+      source-label="Metrics"
+      :range-label="resultsRangeLabel"
+      :rows="metricTableRows"
+      :loading="executing"
+      :error="errorMsg || null"
+      :empty-title="hasResults ? 'No rows returned' : 'Run a PromQL query'"
+      :empty-message="hasResults ? 'Try another expression or adjust its label matchers.' : 'Enter an expression above, then select Execute.'"
+    >
+      <div class="result-table">
         <div class="result-table-row result-table-head" role="row">
           <div role="columnheader">Metric</div>
           <div role="columnheader">Labels</div>
@@ -1212,7 +1016,7 @@ watch(viewMode, () => {
           </template>
         </VirtualTable>
       </div>
-    </div>
+    </TablePanel>
   </div>
 </template>
 
