@@ -13,6 +13,7 @@ import type { HistoryEntry } from '../composables/useQueryHistory'
 import VirtualTable from '../components/VirtualTable.vue'
 import { TablePanel, TimeSeriesPanel, formatPanelRange } from '../components/panels'
 import type { TimeSeriesPanelSeries } from '../components/panels'
+import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 interface MetricsHistoryQuery {
   query: string
@@ -241,7 +242,7 @@ function acceptAutocomplete(item: { text: string; kind: 'metric' | 'function' | 
 }
 
 // ═══ Time range ═══
-const selectedPreset = ref(60)
+const selectedPreset = useTimeRangePreference()
 const customRange = ref<{ from: string; to: string } | null>(null)
 
 // ═══ Smart suggestions ═══

@@ -11,6 +11,7 @@ import PanelCard from '../components/PanelCard.vue'
 import { HistogramPanel, TimeSeriesPanel } from '../components/panels'
 import type { TimeSeriesPanelSeries } from '../components/panels'
 import type { GraphNode, GraphEdge, TimeseriesBucket, RushEvent, Filter, Funnel, FunnelResult, FunnelStep, DeployMarker, Monitor, Slo, AnomalyRule, LatencyHistogram, EndpointRow, ErrorGroup, ServiceTimeBreakdown, ServiceTimeBreakdownTimeseries } from '../types'
+import { applyTimeRangeOverride, useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const route = useRoute()
 const router = useRouter()
@@ -63,7 +64,8 @@ const traces = ref<RushEvent[]>([])
 const loading = ref(true)
 const serviceStatus = ref<'checking' | 'found' | 'missing' | 'error'>('checking')
 const initMinutes = Number(route.query.t)
-const minutes = ref(initMinutes > 0 ? initMinutes : 60)
+const minutes = useTimeRangePreference()
+if (initMinutes > 0) applyTimeRangeOverride(initMinutes)
 
 // Deploy markers are overlaid by the reusable time-series panels.
 const deploys = ref<DeployMarker[]>([])

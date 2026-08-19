@@ -17,6 +17,7 @@ import { compareFindingStrength, compareFindingSummary, rankCompareFindings } fr
 import { authenticatedFetch } from '../composables/authSession'
 import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from '../composables/storageScope'
 import { usePollingTask, type PollingRunContext } from '../composables/usePollingTask'
+import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import type { ContextMenuEntry } from '../types/contextMenu'
 
 interface ExploreHistoryQuery {
@@ -34,7 +35,7 @@ const route = useRoute()
 const api = useApi()
 const { features } = useFeatures()
 
-const selectedPreset = ref(60)
+const selectedPreset = useTimeRangePreference()
 
 // ═══ Custom time range ═══
 const customRange = ref<{ from: string; to: string } | null>(null)

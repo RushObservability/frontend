@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import type { RumAppEntry, RumVitalsSummary, Filter } from '../types'
+import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const router = useRouter()
 const api = useApi()
@@ -10,15 +11,17 @@ const api = useApi()
 const apps = ref<RumAppEntry[]>([])
 const appVitals = ref<Record<string, RumVitalsSummary[]>>({})
 const loading = ref(true)
+const timeRangeMinutes = useTimeRangePreference()
 
-onMounted(async () => {
+async function loadApps() {
+  loading.value = true
   try {
     const res = await api.rumApps()
     apps.value = res.apps
 
-    // Fetch vitals for each app in parallel (1h window)
+    // Fetch vitals for each app over the user's shared lookback window.
     const now = new Date()
-    const from = new Date(now.getTime() - 60 * 60 * 1000)
+    const from = new Date(now.getTime() - timeRangeMinutes.value * 60 * 1000)
     const timeRange = { from: from.toISOString(), to: now.toISOString() }
 
     await Promise.all(apps.value.map(async (app) => {
@@ -30,7 +33,10 @@ onMounted(async () => {
     }))
   } catch { /* empty state */ }
   loading.value = false
-})
+}
+
+onMounted(loadApps)
+watch(timeRangeMinutes, loadApps)
 
 function openApp(app: RumAppEntry) {
   router.push(`/rum/${encodeURIComponent(app.AppName)}`)

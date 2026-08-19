@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useApi } from '../composables/useApi'
 import TimePicker from '../components/TimePicker.vue'
 import type { AuditEvent, AuditQueryParams, AuditVerifyResponse } from '../types'
+import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const api = useApi()
 
@@ -10,7 +11,7 @@ const PAGE_SIZE = 100
 const DEFAULT_PRESET = 1440 // last 24h
 
 // ── Time range (shared TimePicker): preset minutes OR an explicit custom range ──
-const selectedPreset = ref(DEFAULT_PRESET)
+const selectedPreset = useTimeRangePreference()
 const customRange = ref<{ from: string; to: string } | null>(null)
 
 /** Resolve the active window to ISO from/to for the API. */
