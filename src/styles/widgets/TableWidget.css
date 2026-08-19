@@ -1,6 +1,8 @@
 .table-widget {
-  overflow: auto;
   height: 100%;
+  overflow: auto;
+  overscroll-behavior-inline: contain;
+  container-type: inline-size;
 }
 .tw-row {
   display: grid;
@@ -23,11 +25,31 @@
   padding: var(--sp-1) var(--sp-2);
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  max-width: 160px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tw-head > .tw-col-http_method,
+.tw-col-http_method { text-align: center; }
+.tw-head > .tw-col-http_status_code,
+.tw-head > .tw-col-duration_ns,
+.tw-head > .tw-col-count,
+.tw-col-http_status_code,
+.tw-col-duration_ns,
+.tw-col-count { text-align: right; }
+.tw-col-http_path,
+.tw-col-error_message,
+.tw-col-message { padding-inline: var(--sp-3); }
 .tw-row:hover .tw-cell {
   background: var(--bg-hover);
+}
+
+@container (max-width: 560px) {
+  .table-widget--trace .tw-row {
+    grid-template-columns: 82px 72px 48px minmax(96px, 1fr) 44px 58px 54px !important;
+  }
+  .table-widget--trace .tw-head > div,
+  .table-widget--trace .tw-cell { padding-inline: 6px; }
+  .table-widget--trace .tw-col-http_path { padding-inline: var(--sp-2); }
 }

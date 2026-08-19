@@ -9,6 +9,7 @@ const KNOWN_LEGACY_KEYS = [
   'rush_metrics_history',
   'rush_explore_history',
   'rush-log-word-wrap',
+  'rush-time-range-minutes',
   'svc_funnel_range_minutes',
   'funnels_range_minutes',
 ]

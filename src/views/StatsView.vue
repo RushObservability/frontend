@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import TimePicker from '../components/TimePicker.vue'
+import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import type {
   StatsResponse, TableStorage, UsageResponse,
   UsageEntry, UnusedMetric, CardinalityEntry,
@@ -38,7 +39,7 @@ function setTab(tab: SubTab) {
 const stats = ref<StatsResponse | null>(null)
 const loadingStats = ref(false)
 
-const selectedPreset = ref(1440)
+const selectedPreset = useTimeRangePreference()
 
 // ── Usage data ──
 const usage = ref<UsageResponse | null>(null)
@@ -301,6 +302,7 @@ const localPct = computed(() => {
         :presets="[
           { label: '1h', value: 60 },
           { label: '6h', value: 360 },
+          { label: '12h', value: 720 },
           { label: '24h', value: 1440 },
           { label: '7d', value: 10080 },
           { label: '30d', value: 43200 },

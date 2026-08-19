@@ -68,7 +68,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-3) var(--sp-6);
-  padding: var(--sp-3) var(--sp-4);
 }
 
 .meta-row {
@@ -92,15 +91,7 @@
 
 /* ═══ Focused event ═══ */
 .focused-event {
-  padding: var(--sp-3) var(--sp-4);
-  border-left: 3px solid var(--amber);
-}
-
-.focused-header {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-2);
+  padding: 0;
 }
 
 .focused-time {
@@ -155,49 +146,24 @@
 .range-btn.active { color: var(--amber); border-color: var(--amber); background: rgba(59, 130, 246, 0.08); }
 
 /* ═══ Charts ═══ */
+.anomaly-loading-panel {
+  min-height: 220px;
+}
+
 .charts-section {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
 }
 
-/* chart-card is now a PanelCard; the panel body provides padding. */
+/* The reusable time-series panel body provides chart padding. */
 .chart-card { padding: 0; }
-
-.chart-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--sp-2);
-}
-
-.chart-header-left {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
-.chart-header-right {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-shrink: 0;
-}
 
 .chart-color-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-}
-
-.chart-name {
-  font-size: 12px;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .chart-hover-val {
@@ -246,27 +212,9 @@
   fill: var(--amber);
 }
 
-.empty-chart {
-  padding: var(--sp-8);
-  text-align: center;
-}
-
-.empty-icon {
-  font-size: 28px;
-  color: var(--text-muted);
-  margin-bottom: var(--sp-2);
-}
-
-.empty-text {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
 /* ═══ Events table ═══ */
 .events-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
+  padding: 0;
 }
 
 .section-title {
@@ -279,6 +227,8 @@
 }
 
 .section-title-filter {
+  max-width: min(42vw, 420px);
+  overflow: hidden;
   font-size: 11px;
   font-weight: 400;
   color: var(--text-muted);
@@ -286,6 +236,8 @@
   border-radius: var(--r-sm);
   background: var(--bg-overlay);
   border: 1px solid var(--border-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .events-table {
@@ -294,6 +246,7 @@
 
 .events-thead {
   display: flex;
+  column-gap: 6px;
   padding: var(--sp-1) var(--sp-3);
   border-bottom: 1px solid var(--border-default);
 }
@@ -313,6 +266,7 @@
 
 .events-row {
   display: flex;
+  column-gap: 6px;
   padding: var(--sp-1) var(--sp-3);
   border-bottom: 1px solid var(--border-subtle);
   cursor: pointer;
@@ -371,7 +325,7 @@
   gap: var(--sp-3);
 }
 
-/* corr-chart-card is now a PanelCard; the panel body provides padding. */
+/* Correlation charts use the same reusable time-series frame. */
 .corr-chart-card { padding: 0; }
 
 .corr-total-badge {
@@ -493,6 +447,39 @@
 
 .trace-link:hover {
   opacity: 1;
+}
+
+@media (max-width: 900px) {
+  .corr-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .focused-stats {
+    flex-wrap: wrap;
+    gap: var(--sp-3) var(--sp-5);
+  }
+}
+
+@media (max-width: 680px) {
+  .page-header {
+    align-items: flex-start;
+    gap: var(--sp-3);
+  }
+
+  .page-header-left {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .rule-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .range-bar {
+    flex-wrap: wrap;
+  }
 }
 
 /* ═══ AI Analysis button ═══ */
@@ -868,4 +855,3 @@
   white-space: nowrap;
   color: var(--text-primary);
 }
-

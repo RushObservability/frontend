@@ -4,8 +4,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { useTenant } from '../composables/useTenant'
-import { removeLegacyStorageKey, storageUserId, tenantScopedStorageKey } from '../composables/storageScope'
 import { usePollingTask } from '../composables/usePollingTask'
+import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import type { ServiceEntry, GraphNode, GraphEdge, Funnel, FunnelResult, FunnelStep } from '../types'
 import TimePicker from '../components/TimePicker.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
@@ -17,7 +17,7 @@ const { canWrite } = useAuth()
 // The Services page is built entirely from APM (trace/span) data, so it can't
 // function when APM is disabled for the active tenant. Load the tenant list (if
 // needed) so we know whether to show the "needs APM" notice instead.
-const { apmEnabled, activeTenant, loadTenants: loadTenantSignals, loaded: tenantsLoaded } = useTenant()
+const { apmEnabled, loadTenants: loadTenantSignals, loaded: tenantsLoaded } = useTenant()
 if (!tenantsLoaded.value) loadTenantSignals()
 const serviceNames = ref<string[]>([])
 const services = ref<ServiceEntry[]>([])
@@ -31,12 +31,12 @@ const viewMode = ref<'catalog' | 'graph' | 'funnels'>(
 // Graph state
 const graphNodes = ref<GraphNode[]>([])
 const graphEdges = ref<GraphEdge[]>([])
-const graphMinutes = ref(60)
+const graphMinutes = useTimeRangePreference()
 const graphLoading = ref(false)
 
 // Catalog state
 const catalogLoading = ref(false)
-const catalogMinutes = ref(60)
+const catalogMinutes = graphMinutes
 const namesLoaded = ref(false)
 
 function onFvKey(e: KeyboardEvent) {
@@ -491,17 +491,7 @@ const funnels        = ref<Funnel[]>([])
 const funnelSel      = ref<Funnel | null>(null)
 const funnelResult   = ref<FunnelResult | null>(null)
 const funnelRunning  = ref(false)
-const FUNNEL_RANGE_KEY = 'svc_funnel_range_minutes'
-removeLegacyStorageKey(FUNNEL_RANGE_KEY)
-const funnelRange    = ref<number>(60)
-function loadFunnelRange() {
-  const key = tenantScopedStorageKey(FUNNEL_RANGE_KEY, activeTenant.value)
-  try {
-    const stored = key ? Number(localStorage.getItem(key)) : NaN
-    funnelRange.value = Number.isFinite(stored) && stored > 0 ? stored : 60
-  } catch { funnelRange.value = 60 }
-}
-watch([storageUserId, activeTenant], loadFunnelRange, { immediate: true })
+const funnelRange    = graphMinutes
 const funnelErr      = ref<string | null>(null)
 const showFunnelForm = ref(false)
 const funnelNewName  = ref('')
@@ -535,9 +525,6 @@ async function loadFunnels() {
 
 function setFunnelRange(v: number) {
   funnelRange.value = v
-  const key = tenantScopedStorageKey(FUNNEL_RANGE_KEY, activeTenant.value)
-  if (!key) return
-  try { localStorage.setItem(key, String(v)) } catch { /* storage may be unavailable */ }
 }
 
 function selectFunnel(f: Funnel) {
