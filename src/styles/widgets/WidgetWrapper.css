@@ -1,0 +1,103 @@
+/* Wrapper fills the dashboard grid cell; the PanelCard inside stretches to it
+   so the chart body flexes to the available height (same as before). */
+.widget-wrap {
+  position: relative;
+  height: 100%;
+  container-type: inline-size;
+}
+/* Lift the hovered dashboard panel above its grid neighbors so the chart
+   tooltip (which overflows the card) isn't painted under the next panel. */
+.widget-wrap:hover { z-index: 20; }
+.widget-wrap :deep(.panel-card) {
+  height: 100%;
+}
+.widget-wrap :deep(.panel-body) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 60px;
+}
+
+/* Edit-mode chrome */
+.widget-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: -5px;
+}
+.widget-type {
+  margin-right: 3px;
+  color: var(--text-muted);
+  font: 700 7px var(--font-mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.widget-btn {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: 10px;
+  transition: color 0.15s, background 0.15s;
+}
+.widget-btn-glyph { font-size: 11px; line-height: 1; }
+.widget-btn-label { font-weight: 600; }
+.widget-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.widget-btn-danger:hover {
+  color: var(--error);
+}
+.widget-edit-mode :deep(.panel-card) {
+  border-color: var(--border-strong);
+  border-style: dashed;
+}
+.widget-edit-mode:hover :deep(.panel-card) { border-color: var(--amber-muted); }
+.drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 15px;
+  padding: 2px 5px;
+  user-select: none;
+  transition: color 0.15s;
+  line-height: 1;
+}
+.drag-handle:hover {
+  color: var(--amber);
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: end;
+  cursor: nwse-resize;
+  color: var(--amber-muted);
+  font-size: 10px;
+  line-height: 1;
+  user-select: none;
+  transition: color 0.15s;
+  z-index: 4;
+}
+.resize-handle:hover {
+  color: var(--amber);
+}
+
+@container (max-width: 420px) {
+  .widget-btn-label,
+  .widget-type { display: none; }
+}
+
+@container (max-width: 260px) {
+  .widget-btn { padding-inline: 3px; }
+  .drag-handle { padding-inline: 3px; }
+}

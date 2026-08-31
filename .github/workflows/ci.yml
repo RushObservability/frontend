@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.13.1'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Security regression checks
+        run: npm run security:check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser accessibility smoke tests
+        run: npm run test:e2e
+
+      - name: Build production security-header image
+        run: docker build --platform linux/amd64 -t rush-web-ui:csp-test .
+
+      - name: Run production CSP route matrix
+        run: |
+          docker run --rm -d --name rush-web-ui-csp-test \
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+            -p 127.0.0.1:4174:8080 rush-web-ui:csp-test
+          trap 'docker stop rush-web-ui-csp-test >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 20); do
+            curl --fail --silent http://127.0.0.1:4174/ >/dev/null && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4174/ >/dev/null
+          npm run security:headers -- http://127.0.0.1:4174/
+          PLAYWRIGHT_BASE_URL=http://127.0.0.1:4174 npm run test:e2e -- csp.spec.ts

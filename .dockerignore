@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+.DS_Store
+node_modules
+dist
+coverage
+playwright-report
+test-results
+tests
+docs
+*.log
+runtime-config.js
