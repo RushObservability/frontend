@@ -24,7 +24,7 @@ RUN npm run build
 # The runtime image (Chainguard nginx) is distroless — no shell, and we can't RUN
 # in it. Stage a busybox multi-call binary + the applet symlinks the entrypoint
 # needs (sh, sed, mkdir, grep) so it can validate and render config at start.
-FROM cgr.dev/chainguard/busybox@sha256:1b57aa036fb6ae3583b6a382f0c8b230a06a97da04499b0a1dfb1047b999f9b9 AS tools
+FROM cgr.dev/chainguard/busybox@sha256:897569ed1144d5644aded67a0e72ce8e3686e922f7de4808b5f13e4765d62184 AS tools
 # The busybox image also runs non-root, so assemble the tools under /tmp (writable).
 RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/busybox; for a in sh sed mkdir grep; do ln -s busybox /tmp/tools/$a; done"]
 
@@ -32,7 +32,7 @@ RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/b
 # Chainguard nginx: 0-CVE, distroless, runs as non-root (uid 65532) and listens
 # on 8080. Its entrypoint is bare `nginx` (no docker-entrypoint.sh / envsubst),
 # so we supply our own entrypoint to render the runtime template.
-FROM cgr.dev/chainguard/nginx@sha256:2189489ef3fa5b1e94a8463f98f9c148a4d8e7498d3f747069fc78de405742fc
+FROM cgr.dev/chainguard/nginx@sha256:df0a97604163fb49366d0853c34b238cde40122606f3c92940d47717689a0473
 
 # busybox tools for the entrypoint (sh/sed/mkdir at /usr/local/bin).
 COPY --from=tools /tmp/tools/ /usr/local/bin/
