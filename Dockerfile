@@ -32,7 +32,7 @@ RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/b
 # Chainguard nginx: 0-CVE, distroless, runs as non-root (uid 65532) and listens
 # on 8080. Its entrypoint is bare `nginx` (no docker-entrypoint.sh / envsubst),
 # so we supply our own entrypoint to render the runtime template.
-FROM cgr.dev/chainguard/nginx@sha256:2189489ef3fa5b1e94a8463f98f9c148a4d8e7498d3f747069fc78de405742fc
+FROM cgr.dev/chainguard/nginx@sha256:df0a97604163fb49366d0853c34b238cde40122606f3c92940d47717689a0473
 
 # busybox tools for the entrypoint (sh/sed/mkdir at /usr/local/bin).
 COPY --from=tools /tmp/tools/ /usr/local/bin/
