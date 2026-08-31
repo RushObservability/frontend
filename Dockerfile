@@ -24,7 +24,7 @@ RUN npm run build
 # The runtime image (Chainguard nginx) is distroless — no shell, and we can't RUN
 # in it. Stage a busybox multi-call binary + the applet symlinks the entrypoint
 # needs (sh, sed, mkdir, grep) so it can validate and render config at start.
-FROM cgr.dev/chainguard/busybox@sha256:1b57aa036fb6ae3583b6a382f0c8b230a06a97da04499b0a1dfb1047b999f9b9 AS tools
+FROM cgr.dev/chainguard/busybox@sha256:897569ed1144d5644aded67a0e72ce8e3686e922f7de4808b5f13e4765d62184 AS tools
 # The busybox image also runs non-root, so assemble the tools under /tmp (writable).
 RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/busybox; for a in sh sed mkdir grep; do ln -s busybox /tmp/tools/$a; done"]
 
