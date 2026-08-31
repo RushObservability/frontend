@@ -1,0 +1,119 @@
+.qb {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qb-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  animation: fadeIn 0.15s ease both;
+}
+
+.qb-field-wrap {
+  position: relative;
+  width: 180px;
+}
+
+/* The select provides the dropdown options; the input overlays for custom typing */
+.qb-field-wrap .qb-select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.qb-field-custom {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 11px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  transition: border-color 0.15s;
+}
+.qb-field-custom:focus { border-color: var(--amber); }
+
+.qb-op {
+  width: 80px;
+  padding: 5px 6px;
+  font-size: 11px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.qb-op:focus { border-color: var(--amber); }
+
+.qb-value-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.qb-value {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 11px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  transition: border-color 0.15s;
+}
+.qb-value:focus { border-color: var(--amber); }
+
+.qb-suggest {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.qb-suggest-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  transition: all 0.1s;
+}
+.qb-suggest-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.qb-remove {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-muted);
+  border-radius: var(--r-sm);
+  transition: all 0.1s;
+}
+.qb-remove:hover { color: var(--error); background: var(--error-dim); }
+
+.qb-add {
+  align-self: flex-start;
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: var(--r-sm);
+  transition: color 0.15s;
+}
+.qb-add:hover { color: var(--amber); }

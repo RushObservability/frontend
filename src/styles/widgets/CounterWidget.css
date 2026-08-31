@@ -1,0 +1,35 @@
+.counter-widget {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  min-height: 72px;
+  gap: 7px;
+  padding: var(--sp-2);
+  text-align: left;
+}
+.counter-value {
+  color: var(--text-primary);
+  font-size: clamp(28px, 4cqw, 40px);
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -.045em;
+  font-variant-numeric: tabular-nums;
+}
+.counter-unit {
+  margin-left: 5px;
+  color: var(--text-muted);
+  font-size: .32em;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.counter-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.counter-widget--positive .counter-value { color: var(--ok); }
+.counter-widget--warning .counter-value { color: var(--warning); }
+.counter-widget--danger .counter-value { color: var(--error); }

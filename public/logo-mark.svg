@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Rush Observability — Logomark -->
+  <!-- Diamond with internal signal pulse -->
+  <defs>
+    <linearGradient id="diamond-grad" x1="32" y1="4" x2="32" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="inner-grad" x1="32" y1="18" x2="32" y2="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0d0f17"/>
+      <stop offset="100%" stop-color="#08090f"/>
+    </linearGradient>
+  </defs>
+  <!-- Outer diamond -->
+  <path d="M32 4 L58 32 L32 60 L6 32 Z" fill="url(#diamond-grad)"/>
+  <!-- Inner cutout diamond -->
+  <path d="M32 14 L48 32 L32 50 L16 32 Z" fill="url(#inner-grad)"/>
+  <!-- Signal pulse line -->
+  <polyline points="20,32 26,32 28,24 30,40 32,28 34,36 36,32 38,32 44,32"
+    stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

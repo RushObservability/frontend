@@ -1,0 +1,77 @@
+.table-widget {
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  overscroll-behavior-inline: contain;
+  container-type: inline-size;
+}
+.tw-row {
+  display: grid;
+  width: 100%;
+  min-width: max-content;
+  font-size: 11px;
+}
+.tw-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-surface);
+  box-shadow: 0 1px 0 var(--border-subtle);
+}
+.tw-head > div {
+  text-align: left;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  border-bottom: 0;
+  white-space: nowrap;
+}
+.tw-head > div[title]:not([title='']) { cursor: help; }
+.tw-cell {
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tw-cell-mono { font-family: var(--font-mono); }
+.tw-head > .tw-col-http_method,
+.tw-col-http_method { text-align: center; }
+.tw-head > .tw-col-http_status_code,
+.tw-head > .tw-col-duration_ns,
+.tw-head > .tw-col-count,
+.tw-col-http_status_code,
+.tw-col-duration_ns,
+.tw-col-count { text-align: right; }
+.tw-align-right { text-align: right; font-variant-numeric: tabular-nums; }
+.tw-align-center { text-align: center; }
+.tw-col-http_path,
+.tw-col-error_message,
+.tw-col-message { padding-inline: var(--sp-3); }
+.tw-col-query,
+.tw-col-waiting_query,
+.tw-col-blocking_query,
+.tw-col-evidence,
+.tw-col-next_step { padding-inline: var(--sp-3); }
+.tw-col-severity { font-weight: 700; text-transform: capitalize; }
+.tw-row--warning .tw-col-severity { color: var(--warning, #d97706); }
+.tw-row--danger .tw-col-severity,
+.tw-row--critical .tw-col-severity { color: var(--error, #dc2626); }
+.tw-row--info .tw-col-severity { color: var(--text-tertiary); }
+.tw-row:hover .tw-cell {
+  background: var(--bg-hover);
+}
+
+@container (max-width: 560px) {
+  .table-widget--trace .tw-row {
+    grid-template-columns: 82px 72px 48px minmax(96px, 1fr) 44px 58px 54px !important;
+  }
+  .table-widget--trace .tw-head > div,
+  .table-widget--trace .tw-cell { padding-inline: 6px; }
+  .table-widget--trace .tw-col-http_path { padding-inline: var(--sp-2); }
+}

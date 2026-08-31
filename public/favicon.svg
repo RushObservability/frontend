@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Rush Observability — Favicon (matches logo-mark) -->
+  <defs>
+    <linearGradient id="dg" x1="16" y1="2" x2="16" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="ig" x1="16" y1="9" x2="16" y2="23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0d0f17"/>
+      <stop offset="100%" stop-color="#08090f"/>
+    </linearGradient>
+  </defs>
+  <!-- Outer diamond -->
+  <path d="M16 2 L29 16 L16 30 L3 16 Z" fill="url(#dg)"/>
+  <!-- Inner cutout diamond -->
+  <path d="M16 7 L24 16 L16 25 L8 16 Z" fill="url(#ig)"/>
+  <!-- Signal pulse line -->
+  <polyline points="10,16 13,16 14,12 15,20 16,14 17,18 18,16 19,16 22,16"
+    stroke="#3b82f6" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

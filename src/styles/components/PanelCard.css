@@ -1,0 +1,281 @@
+/* Shared Rush panel shell. Complete visualization panels compose this component
+   with a data view, while dashboard-only drag/edit behavior stays outside it. */
+.panel-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  container-type: inline-size;
+  isolation: isolate;
+  overflow: visible;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-lg);
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.panel-card:hover {
+  z-index: 20;
+  border-color: var(--border-strong);
+}
+
+.panel-card--warning { border-color: color-mix(in srgb, var(--warning) 34%, var(--border-subtle)); }
+.panel-card--danger { border-color: color-mix(in srgb, var(--error) 34%, var(--border-subtle)); }
+
+.panel-header {
+  display: flex;
+  min-height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.panel-header-left,
+.panel-header-right {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.panel-header-left { gap: var(--sp-1); }
+.panel-header-right {
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.panel-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-info {
+  position: relative;
+  display: inline-grid;
+  width: 20px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  cursor: help;
+  transition: color 140ms ease, background 140ms ease;
+}
+
+.panel-info:hover,
+.panel-info:focus-visible {
+  color: var(--amber);
+  background: var(--amber-dim);
+}
+
+.panel-info svg { display: block; }
+
+.panel-info-tip {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 30;
+  display: none;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 48px));
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .2);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: normal;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+}
+
+.panel-info:hover .panel-info-tip,
+.panel-info:focus-visible .panel-info-tip { display: block; }
+
+.panel-range {
+  padding: 2px 6px;
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 2px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.panel-summary {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+
+.panel-body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: var(--sp-3);
+}
+
+.panel-card--table .panel-body { padding: 0; }
+.panel-card--stat .panel-body { justify-content: center; }
+
+.panel-legend {
+  flex: 0 0 auto;
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+
+.panel-footer {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0 var(--sp-3);
+  padding: 7px 0 8px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.panel-caption {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-source {
+  flex: 0 0 auto;
+  font-size: 7px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.panel-loading {
+  display: grid;
+  min-height: 96px;
+  align-content: center;
+  gap: 10px;
+  padding: var(--sp-2);
+}
+
+.panel-loading-line,
+.panel-loading-chart {
+  display: block;
+  overflow: hidden;
+  background: var(--bg-raised);
+  border-radius: 2px;
+}
+
+.panel-loading-line { width: 54%; height: 8px; }
+.panel-loading-line--short { width: 28%; }
+.panel-loading-chart { width: 100%; height: 48px; }
+
+.panel-loading-line::after,
+.panel-loading-chart::after {
+  display: block;
+  width: 42%;
+  height: 100%;
+  content: '';
+  background: linear-gradient(90deg, transparent, var(--amber-dim), transparent);
+  animation: panel-shimmer 1.35s ease-in-out infinite;
+}
+
+@keyframes panel-shimmer {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(340%); }
+}
+
+.panel-error,
+.panel-empty {
+  display: grid;
+  min-height: 90px;
+  align-content: center;
+  justify-items: start;
+  gap: 5px;
+  padding: var(--sp-3);
+}
+
+.panel-error { grid-template-columns: auto minmax(0, 1fr); }
+
+.panel-error-icon,
+.panel-empty-mark {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  color: var(--error);
+  border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+  border-radius: 50%;
+  font: 700 11px var(--font-mono);
+}
+
+.panel-empty-mark {
+  color: var(--text-muted);
+  border-color: var(--border-default);
+}
+
+.panel-error-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.panel-error-copy strong,
+.panel-empty strong { font-size: 11px; font-weight: 650; }
+
+.panel-error-msg,
+.panel-empty > span:last-child {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@container (max-width: 360px) {
+  .panel-header { padding-inline: 10px; }
+  .panel-body { padding: var(--sp-2); }
+  .panel-footer { margin-inline: var(--sp-2); }
+  .panel-caption { white-space: normal; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-loading-line::after,
+  .panel-loading-chart::after { animation: none; }
+}
