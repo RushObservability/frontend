@@ -1836,3 +1836,65 @@ export interface KubernetesAccessDetailResponse {
   event: KubernetesAccessEvent
   session?: KubernetesSessionArtifact | null
 }
+
+export type LlmProviderKind = 'openai' | 'anthropic' | 'openrouter' | 'bedrock' | 'openai_compatible'
+
+export interface LlmProviderRouting {
+  allowed_providers: string[]
+  provider_order: string[]
+  allow_fallbacks: boolean
+  zero_data_retention: boolean
+  data_collection: 'allow' | 'deny'
+  region: string
+}
+
+export interface LlmProvider {
+  id: string
+  name: string
+  kind: LlmProviderKind
+  base_url: string
+  key_configured: boolean
+  key_hint: string
+  routing: LlmProviderRouting
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface LlmProviderInput {
+  name: string
+  kind: LlmProviderKind
+  base_url: string
+  api_key: string
+  routing: LlmProviderRouting
+  enabled: boolean
+}
+
+export interface LlmModel {
+  id: string
+  tenant_id: string
+  provider_id: string
+  name: string
+  model_id: string
+  reasoning: string[]
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface LlmModelInput {
+  provider_id: string
+  name: string
+  model_id: string
+  reasoning: string[]
+  enabled: boolean
+}
+
+export interface SreAgentModelOption {
+  id: string
+  name: string
+  model_id: string
+  provider: string
+  provider_kind: LlmProviderKind
+  reasoning: string[]
+}

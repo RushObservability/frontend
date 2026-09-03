@@ -1,5 +1,5 @@
 export type SettingsTabId = 'keys' | 'auth' | 'links' | 'integrations' | 'agent' | 'tenants' | 'retention' | 'groups' | 'users' | 'alerting' | 'general' | 'performance' | 'firewall' | 'license' | 'config'
-export type AgentSubtabId = 'access' | 'models' | 'limits' | 'skills'
+export type AgentSubtabId = 'access' | 'providers' | 'models' | 'limits' | 'skills'
 
 export interface SettingsTabDef {
   id: SettingsTabId
@@ -53,4 +53,3 @@ export const SETTINGS_INTEGRATIONS: SettingsIntegrationNavItem[] = [
   { key: 'kubernetes-logging', label: 'Kubernetes logging', desc: 'Record kubectl activity and manage authenticated clients.' },
   { key: 'cloudwatch', label: 'CloudWatch Logs', desc: 'Ingest AWS CloudWatch Logs through Kinesis Data Firehose.' },
 ]
-

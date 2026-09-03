@@ -681,8 +681,6 @@ async function saveSetup() {
   align-items: center;
   justify-content: center;
   background: var(--bg-root);
-  background-image: radial-gradient(circle, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
-  background-size: 24px 24px;
 }
 .sso-setup-card {
   width: 100%;
