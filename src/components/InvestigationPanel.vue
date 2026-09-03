@@ -742,11 +742,9 @@ onMounted(() => {
                 <div class="stream-setup-body">
                   <div class="stream-setup-title">The SRE agent isn't connected to an LLM yet</div>
                   <div class="stream-setup-text">
-                    Investigations need a model to reason with. An admin can enable them by setting
-                    <code class="mono">OPENAI_API_KEY</code> on the sre-agent service — optionally
-                    <code class="mono">OPENAI_BASE_URL</code> for an OpenAI-compatible provider —
-                    and restarting it. Choose the model in SRE Agent settings. Everything else in
-                    Rush works without it.
+                    Investigations need a model to reason with. An admin can connect a provider and
+                    add a model under <strong>Settings → AI Agent</strong>. No SRE-agent restart is
+                    required. Everything else in Rush works without it.
                   </div>
                 </div>
               </div>

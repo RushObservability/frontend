@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useApi } from '../composables/useApi'
-import type { InvestigationSession } from '../types'
+import type { InvestigationSession, SreAgentModelOption } from '../types'
 import InvestigationPanel from '../components/InvestigationPanel.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 
@@ -13,7 +13,7 @@ const started = ref(false)
 // ── Model / thinking pickers (admin-defined policy) ──
 // The user picks a model + thinking level per investigation from the allowed
 // menu. Hidden entirely when no policy is configured (agent uses its default).
-const agentModels = ref<Array<{ id: string; reasoning: string[] }>>([])
+const agentModels = ref<SreAgentModelOption[]>([])
 const selectedModel = ref('')
 const selectedEffort = ref('')   // '' = agent default
 const selectedModelReasoning = computed(() =>
@@ -283,7 +283,7 @@ function onHistoryRowClick(row: Record<string, unknown>) {
                   <span class="sre-hint">Run with <kbd>⌘↵</kbd></span>
                   <template v-if="showModelPicker">
                     <select v-model="selectedModel" class="sre-picker" title="Model">
-                      <option v-for="m in agentModels" :key="m.id" :value="m.id">{{ m.id }}</option>
+                      <option v-for="m in agentModels" :key="m.id" :value="m.id">{{ m.name }} · {{ m.provider }}</option>
                     </select>
                     <select
                       v-if="selectedModelReasoning.length"
