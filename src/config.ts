@@ -18,6 +18,14 @@ const browserWindow = typeof window === 'undefined' ? undefined : window
 const runtime = (browserWindow as unknown as { __RUSH_CONFIG__?: RushRuntimeConfig } | undefined)
   ?.__RUSH_CONFIG__
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase()
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '[::1]'
+    || normalized === '::1'
+}
+
 /** Validate and canonicalize an API URL to an exact browser origin. */
 export function normalizeApiOrigin(raw: string, uiOrigin: string, production: boolean): string {
   let parsed: URL
@@ -33,7 +41,11 @@ export function normalizeApiOrigin(raw: string, uiOrigin: string, production: bo
     throw new Error('Rush API URL must be an origin without credentials, path, query, or fragment')
   }
   const ui = new URL(uiOrigin)
-  if (production && (parsed.protocol !== 'https:' || ui.protocol !== parsed.protocol)) {
+  const isLoopbackHttp = parsed.protocol === 'http:'
+    && ui.protocol === 'http:'
+    && isLoopbackHostname(parsed.hostname)
+    && isLoopbackHostname(ui.hostname)
+  if (production && !isLoopbackHttp && (parsed.protocol !== 'https:' || ui.protocol !== parsed.protocol)) {
     throw new Error('Rush API URL must use the frontend HTTPS scheme in production')
   }
   return parsed.origin
