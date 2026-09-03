@@ -87,6 +87,11 @@ import type {
   IdpGroupMapping,
   SsoStatus,
   SetupToken,
+  LlmProvider,
+  LlmProviderInput,
+  LlmModel,
+  LlmModelInput,
+  SreAgentModelOption,
   SetupTokenValidation,
   InvestigationSession,
   InvestigationTurn,
@@ -1761,8 +1766,56 @@ export function useApi() {
 
   // User-facing model/thinking menu: the admin-defined policy. Any authenticated
   // user can read it to populate the investigation pickers (not admin-only).
-  async function getSreAgentOptions(): Promise<{ models: Array<{ id: string; reasoning: string[] }>; default_model: string }> {
+  async function getSreAgentOptions(): Promise<{ models: SreAgentModelOption[]; default_model: string }> {
     return await request('/sre-agent/options')
+  }
+
+  async function listLlmProviders(): Promise<{ providers: LlmProvider[] }> {
+    return await request('/settings/llm/providers')
+  }
+
+  async function createLlmProvider(input: LlmProviderInput): Promise<LlmProvider> {
+    return await request('/settings/llm/providers', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  }
+
+  async function updateLlmProvider(id: string, input: LlmProviderInput): Promise<LlmProvider> {
+    return await request(`/settings/llm/providers/${encodePathSegment(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    })
+  }
+
+  async function deleteLlmProvider(id: string): Promise<void> {
+    await request(`/settings/llm/providers/${encodePathSegment(id)}`, { method: 'DELETE' })
+  }
+
+  async function discoverLlmModels(id: string): Promise<{ models: string[] }> {
+    return await request(`/settings/llm/providers/${encodePathSegment(id)}/models`)
+  }
+
+  async function listLlmModels(): Promise<{ models: LlmModel[] }> {
+    return await request('/settings/llm/models')
+  }
+
+  async function createLlmModel(input: LlmModelInput): Promise<LlmModel> {
+    return await request('/settings/llm/models', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  }
+
+  async function updateLlmModel(id: string, input: LlmModelInput): Promise<LlmModel> {
+    return await request(`/settings/llm/models/${encodePathSegment(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    })
+  }
+
+  async function deleteLlmModel(id: string): Promise<void> {
+    await request(`/settings/llm/models/${encodePathSegment(id)}`, { method: 'DELETE' })
   }
 
   async function setSreAgentEnabled(enabled: boolean): Promise<{ enabled: boolean }> {
@@ -2010,7 +2063,7 @@ export function useApi() {
     listInvestigationSessions, getInvestigationSession, deleteInvestigationSession, listInvestigationTemplates,
     bubbleUp,
     listMonitors, getMonitor, createMonitor, updateMonitor, deleteMonitor, listMonitorEvents, previewMonitor, muteMonitor, unmuteMonitor, monitorAutocomplete, monitorSuggest,
-    getFeatures, getRuntimeConfig, getKubernetesLoggingSettings, setKubernetesLoggingSettings, revokeKubernetesClient, revokeAllKubernetesClients, createKubernetesRbacGrant, updateKubernetesRbacGrant, deleteKubernetesRbacGrant, setExportMaxRows, getQueryLimits, setQueryLimits, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, setSreAgentTenantAccess, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
+    getFeatures, getRuntimeConfig, getKubernetesLoggingSettings, setKubernetesLoggingSettings, revokeKubernetesClient, revokeAllKubernetesClients, createKubernetesRbacGrant, updateKubernetesRbacGrant, deleteKubernetesRbacGrant, setExportMaxRows, getQueryLimits, setQueryLimits, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, setSreAgentTenantAccess, listLlmProviders, createLlmProvider, updateLlmProvider, deleteLlmProvider, discoverLlmModels, listLlmModels, createLlmModel, updateLlmModel, deleteLlmModel, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
     listMetricFirewall, createMetricFirewall, updateMetricFirewall, deleteMetricFirewall,
   }
 }

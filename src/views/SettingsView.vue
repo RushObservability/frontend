@@ -6,12 +6,13 @@ import { useAuth } from '../composables/useAuth'
 import { useFeatures } from '../composables/useFeatures'
 import { useTenant } from '../composables/useTenant'
 import { apiBaseUrl } from '../config'
-import type { ApiKey, ApiKeyCreated, ServiceLink, CustomSkill, Group, Tenant, TenantRetention, TenantSignals, GlobalRetention, User, AuthSession, SsoProvider, IdpGroupMapping, SetupToken, NotificationChannel, MetricFirewallRule, MetricFirewallInput, LicenseStatus, QueryLimitsConfig, QueryWorkloadBudget, QueryWorkloadClass, KubernetesClientSession, KubernetesGatewayCluster, KubernetesLoggingSettings, KubernetesRbacGrant, KubernetesRbacGrantInput, KubernetesRbacRoleKind, KubernetesRbacScope, KubernetesRbacClusterMatch } from '../types'
+import type { ApiKey, ApiKeyCreated, ServiceLink, CustomSkill, Group, Tenant, TenantRetention, TenantSignals, GlobalRetention, User, AuthSession, SsoProvider, IdpGroupMapping, SetupToken, NotificationChannel, MetricFirewallRule, MetricFirewallInput, LicenseStatus, QueryLimitsConfig, QueryWorkloadBudget, QueryWorkloadClass, KubernetesClientSession, KubernetesGatewayCluster, KubernetesLoggingSettings, KubernetesRbacGrant, KubernetesRbacGrantInput, KubernetesRbacRoleKind, KubernetesRbacScope, KubernetesRbacClusterMatch, LlmProvider, LlmProviderInput, LlmProviderKind, LlmModel, LlmModelInput } from '../types'
 import SkillEditDialog from '../components/SkillEditDialog.vue'
 import ChannelForm from '../components/ChannelForm.vue'
 import RegexHelp from '../components/RegexHelp.vue'
 import SettingsNavigation from '../components/SettingsNavigation.vue'
 import EmptyState from '../components/EmptyState.vue'
+import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 import { getAddon } from '../integrations/catalog'
 import { isAddonEnabled, setAddonEnabled, addonNamespace, saveAddonNamespace, namespaceValid } from '../composables/useIntegrationEnabled'
 import {
@@ -513,8 +514,9 @@ const activeTab = ref<SettingsTabId>('general')
 const activeAgentSubtab = ref<AgentSubtabId>(currentUser.value?.role === 'admin' ? 'access' : 'skills')
 const agentSubtabs: Array<{ id: AgentSubtabId; label: string; eyebrow: string; adminOnly: boolean }> = [
   { id: 'access', label: 'Tenant access', eyebrow: 'Scope', adminOnly: true },
+  { id: 'providers', label: 'Providers', eyebrow: 'Credentials', adminOnly: true },
   { id: 'models', label: 'Models', eyebrow: 'Policy', adminOnly: true },
-  { id: 'limits', label: 'Investigation limits', eyebrow: 'Budget', adminOnly: true },
+  { id: 'limits', label: 'Investigation budget', eyebrow: 'Budget', adminOnly: true },
   { id: 'skills', label: 'Custom skills', eyebrow: 'Playbooks', adminOnly: false },
 ]
 const activeTabDef = computed(() => tabs.find(t => t.id === activeTab.value) ?? tabs[0]!)
@@ -569,7 +571,8 @@ function agentSubtabMeta(id: AgentSubtabId): string {
       ? `${enabledAgentTenants.value.length} enabled`
       : `${agentAllowedTenants.value.length} selected`
   }
-  if (id === 'models') return agentAllowedIds.value.length ? `${agentAllowedIds.value.length} allowed` : 'Default only'
+  if (id === 'providers') return llmProviders.value.length ? `${llmProviders.value.length} connected` : 'Not configured'
+  if (id === 'models') return llmModels.value.length ? `${llmModels.value.length} available` : 'No models'
   if (id === 'limits') return agentMaxToolSteps.value ? `${agentMaxToolSteps.value} tool calls` : 'Cost controls'
   return customSkills.value.length ? `${customSkills.value.length} custom` : 'Built-in only'
 }
@@ -1392,7 +1395,8 @@ async function confirmDelete() {
     else if (type === 'user') await removeUser(id)
     else if (type === 'channel') await removeChannel(id)
     else if (type === 'firewall rule') await removeFirewallRule(id)
-    else if (type === 'model') removeModel(id)
+    else if (type === 'LLM provider') await removeLlmProvider(id)
+    else if (type === 'LLM model') await removeLlmModel(id)
   } finally {
     deleteModal.value = null
   }
@@ -2222,6 +2226,305 @@ async function toggleUserEnabled(id: string, enabled: boolean) {
 }
 
 // ── SRE agent enable + investigation budget ──
+const llmProviders = ref<LlmProvider[]>([])
+const llmModels = ref<LlmModel[]>([])
+const llmConfigLoading = ref(false)
+const llmConfigError = ref('')
+const showLlmProviderForm = ref(false)
+const editingLlmProviderId = ref<string | null>(null)
+const llmProviderSaving = ref(false)
+const llmProviderName = ref('')
+const llmProviderKind = ref<LlmProviderKind>('openai')
+const llmProviderBaseUrl = ref('')
+const llmProviderApiKey = ref('')
+const llmProviderRegion = ref('us-east-1')
+const llmProviderAllowed = ref('')
+const llmProviderOrder = ref('')
+const llmProviderFallbacks = ref(true)
+const llmProviderZdr = ref(false)
+const llmProviderDataCollection = ref<'allow' | 'deny'>('deny')
+const llmProviderEnabled = ref(true)
+const showLlmModelForm = ref(false)
+const editingLlmModelId = ref<string | null>(null)
+const llmModelSaving = ref(false)
+const llmModelProviderId = ref('')
+const llmModelName = ref('')
+const llmModelId = ref('')
+const llmModelReasoning = ref<string[]>([])
+const llmModelEnabled = ref(true)
+const llmDiscoveredModels = ref<string[]>([])
+const llmDiscovering = ref(false)
+let llmDiscoveryRequestId = 0
+
+const providerKindLabels: Record<LlmProviderKind, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  openrouter: 'OpenRouter',
+  bedrock: 'AWS Bedrock',
+  openai_compatible: 'OpenAI-compatible',
+}
+
+const llmProviderById = computed(() => new Map(llmProviders.value.map(provider => [provider.id, provider])))
+const enabledLlmProviders = computed(() => llmProviders.value.filter(provider => provider.enabled))
+const llmModelIdPlaceholder = computed(() => {
+  const kind = llmProviderById.value.get(llmModelProviderId.value)?.kind
+  const examples: Record<LlmProviderKind, string> = {
+    openai: 'gpt-5',
+    anthropic: 'claude-sonnet-4-6',
+    openrouter: 'openai/gpt-5',
+    bedrock: 'us.anthropic.claude-sonnet-4-6-v1:0',
+    openai_compatible: 'model-id',
+  }
+  return kind ? examples[kind] : 'model-id'
+})
+const llmProviderColumns: DataTableColumn[] = [
+  { key: 'connection', label: 'Connection', headerClass: 'llm-primary-column', cellClass: 'llm-primary-column' },
+  { key: 'provider', label: 'Provider' },
+  { key: 'credential', label: 'Credential' },
+  { key: 'status', label: 'Status' },
+  { key: 'actions', label: 'Actions', align: 'right', headerClass: 'llm-actions-column', cellClass: 'llm-actions-column' },
+]
+const llmModelColumns: DataTableColumn[] = [
+  { key: 'model', label: 'Model', headerClass: 'llm-primary-column', cellClass: 'llm-primary-column' },
+  { key: 'provider', label: 'Provider' },
+  { key: 'effort', label: 'Effort' },
+  { key: 'status', label: 'Status' },
+  { key: 'actions', label: 'Actions', align: 'right', headerClass: 'llm-actions-column', cellClass: 'llm-actions-column' },
+]
+const llmProviderTableRows = computed<Record<string, unknown>[]>(() => llmProviders.value.map(provider => ({ ...provider })))
+const llmModelTableRows = computed<Record<string, unknown>[]>(() => llmModels.value.map(model => ({ ...model })))
+
+function llmProviderTableRow(row: Record<string, unknown>): LlmProvider {
+  return row as unknown as LlmProvider
+}
+
+function llmModelTableRow(row: Record<string, unknown>): LlmModel {
+  return row as unknown as LlmModel
+}
+
+function splitCsv(value: string): string[] {
+  return [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))]
+}
+
+function resetLlmProviderForm() {
+  editingLlmProviderId.value = null
+  llmProviderName.value = ''
+  llmProviderKind.value = 'openai'
+  llmProviderBaseUrl.value = ''
+  llmProviderApiKey.value = ''
+  llmProviderRegion.value = 'us-east-1'
+  llmProviderAllowed.value = ''
+  llmProviderOrder.value = ''
+  llmProviderFallbacks.value = true
+  llmProviderZdr.value = false
+  llmProviderDataCollection.value = 'deny'
+  llmProviderEnabled.value = true
+}
+
+function openLlmProviderForm(provider?: LlmProvider) {
+  resetLlmProviderForm()
+  if (provider) {
+    editingLlmProviderId.value = provider.id
+    llmProviderName.value = provider.name
+    llmProviderKind.value = provider.kind
+    llmProviderBaseUrl.value = provider.base_url
+    llmProviderRegion.value = provider.routing.region || 'us-east-1'
+    llmProviderAllowed.value = provider.routing.allowed_providers.join(', ')
+    llmProviderOrder.value = provider.routing.provider_order.join(', ')
+    llmProviderFallbacks.value = provider.routing.allow_fallbacks
+    llmProviderZdr.value = provider.routing.zero_data_retention
+    llmProviderDataCollection.value = provider.routing.data_collection
+    llmProviderEnabled.value = provider.enabled
+  }
+  showLlmProviderForm.value = true
+}
+
+function closeLlmProviderForm() {
+  showLlmProviderForm.value = false
+  resetLlmProviderForm()
+}
+
+async function saveLlmProvider() {
+  llmConfigError.value = ''
+  if (!llmProviderName.value.trim()) {
+    llmConfigError.value = 'Enter a provider name.'
+    return
+  }
+  if (!editingLlmProviderId.value && !llmProviderApiKey.value.trim()) {
+    llmConfigError.value = 'Enter the provider API key.'
+    return
+  }
+  const input: LlmProviderInput = {
+    name: llmProviderName.value.trim(),
+    kind: llmProviderKind.value,
+    base_url: llmProviderBaseUrl.value.trim(),
+    api_key: llmProviderApiKey.value.trim(),
+    routing: {
+      allowed_providers: splitCsv(llmProviderAllowed.value),
+      provider_order: splitCsv(llmProviderOrder.value),
+      allow_fallbacks: llmProviderFallbacks.value,
+      zero_data_retention: llmProviderZdr.value,
+      data_collection: llmProviderDataCollection.value,
+      region: llmProviderRegion.value.trim(),
+    },
+    enabled: llmProviderEnabled.value,
+  }
+  llmProviderSaving.value = true
+  try {
+    if (editingLlmProviderId.value) await api.updateLlmProvider(editingLlmProviderId.value, input)
+    else await api.createLlmProvider(input)
+    await loadLlmConfig()
+    closeLlmProviderForm()
+  } catch (e: any) {
+    llmConfigError.value = e.message || 'Failed to save provider.'
+  } finally {
+    llmProviderSaving.value = false
+  }
+}
+
+async function removeLlmProvider(id: string) {
+  try {
+    await api.deleteLlmProvider(id)
+    await loadLlmConfig()
+  } catch (e: any) {
+    llmConfigError.value = e.message || 'Failed to remove provider.'
+  }
+}
+
+function resetLlmModelForm() {
+  editingLlmModelId.value = null
+  llmModelProviderId.value = enabledLlmProviders.value[0]?.id || ''
+  llmModelName.value = ''
+  llmModelId.value = ''
+  llmModelReasoning.value = []
+  llmModelEnabled.value = true
+  llmDiscoveredModels.value = []
+}
+
+function openLlmModelForm(model?: LlmModel) {
+  resetLlmModelForm()
+  if (model) {
+    editingLlmModelId.value = model.id
+    llmModelProviderId.value = model.provider_id
+    llmModelName.value = model.name
+    llmModelId.value = model.model_id
+    llmModelReasoning.value = [...model.reasoning]
+    llmModelEnabled.value = model.enabled
+  }
+  showLlmModelForm.value = true
+  void discoverModels()
+}
+
+function closeLlmModelForm() {
+  showLlmModelForm.value = false
+  resetLlmModelForm()
+}
+
+function toggleLlmModelReasoning(level: string) {
+  llmModelReasoning.value = llmModelReasoning.value.includes(level)
+    ? llmModelReasoning.value.filter(item => item !== level)
+    : [...llmModelReasoning.value, level]
+}
+
+async function discoverModels() {
+  const providerId = llmModelProviderId.value
+  const requestId = ++llmDiscoveryRequestId
+  if (!providerId) {
+    llmDiscoveredModels.value = []
+    llmDiscovering.value = false
+    return
+  }
+  llmDiscoveredModels.value = []
+  llmDiscovering.value = true
+  llmConfigError.value = ''
+  try {
+    const result = await api.discoverLlmModels(providerId)
+    if (requestId === llmDiscoveryRequestId && providerId === llmModelProviderId.value) {
+      llmDiscoveredModels.value = result.models || []
+    }
+  } catch (e: any) {
+    if (requestId === llmDiscoveryRequestId && providerId === llmModelProviderId.value) {
+      llmConfigError.value = e.message || 'Model discovery is not available for this provider.'
+    }
+  } finally {
+    if (requestId === llmDiscoveryRequestId) llmDiscovering.value = false
+  }
+}
+
+async function saveLlmModel() {
+  llmConfigError.value = ''
+  const modelId = llmModelId.value.trim()
+  if (!llmModelProviderId.value || !modelId) {
+    llmConfigError.value = 'Choose a provider and enter a provider model ID.'
+    return
+  }
+  const input: LlmModelInput = {
+    provider_id: llmModelProviderId.value,
+    name: llmModelName.value.trim() || modelId,
+    model_id: modelId,
+    reasoning: llmModelReasoning.value,
+    enabled: llmModelEnabled.value,
+  }
+  llmModelSaving.value = true
+  try {
+    const saved = editingLlmModelId.value
+      ? await api.updateLlmModel(editingLlmModelId.value, input)
+      : await api.createLlmModel(input)
+    await loadLlmConfig()
+    if (!agentModel.value) {
+      agentModel.value = saved.id
+      await saveConfiguredDefault()
+    }
+    closeLlmModelForm()
+  } catch (e: any) {
+    llmConfigError.value = e.message || 'Failed to save model.'
+  } finally {
+    llmModelSaving.value = false
+  }
+}
+
+async function removeLlmModel(id: string) {
+  try {
+    await api.deleteLlmModel(id)
+    await loadLlmConfig()
+    if (agentModel.value === id) {
+      agentModel.value = llmModels.value.find(model => model.enabled)?.id || ''
+      await saveConfiguredDefault()
+    }
+  } catch (e: any) {
+    llmConfigError.value = e.message || 'Failed to remove model.'
+  }
+}
+
+async function saveConfiguredDefault() {
+  const steps = parseInt(agentMaxToolSteps.value, 10) || 40
+  const calls = parseInt(agentMaxLlmCalls.value, 10) || 55
+  await api.setSreAgentSettings(steps, calls, agentModel.value)
+}
+
+async function loadLlmConfig() {
+  if (!isAdmin.value) return
+  llmConfigLoading.value = true
+  llmConfigError.value = ''
+  try {
+    const [providers, models] = await Promise.all([
+      api.listLlmProviders(),
+      api.listLlmModels(),
+    ])
+    llmProviders.value = providers.providers || []
+    llmModels.value = models.models || []
+    const selectedProviderIsAvailable = enabledLlmProviders.value.some(provider => provider.id === llmModelProviderId.value)
+    if (!selectedProviderIsAvailable) {
+      llmModelProviderId.value = enabledLlmProviders.value[0]?.id || ''
+    }
+    await discoverModels()
+  } catch (e: any) {
+    llmConfigError.value = e.message || 'Failed to load LLM configuration.'
+  } finally {
+    llmConfigLoading.value = false
+  }
+}
+
 const agentBudgetLoaded = ref(false)
 const agentEnabled = ref(false)
 const agentToggleSaving = ref(false)
@@ -2231,107 +2534,8 @@ const agentTenantSaving = ref(false)
 const agentTenantSaved = ref(false)
 const agentMaxToolSteps = ref<string>('')
 const agentMaxLlmCalls = ref<string>('')
-// Two-tier model/thinking policy (admin-defined). `agentModel` is the DEFAULT
-// model (the one used when a user/button doesn't pick); `agentAllowedModels` is
-// the menu of models users may pick + the per-model allowed thinking levels.
+// Stored model id used as the default on the investigation start screen.
 const agentModel = ref<string>('')
-const agentProviderModels = ref<string[]>([])     // full provider model list (autocomplete pool)
-const agentReasoningLevels = ref<string[]>([])    // minimal/low/medium/high
-// Allowed-models policy keyed by id: id → allowed thinking levels.
-const agentAllowed = ref<Record<string, string[]>>({})
-// Autocomplete combobox state for adding allowed models.
-const agentModelInput = ref<string>('')
-const showModelMenu = ref<boolean>(false)
-
-// Does a model id accept a thinking level? (gpt-5 / o-series.) Mirrors the server.
-function modelIsReasoning(id: string): boolean {
-  const m = id.trim().toLowerCase()
-  return m.startsWith('gpt-5') || m.startsWith('o1') || m.startsWith('o3') || m.startsWith('o4')
-}
-// The allowed ids, in the order they were added.
-const agentAllowedIds = computed(() => Object.keys(agentAllowed.value))
-// Provider models matching what's typed, excluding already-added ones.
-const agentModelMatches = computed(() => {
-  const q = agentModelInput.value.trim().toLowerCase()
-  return agentProviderModels.value
-    .filter(id => !(id in agentAllowed.value))
-    .filter(id => !q || id.toLowerCase().includes(q))
-    .slice(0, 8)
-})
-
-// Add a model to the allowlist. Reasoning models default to ALL thinking levels.
-function addModel(id: string) {
-  const v = id.trim()
-  if (!v || v in agentAllowed.value) { agentModelInput.value = ''; return }
-  agentAllowed.value = {
-    ...agentAllowed.value,
-    [v]: modelIsReasoning(v) ? [...agentReasoningLevels.value] : [],
-  }
-  if (!agentModel.value) agentModel.value = v   // first added becomes the default
-  agentModelInput.value = ''
-  showModelMenu.value = true   // keep open so several can be added in a row
-  schedulePolicySave()
-}
-function removeModel(id: string) {
-  const next = { ...agentAllowed.value }
-  delete next[id]
-  agentAllowed.value = next
-  if (agentModel.value === id) agentModel.value = ''
-  schedulePolicySave()
-}
-// Tab / Enter completes-and-adds the best match (or the typed value); Esc clears.
-function onModelKeydown(e: KeyboardEvent) {
-  if (e.key === 'Tab' || e.key === 'Enter') {
-    const top = agentModelMatches.value[0]
-    const v = agentModelInput.value.trim()
-    const pick = top && (!v || top.toLowerCase().startsWith(v.toLowerCase())) ? top : (v || top)
-    if (pick) { e.preventDefault(); addModel(pick) }
-  } else if (e.key === 'Escape') {
-    agentModelInput.value = ''
-    showModelMenu.value = false
-  }
-}
-// Delay hiding so a mousedown on a menu item still registers.
-function onModelBlur() {
-  setTimeout(() => { showModelMenu.value = false }, 150)
-}
-function toggleAllowedLevel(id: string, level: string) {
-  const cur = agentAllowed.value[id] || []
-  const next = cur.includes(level) ? cur.filter(l => l !== level) : [...cur, level]
-  agentAllowed.value = { ...agentAllowed.value, [id]: next }
-  schedulePolicySave()
-}
-
-// Auto-save the allowed-models policy (debounced) whenever it changes, so the
-// admin never has to hit a Save button for the model menu. Reuses the current
-// budget values (which the server clamps) and the chosen default model.
-const agentPolicySaving = ref(false)
-const agentPolicySaved = ref(false)
-let policySaveTimer: ReturnType<typeof setTimeout> | undefined
-function schedulePolicySave() {
-  if (!agentBudgetLoaded.value) return   // skip during initial load
-  if (policySaveTimer) clearTimeout(policySaveTimer)
-  policySaveTimer = setTimeout(savePolicy, 400)
-}
-async function savePolicy() {
-  const steps = parseInt(agentMaxToolSteps.value, 10) || (agentBudgetDefaults.value?.max_tool_steps ?? 40)
-  const calls = parseInt(agentMaxLlmCalls.value, 10) || (agentBudgetDefaults.value?.max_llm_calls ?? 55)
-  const allowedModels = agentAllowedIds.value.map(id => ({
-    id,
-    reasoning: modelIsReasoning(id) ? (agentAllowed.value[id] || []) : [],
-  }))
-  agentPolicySaving.value = true
-  agentBudgetError.value = null
-  try {
-    await api.setSreAgentSettings(steps, calls, agentModel.value.trim(), undefined, allowedModels)
-    agentPolicySaved.value = true
-    setTimeout(() => { agentPolicySaved.value = false }, 2000)
-  } catch (e: any) {
-    agentBudgetError.value = e.message || 'Failed to save models'
-  } finally {
-    agentPolicySaving.value = false
-  }
-}
 const agentBudgetDefaults = ref<{ max_tool_steps: number; max_llm_calls: number } | null>(null)
 const agentBudgetSaving = ref(false)
 const agentBudgetSaved = ref(false)
@@ -2373,25 +2577,9 @@ async function loadAgentBudget() {
     agentMaxToolSteps.value = String(s.max_tool_steps)
     agentMaxLlmCalls.value = String(s.max_llm_calls)
     agentModel.value = s.model || ''
-    agentReasoningLevels.value = s.reasoning_levels || []
-    // Seed the allowed-models policy from the saved setting.
-    const allowed: Record<string, string[]> = {}
-    for (const m of s.allowed_models || []) allowed[m.id] = m.reasoning || []
-    agentAllowed.value = allowed
-    // The checklist starts from the saved suggestions, augmented by anything
-    // already allowed (so a saved id never disappears from the list).
-    const seed = new Set<string>([...(s.model_suggestions || []), ...Object.keys(allowed)])
-    agentProviderModels.value = Array.from(seed)
     agentBudgetDefaults.value = s.defaults
     agentBudgetLoaded.value = true
-    // Pull the live provider model list (best-effort; merge with allowed ids).
-    try {
-      const m = await api.getSreAgentModels()
-      if (m.models?.length) {
-        const merged = new Set<string>([...m.models, ...Object.keys(allowed)])
-        agentProviderModels.value = Array.from(merged)
-      }
-    } catch { /* keep static suggestions */ }
+    await loadLlmConfig()
   } catch { /* non-admin or endpoint unavailable */ }
 }
 
@@ -2424,15 +2612,9 @@ async function saveAgentBudget() {
   agentBudgetError.value = null
   agentBudgetSaved.value = false
   try {
-    // Build the allowed-models policy array from the checklist (reasoning only
-    // for reasoning models; server re-validates).
-    const allowedModels = agentAllowedIds.value.map(id => ({
-      id,
-      reasoning: modelIsReasoning(id) ? (agentAllowed.value[id] || []) : [],
-    }))
-    // Server clamps (tool steps 4–200; LLM calls steps+2–300) and returns the
-    // effective values, which we reflect back into the inputs.
-    const saved = await api.setSreAgentSettings(steps, calls, agentModel.value.trim(), undefined, allowedModels)
+    // Server normalizes the targets (tool calls 4–200; LLM calls
+    // tool calls+2–300) and returns the effective values for the inputs.
+    const saved = await api.setSreAgentSettings(steps, calls, agentModel.value.trim())
     agentMaxToolSteps.value = String(saved.max_tool_steps)
     agentMaxLlmCalls.value = String(saved.max_llm_calls)
     agentBudgetSaved.value = true
@@ -4823,6 +5005,127 @@ function formatDate(ts: string): string {
 
       <div
         v-if="isAdmin"
+        v-show="activeAgentSubtab === 'providers'"
+        id="agent-panel-providers"
+        class="section-card card agent-tabpanel"
+        role="tabpanel"
+        aria-labelledby="agent-tab-providers"
+      >
+        <div class="card-header">
+          <div class="card-header-text">
+            <h2 class="card-title">LLM providers</h2>
+            <p class="card-desc text-secondary">Credentials stay encrypted in query-api. The SRE Agent never receives them.</p>
+          </div>
+          <button v-if="!showLlmProviderForm" class="btn-create" @click="openLlmProviderForm()">+ Add provider</button>
+        </div>
+
+        <form v-if="showLlmProviderForm" class="llm-config-form" @submit.prevent="saveLlmProvider">
+          <div class="llm-form-heading">
+            <div>
+              <p class="card-title">{{ editingLlmProviderId ? 'Edit provider' : 'Connect a provider' }}</p>
+              <p class="card-desc">Use a separate connection when the same model is available through more than one company.</p>
+            </div>
+            <button type="button" class="btn btn-secondary" @click="closeLlmProviderForm">Cancel</button>
+          </div>
+          <div class="llm-form-grid">
+            <div class="form-group-inline">
+              <label class="form-label" for="llm-provider-name">Connection name</label>
+              <input id="llm-provider-name" v-model="llmProviderName" class="form-input" placeholder="Production Anthropic" autocomplete="off" />
+            </div>
+            <div class="form-group-inline">
+              <label class="form-label" for="llm-provider-kind">Provider</label>
+              <select id="llm-provider-kind" v-model="llmProviderKind" class="form-input">
+                <option v-for="(label, kind) in providerKindLabels" :key="kind" :value="kind">{{ label }}</option>
+              </select>
+            </div>
+            <div v-if="llmProviderKind === 'bedrock'" class="form-group-inline">
+              <label class="form-label" for="llm-provider-region">AWS region</label>
+              <input id="llm-provider-region" v-model="llmProviderRegion" class="form-input mono" placeholder="us-east-1" autocomplete="off" />
+            </div>
+            <div class="form-group-inline llm-form-span-2">
+              <label class="form-label" for="llm-provider-key">API key</label>
+              <input id="llm-provider-key" v-model="llmProviderApiKey" class="form-input mono" type="password" autocomplete="new-password" :placeholder="editingLlmProviderId ? 'Leave blank to keep the current key' : 'Paste provider API key'" />
+              <span class="form-hint">{{ editingLlmProviderId ? 'The saved key is never shown again.' : 'Encrypted before it is written to ClickHouse.' }}</span>
+            </div>
+            <div class="form-group-inline llm-form-span-2">
+              <label class="form-label" for="llm-provider-url">Base URL</label>
+              <input id="llm-provider-url" v-model="llmProviderBaseUrl" class="form-input mono" inputmode="url" placeholder="Leave blank to use the provider default" autocomplete="off" />
+              <span class="form-hint">Set this for proxies or another OpenAI-compatible endpoint.</span>
+            </div>
+          </div>
+
+          <div v-if="llmProviderKind === 'openrouter'" class="llm-routing-block">
+            <div class="llm-routing-head">
+              <p class="card-title">OpenRouter policy</p>
+              <p class="card-desc">Limit which companies may process investigation data.</p>
+            </div>
+            <div class="llm-form-grid">
+              <div class="form-group-inline">
+                <label class="form-label" for="llm-provider-only">Allowed providers</label>
+                <input id="llm-provider-only" v-model="llmProviderAllowed" class="form-input mono" placeholder="anthropic, amazon-bedrock" autocomplete="off" />
+                <span class="form-hint">Comma-separated OpenRouter provider slugs.</span>
+              </div>
+              <div class="form-group-inline">
+                <label class="form-label" for="llm-provider-order">Preferred order</label>
+                <input id="llm-provider-order" v-model="llmProviderOrder" class="form-input mono" placeholder="anthropic, amazon-bedrock" autocomplete="off" />
+              </div>
+            </div>
+            <div class="llm-toggle-row">
+              <label><input v-model="llmProviderFallbacks" type="checkbox" /> Allow provider fallback</label>
+              <label><input v-model="llmProviderZdr" type="checkbox" /> Require zero data retention</label>
+              <label>Data collection
+                <select v-model="llmProviderDataCollection" class="form-input llm-inline-select">
+                  <option value="deny">Deny</option>
+                  <option value="allow">Allow</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="llm-form-actions">
+            <label class="llm-enabled-check"><input v-model="llmProviderEnabled" type="checkbox" /> Enabled</label>
+            <button class="btn btn-primary" :disabled="llmProviderSaving">
+              {{ llmProviderSaving ? 'Saving…' : editingLlmProviderId ? 'Save provider' : 'Connect provider' }}
+            </button>
+          </div>
+        </form>
+
+        <p v-if="llmConfigError && activeAgentSubtab === 'providers'" class="agent-inline-error llm-inline-message" role="alert">{{ llmConfigError }}</p>
+        <DataTable
+          class="llm-table"
+          :columns="llmProviderColumns"
+          :rows="llmProviderTableRows"
+          row-key="id"
+          :loading="llmConfigLoading"
+          empty-label="No providers connected. Add one before creating a model."
+          bare
+        >
+          <template #cell-connection="{ row }">
+            <div class="llm-primary-cell">
+              <strong>{{ llmProviderTableRow(row).name }}</strong>
+              <span class="mono">{{ llmProviderTableRow(row).base_url }}</span>
+            </div>
+          </template>
+          <template #cell-provider="{ row }">{{ providerKindLabels[llmProviderTableRow(row).kind] }}</template>
+          <template #cell-credential="{ row }">
+            <span class="mono">{{ llmProviderTableRow(row).key_configured ? `••••${llmProviderTableRow(row).key_hint}` : 'Missing' }}</span>
+          </template>
+          <template #cell-status="{ row }">
+            <span class="status-badge" :class="llmProviderTableRow(row).enabled ? 'status-enabled' : 'status-disabled'">
+              {{ llmProviderTableRow(row).enabled ? 'Enabled' : 'Disabled' }}
+            </span>
+          </template>
+          <template #cell-actions="{ row }">
+            <div class="llm-row-actions">
+              <button type="button" class="action-btn" @click="openLlmProviderForm(llmProviderTableRow(row))">Edit</button>
+              <button type="button" class="action-btn action-btn-danger" @click="askDelete('LLM provider', llmProviderTableRow(row).id, llmProviderTableRow(row).name)">Delete</button>
+            </div>
+          </template>
+        </DataTable>
+      </div>
+
+      <div
+        v-if="isAdmin"
         v-show="activeAgentSubtab === 'models'"
         id="agent-panel-models"
         class="section-card card agent-tabpanel"
@@ -4831,58 +5134,90 @@ function formatDate(ts: string): string {
       >
         <div class="card-header">
           <div class="card-header-text">
-            <h2 class="card-title">Model policy</h2>
-            <p class="card-desc text-secondary">Define the models and reasoning levels people can choose for an investigation.</p>
+            <h2 class="card-title">Investigation models</h2>
+            <p class="card-desc text-secondary">Choose the provider model IDs and effort levels available when an investigation starts.</p>
           </div>
-          <span v-if="agentPolicySaving" class="agent-save-state">Saving…</span>
-          <span v-else-if="agentPolicySaved" class="agent-save-state saved">Saved ✓</span>
+          <button v-if="!showLlmModelForm && llmProviders.length" class="btn-create" @click="openLlmModelForm()">+ Add model</button>
         </div>
-        <div v-if="agentEnabled" class="create-form agent-model-form">
-          <label class="form-label" for="agent-model-input">Allowed models</label>
-          <p class="card-desc text-secondary">Type a model name and press Tab or Enter. Reasoning models can be restricted to specific thinking levels; the server enforces this policy.</p>
-          <div class="agent-model-combo">
-            <input
-              id="agent-model-input"
-              v-model="agentModelInput"
-              class="form-input mono"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="Type a model name…"
-              @keydown="onModelKeydown"
-              @input="showModelMenu = true"
-              @focus="showModelMenu = true"
-              @blur="onModelBlur"
-            />
-            <ul v-if="showModelMenu && agentModelMatches.length" class="agent-model-menu">
-              <li v-for="(id, i) in agentModelMatches" :key="id" :class="{ active: i === 0 }" class="mono" @mousedown.prevent="addModel(id)">{{ id }}</li>
-            </ul>
+
+        <form v-if="showLlmModelForm" class="llm-config-form" @submit.prevent="saveLlmModel">
+          <div class="llm-form-heading">
+            <div><p class="card-title">{{ editingLlmModelId ? 'Edit model' : 'Add an investigation model' }}</p><p class="card-desc">The display name appears on the SRE Agent start screen.</p></div>
+            <button type="button" class="btn btn-secondary" @click="closeLlmModelForm">Cancel</button>
           </div>
-          <div v-if="agentAllowedIds.length" class="agent-model-added">
-            <div v-for="id in agentAllowedIds" :key="id" class="agent-model-row">
-              <div class="agent-model-row-head">
-                <span class="mono">{{ id }}</span>
-                <button type="button" class="agent-model-remove" @click="askDelete('model', id, id)">Remove</button>
+          <div class="llm-form-grid">
+            <div class="form-group-inline">
+              <label class="form-label" for="llm-model-provider">Provider connection</label>
+              <select id="llm-model-provider" v-model="llmModelProviderId" class="form-input" @change="discoverModels()">
+                <option disabled value="">Choose a provider</option>
+                <option v-for="provider in enabledLlmProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
+              </select>
+            </div>
+            <div class="form-group-inline">
+              <label class="form-label" for="llm-model-name">Display name</label>
+              <input id="llm-model-name" v-model="llmModelName" class="form-input" placeholder="Optional, defaults to model ID" autocomplete="off" />
+            </div>
+            <div class="form-group-inline llm-form-span-2">
+              <label class="form-label" for="llm-model-id">Provider model ID</label>
+              <div class="llm-discovery-row">
+                <input id="llm-model-id" v-model="llmModelId" class="form-input mono" list="llm-discovered-models" :placeholder="llmModelIdPlaceholder" autocomplete="off" />
+                <button type="button" class="btn btn-secondary" :disabled="!llmModelProviderId || llmDiscovering" @click="discoverModels">{{ llmDiscovering ? 'Refreshing…' : 'Refresh models' }}</button>
               </div>
-              <div v-if="modelIsReasoning(id)" class="agent-level-list">
-                <span class="text-muted fs-11">thinking:</span>
-                <label v-for="lvl in agentReasoningLevels" :key="lvl" class="agent-level-pick">
-                  <input type="checkbox" :checked="(agentAllowed[id] || []).includes(lvl)" @change="toggleAllowedLevel(id, lvl)" />
-                  <span>{{ lvl }}</span>
-                </label>
-              </div>
+              <datalist id="llm-discovered-models"><option v-for="id in llmDiscoveredModels" :key="id" :value="id" /></datalist>
+              <span class="form-hint">Discovery is optional. You can enter a deployment, inference profile, or model ID directly.</span>
             </div>
           </div>
-          <p v-else class="text-muted fs-12">No models added — investigations use the provider default.</p>
-          <div class="agent-default-model">
-            <label class="form-label">Default model <span class="text-muted">used when a user doesn't pick</span></label>
-            <select v-model="agentModel" class="form-input mono" @change="schedulePolicySave">
-              <option value="">(first allowed)</option>
-              <option v-for="id in agentAllowedIds" :key="id" :value="id">{{ id }}</option>
-            </select>
+          <div class="llm-effort-block">
+            <div><p class="form-label">Allowed reasoning effort</p><p class="form-hint">Leave every option clear for models without a reasoning control.</p></div>
+            <div class="agent-level-list">
+              <label v-for="level in ['minimal', 'low', 'medium', 'high']" :key="level" class="agent-level-pick">
+                <input type="checkbox" :checked="llmModelReasoning.includes(level)" @change="toggleLlmModelReasoning(level)" />
+                <span>{{ level }}</span>
+              </label>
+            </div>
           </div>
+          <div class="llm-form-actions">
+            <label class="llm-enabled-check"><input v-model="llmModelEnabled" type="checkbox" /> Enabled</label>
+            <button class="btn btn-primary" :disabled="llmModelSaving">{{ llmModelSaving ? 'Saving…' : 'Save model' }}</button>
+          </div>
+        </form>
+
+        <p v-if="llmConfigError && activeAgentSubtab === 'models'" class="agent-inline-error llm-inline-message" role="alert">{{ llmConfigError }}</p>
+        <DataTable
+          class="llm-table"
+          :columns="llmModelColumns"
+          :rows="llmModelTableRows"
+          row-key="id"
+          :loading="llmConfigLoading"
+          :empty-label="llmProviders.length ? 'No models configured.' : 'Connect a provider first.'"
+          bare
+        >
+          <template #cell-model="{ row }">
+            <div class="llm-primary-cell">
+              <strong>{{ llmModelTableRow(row).name }}</strong>
+              <span class="mono">{{ llmModelTableRow(row).model_id }}</span>
+            </div>
+          </template>
+          <template #cell-provider="{ row }">{{ llmProviderById.get(llmModelTableRow(row).provider_id)?.name || 'Missing provider' }}</template>
+          <template #cell-effort="{ row }">{{ llmModelTableRow(row).reasoning.length ? llmModelTableRow(row).reasoning.join(', ') : 'Provider default' }}</template>
+          <template #cell-status="{ row }">
+            <span class="status-badge" :class="llmModelTableRow(row).enabled ? 'status-enabled' : 'status-disabled'">
+              {{ llmModelTableRow(row).enabled ? 'Enabled' : 'Disabled' }}
+            </span>
+          </template>
+          <template #cell-actions="{ row }">
+            <div class="llm-row-actions">
+              <button type="button" class="action-btn" @click="openLlmModelForm(llmModelTableRow(row))">Edit</button>
+              <button type="button" class="action-btn action-btn-danger" @click="askDelete('LLM model', llmModelTableRow(row).id, llmModelTableRow(row).name)">Delete</button>
+            </div>
+          </template>
+        </DataTable>
+        <div v-if="llmModels.length" class="llm-default-row">
+          <div><strong>Default model</strong><span>Preselected when an investigation starts.</span></div>
+          <select v-model="agentModel" class="form-input" @change="saveConfiguredDefault">
+            <option v-for="model in llmModels.filter(item => item.enabled)" :key="model.id" :value="model.id">{{ model.name }} · {{ llmProviderById.get(model.provider_id)?.name }}</option>
+          </select>
         </div>
-        <div v-else class="agent-disabled-panel">Enable the SRE Agent above to configure model policy.</div>
       </div>
 
       <div
@@ -4895,26 +5230,26 @@ function formatDate(ts: string): string {
       >
         <div class="card-header">
           <div class="card-header-text">
-            <h2 class="card-title">Investigation limits</h2>
-            <p class="card-desc text-secondary">Bound per-investigation cost. Lower limits are cheaper, but may produce preliminary reports.</p>
+            <h2 class="card-title">Investigation budget</h2>
+            <p class="card-desc text-secondary">Set how deeply the agent should investigate before it starts wrapping up.</p>
           </div>
         </div>
         <div class="create-form agent-budget-form">
           <div class="form-group-inline">
-            <label class="form-label">Max tool calls <span class="text-muted">default {{ agentBudgetDefaults?.max_tool_steps ?? 40 }}</span></label>
+            <label class="form-label">Target tool calls <span class="text-muted">default {{ agentBudgetDefaults?.max_tool_steps ?? 40 }}</span></label>
             <input v-model="agentMaxToolSteps" type="number" min="4" max="200" class="form-input mono" placeholder="40" />
           </div>
           <div class="form-group-inline">
-            <label class="form-label">Max LLM calls <span class="text-muted">default {{ agentBudgetDefaults?.max_llm_calls ?? 55 }}</span></label>
+            <label class="form-label">Target LLM calls <span class="text-muted">default {{ agentBudgetDefaults?.max_llm_calls ?? 55 }}</span></label>
             <input v-model="agentMaxLlmCalls" type="number" min="6" max="300" class="form-input mono" placeholder="55" />
           </div>
           <div class="form-actions-inline">
             <button class="btn btn-primary" :disabled="agentBudgetSaving" @click="saveAgentBudget">
-              {{ agentBudgetSaving ? 'Saving…' : agentBudgetSaved ? 'Saved ✓' : 'Save limits' }}
+              {{ agentBudgetSaving ? 'Saving…' : agentBudgetSaved ? 'Saved ✓' : 'Save budget' }}
             </button>
           </div>
           <p v-if="agentBudgetError" class="fw-field-err agent-budget-note">{{ agentBudgetError }}</p>
-          <p v-else class="fw-hint agent-budget-note">Tool calls are investigation actions such as log searches and trace queries. LLM calls include retries and self-review, and must be at least tool calls + 2. Changes apply to new investigations immediately.</p>
+          <p v-else class="fw-hint agent-budget-note">Smaller budgets make the agent narrow its search sooner; larger budgets let it test more possible causes. It may use up to 2 extra tool calls and 3 extra LLM calls to verify a finding or finish the report. LLM calls must be at least tool calls + 2. Changes apply to new investigations.</p>
         </div>
       </div>
 
