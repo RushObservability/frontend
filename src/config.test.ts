@@ -20,7 +20,18 @@ describe('runtime API origin validation', () => {
   it('rejects insecure and cross-scheme origins in production', () => {
     expect(() => normalizeApiOrigin('http://api.example.com', 'https://rush.example.com', true))
       .toThrow()
-    expect(normalizeApiOrigin('http://localhost:8080', 'http://localhost:5173', false))
-      .toBe('http://localhost:8080')
+    expect(() => normalizeApiOrigin('http://api.example.com', 'http://rush.example.com', true))
+      .toThrow()
+    expect(() => normalizeApiOrigin('https://localhost:8080', 'http://localhost:5173', true))
+      .toThrow()
+  })
+
+  it.each([
+    ['http://localhost:8080', 'http://localhost:5173'],
+    ['http://127.0.0.1:8080', 'http://127.0.0.1:5173'],
+    ['http://[::1]:8080', 'http://[::1]:5173'],
+  ])('allows loopback HTTP in a production build: %s', (apiOrigin, uiOrigin) => {
+    expect(normalizeApiOrigin(apiOrigin, uiOrigin, true))
+      .toBe(apiOrigin)
   })
 })
