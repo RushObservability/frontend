@@ -1,4 +1,4 @@
-.PHONY: dev build preview install ensure-deps test validate-capacity-metrics clean docker up down lint typecheck help
+.PHONY: dev build preview install ensure-deps test validate-capacity-metrics release clean docker up down lint typecheck help
 
 ## Development
 
@@ -33,6 +33,11 @@ validate-capacity-metrics: ensure-deps ## Validate query-api and SRE-agent metri
 
 lint: ensure-deps      ## Lint with vue-tsc
 	npx vue-tsc --noEmit
+
+## Release
+
+release:               ## Open a version-bump PR: make release VERSION=0.1.13
+	@VERSION="$(VERSION)" DRY_RUN="$(DRY_RUN)" ./scripts/release.sh
 
 ## Docker
 
