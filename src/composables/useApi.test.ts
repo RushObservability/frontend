@@ -93,6 +93,18 @@ describe('tenant-aware API transport', () => {
     expect(response).not.toHaveProperty('token')
   })
 
+  it('preserves the HTTP status when login credentials are rejected', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(null, { status: 401 }),
+    ))
+
+    const { useApi } = await import('./useApi')
+
+    await expect(useApi().login('operator', 'wrong-password')).rejects.toMatchObject({
+      status: 401,
+    })
+  })
+
   it('encodes identifiers as single URL path segments', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({}), { status: 200 }),
