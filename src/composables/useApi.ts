@@ -1527,32 +1527,25 @@ export function useApi() {
     return json.data as string[]
   }
 
-  // ── Investigation Session API (sre-agent) ──
+  // ── Investigation Session API ──
 
-  // request() already prefixes API_BASE (/api/v1) — this must stay EMPTY or
-  // requests go out as /api/v1/api/v1/... and 404, making the SRE Agent page
-  // report the agent as down. (Vite/nginx route /api/v1/sessions and
-  // /api/v1/investigation-templates to the sre-agent service.)
-  const SRE_AGENT_BASE = ''
-
-  async function listInvestigationSessions(tenantId?: string, limit?: number): Promise<{ sessions: InvestigationSession[] }> {
+  async function listInvestigationSessions(limit?: number): Promise<{ sessions: InvestigationSession[] }> {
     const qs = new URLSearchParams()
-    if (tenantId) qs.set('tenant_id', tenantId)
     if (limit) qs.set('limit', String(limit))
     const query = qs.toString()
-    return await request(`${SRE_AGENT_BASE}/sessions${query ? '?' + query : ''}`)
+    return await request(`/sessions${query ? '?' + query : ''}`)
   }
 
   async function getInvestigationSession(id: string): Promise<{ session: InvestigationSession; turns: InvestigationTurn[] }> {
-    return await request(`${SRE_AGENT_BASE}/sessions/${encodePathSegment(id)}`)
+    return await request(`/sessions/${encodePathSegment(id)}`)
   }
 
   async function deleteInvestigationSession(id: string): Promise<void> {
-    await request(`${SRE_AGENT_BASE}/sessions/${encodePathSegment(id)}`, { method: 'DELETE' })
+    await request(`/sessions/${encodePathSegment(id)}`, { method: 'DELETE' })
   }
 
   async function listInvestigationTemplates(): Promise<{ templates: InvestigationTemplate[] }> {
-    return await request(`${SRE_AGENT_BASE}/investigation-templates`)
+    return await request('/investigation-templates')
   }
 
   // ── BubbleUp API ──
