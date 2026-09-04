@@ -2,6 +2,7 @@
 import { ref, nextTick, watch, computed, onMounted } from 'vue'
 import { useApi } from '../composables/useApi'
 import { safeApiErrorMessage } from '../lib/apiError'
+import { formatInvestigationActivity } from '../lib/investigationTime'
 import type { InvestigationSession, InvestigationTemplate } from '../types'
 
 interface AgentEvent {
@@ -46,6 +47,41 @@ function boundedEvent(event: AgentEvent): AgentEvent {
   }
 }
 
+function parseStoredActivity(value: string): AgentEvent[] {
+  if (!value) return []
+
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+
+    return parsed.slice(0, MAX_SSE_EVENTS).flatMap((item): AgentEvent[] => {
+      if (!item || typeof item !== 'object') return []
+      const event = item as Record<string, unknown>
+      const name = typeof event.name === 'string' ? event.name : 'tool'
+
+      if (event.type === 'tool_call') {
+        return [{
+          type: 'tool_call',
+          name,
+          args: event.args && typeof event.args === 'object'
+            ? event.args as Record<string, unknown>
+            : {},
+        }]
+      }
+      if (event.type === 'tool_result') {
+        return [boundedEvent({
+          type: 'tool_result',
+          name,
+          data: typeof event.data === 'string' ? event.data : '',
+        })]
+      }
+      return []
+    })
+  } catch {
+    return []
+  }
+}
+
 function appendBounded(current: string, addition: string): string {
   if (!addition) return current
   const next = current + addition
@@ -76,6 +112,8 @@ const props = defineProps<{
   eventId?: string
   question?: string
   additionalContext?: string
+  /** Load this saved session instead of starting a new investigation. */
+  initialSessionId?: string
   /** User-chosen model for this investigation (validated server-side). */
   model?: string
   /** User-chosen thinking level (validated server-side against the policy). */
@@ -84,6 +122,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
+  sessionLoaded: [session: InvestigationSession]
 }>()
 
 const api = useApi()
@@ -317,11 +356,17 @@ async function loadTemplates() {
 
 // ── Load a previous session ──
 async function loadSession(id: string) {
+  errorMsg.value = ''
+  thinking.value = ''
+  running.value = false
+  collapsedResults.value = new Set()
+
   try {
     const result = await api.getInvestigationSession(id)
     sessionId.value = id
     sessionTitle.value = result.session.title
     showSidebar.value = false
+    emit('sessionLoaded', result.session)
 
     // Reconstruct turns from server data
     turns.value = []
@@ -339,6 +384,13 @@ async function loadSession(id: string) {
           turns.value.push({ question: 'Investigation', events: [], done: true })
         }
         const lastTurn = turns.value[turns.value.length - 1]!
+        for (const event of parseStoredActivity(t.tool_calls)) {
+          const eventIndex = lastTurn.events.length
+          lastTurn.events.push(event)
+          if (event.type === 'tool_result' && (event.data || '').length > 500) {
+            collapsedResults.value.add(resultKey(turns.value.length - 1, eventIndex))
+          }
+        }
         lastTurn.events.push({
           type: 'summary',
           text: t.content,
@@ -455,8 +507,18 @@ function resetToNew() {
 }
 
 function restart() {
-  start()
+  if (props.initialSessionId) {
+    void loadSession(props.initialSessionId)
+  } else {
+    void start()
+  }
 }
+
+watch(() => props.initialSessionId, (id) => {
+  if (id && id !== sessionId.value) {
+    void loadSession(id)
+  }
+})
 
 function toggleSidebar() {
   showSidebar.value = !showSidebar.value
@@ -554,24 +616,13 @@ const sessionTokenStats = computed(() => {
   return { prompt, completion, model, total: prompt + completion }
 })
 
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  if (diffMins < 1) return 'just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  return `${diffDays}d ago`
-}
-
-// Auto-start on mount
-onMounted(() => {
+// Restore a selected session before considering the new-investigation path.
+onMounted(async () => {
   loadSessions()
-  if (props.question || props.eventId) {
-    start()
+  if (props.initialSessionId) {
+    await loadSession(props.initialSessionId)
+  } else if (props.question || props.eventId) {
+    await start()
   }
 })
 </script>
@@ -601,7 +652,7 @@ onMounted(() => {
           <div class="session-item-title">{{ session.title || 'Untitled' }}</div>
           <div class="session-item-meta">
             <span class="session-status-badge" :class="session.status">{{ session.status }}</span>
-            <span>{{ timeAgo(session.updated_at) }}</span>
+            <span>{{ formatInvestigationActivity(session.updated_at) }}</span>
           </div>
           <button class="session-archive-btn" @click.stop="archiveSession(session.id)" title="Archive">
             &times;
@@ -677,8 +728,8 @@ onMounted(() => {
           class="turn-card"
           :class="{ 'turn-current': tIdx === currentTurnIdx && running }"
         >
-          <div v-if="tIdx > 0" class="turn-header">
-            <span class="turn-label">Follow-up {{ tIdx }}</span>
+          <div v-if="tIdx > 0 || props.initialSessionId" class="turn-header">
+            <span class="turn-label">{{ tIdx > 0 ? `Follow-up ${tIdx}` : 'Question' }}</span>
             <span class="turn-question">"{{ turn.question }}"</span>
           </div>
 
