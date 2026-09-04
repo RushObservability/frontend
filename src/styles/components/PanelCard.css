@@ -1,6 +1,11 @@
 /* Shared Rush panel shell. Complete visualization panels compose this component
    with a data view, while dashboard-only drag/edit behavior stays outside it. */
 .panel-card {
+  --panel-chart-total-size: 1.3125rem;
+  --panel-chart-value-size: .75rem;
+  --panel-chart-label-size: .625rem;
+  --panel-chart-axis-size: .5625rem;
+  --panel-chart-caption-size: .5625rem;
   position: relative;
   display: flex;
   min-width: 0;
