@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch, nextTick, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
-import type { RushEvent, Filter, CountBucket, QueryFilter, GroupResult, SavedQuery, TimeseriesBucket, TraceResponse, SpanNode, LogRecord, BubbleUpResponse, ExploreCountKind, ExploreSearchRequest, ExploreSearchResponse } from '../types'
+import type { RushEvent, Filter, CountBucket, QueryFilter, GroupResult, SavedQuery, TimeseriesBucket, LatencyHeatmapCell, TraceResponse, SpanNode, LogRecord, BubbleUpResponse, ExploreCountKind, ExploreSearchRequest, ExploreSearchResponse } from '../types'
 import SavedQueries from '../components/SavedQueries.vue'
 import QueryHistory from '../components/QueryHistory.vue'
 import { useQueryHistory } from '../composables/useQueryHistory'
@@ -14,6 +14,7 @@ import PanelCard from '../components/PanelCard.vue'
 import VirtualTable from '../components/VirtualTable.vue'
 import ExploreSearchToolbar from '../components/ExploreSearchToolbar.vue'
 import ExploreResultsState from '../components/ExploreResultsState.vue'
+import SignalTimelinePanel from '../components/panels/SignalTimelinePanel.vue'
 import { useTenant } from '../composables/useTenant'
 import { compareFindingStrength, compareFindingSummary, rankCompareFindings } from '../lib/compareFindings'
 import { authenticatedFetch } from '../composables/authSession'
@@ -74,6 +75,12 @@ const nlSearch = ref('')
 const nlConfidence = ref(0)
 const builderFilters = ref<QueryFilter[]>([])
 const results = ref<RushEvent[]>([])
+const scatterCohortRows = ref<RushEvent[] | null>(null)
+const scatterCohortTotal = ref(0)
+const scatterCohortTotalKind = ref<ExploreCountKind>('exact')
+const scatterCohortLoading = ref(false)
+const scatterCohortError = ref<string | null>(null)
+const visibleSpanResults = computed(() => scatterCohortRows.value ?? results.value)
 const total = ref(0)
 const totalKind = ref<ExploreCountKind>('exact')
 const formattedTotal = computed(() => {
@@ -90,11 +97,11 @@ const exploreSummaryWarning = ref<string | null>(null)
 let activeSearchController: AbortController | null = null
 
 function resultAt(index: number): RushEvent {
-  return results.value[index]!
+  return visibleSpanResults.value[index]!
 }
 
 function resultKeyAt(index: number): string {
-  const row = results.value[index]
+  const row = visibleSpanResults.value[index]
   return row?.span_id || `${row?.trace_id || 'span'}:${row?.timestamp || index}:${index}`
 }
 
@@ -121,7 +128,7 @@ const timelineExpandedSpan = ref<string | null>(null)
 
 const expandedRowData = computed(() => {
   if (expandedRow.value === null) return null
-  return results.value[expandedRow.value] || null
+  return visibleSpanResults.value[expandedRow.value] || null
 })
 
 // Which span is "active" in the detail modal (defaults to the clicked row's span)
@@ -246,6 +253,15 @@ async function livePoll({ signal }: PollingRunContext) {
       include_rows: false,
       include_summary: true,
     }, signal)
+    const latencyPromise = isLogs
+      ? Promise.resolve(null)
+      : settleLatencyTimeseries({
+          time_range: tr,
+          filters: activeFilters,
+          interval: intervalBucket,
+          search: searchParam,
+          include_heatmap: true,
+        }, signal)
     const response = await api.queryExplore({
       ...request,
       include_rows: true,
@@ -265,7 +281,7 @@ async function livePoll({ signal }: PollingRunContext) {
     }
     applyExploreRowsResponse(response, isLogs)
 
-    const summaryResult = await summaryPromise
+    const [summaryResult, latencyResult] = await Promise.all([summaryPromise, latencyPromise])
     if (signal.aborted) return
     if ('response' in summaryResult) {
       applyExploreSummaryResponse(summaryResult.response, isLogs)
@@ -273,6 +289,11 @@ async function livePoll({ signal }: PollingRunContext) {
       api.error.value = null
       exploreSummaryWarning.value = 'Summaries are temporarily unavailable. Results are still complete.'
       histogramPhase.value = 'idle'
+    }
+    if (latencyResult && 'response' in latencyResult) {
+      latencyTimeseries.value = latencyResult.response.buckets as TimeseriesBucket[]
+      latencyHeatmap.value = latencyResult.response.heatmap ?? []
+      if (scatterMode.value === 'heatmap' && !latencyHeatmap.value.length) scatterMode.value = 'trend'
     }
   } catch (error) {
     // Swallow errors silently for live polling — don't let a transient
@@ -944,6 +965,15 @@ function settleExploreRequest(request: ExploreSearchRequest, signal: AbortSignal
     .catch(error => ({ error }))
 }
 
+function settleLatencyTimeseries(
+  request: { time_range: { from: string; to: string }; filters: Filter[]; interval: string; search?: string; include_heatmap?: boolean },
+  signal: AbortSignal,
+) {
+  return api.queryTimeseries(request, undefined, signal)
+    .then(response => ({ response }))
+    .catch(error => ({ error }))
+}
+
 function applyExploreRowsResponse(response: ExploreSearchResponse, isLogs: boolean) {
   total.value = response.count.value
   totalKind.value = response.count.kind
@@ -1109,6 +1139,8 @@ async function search(opts?: { skipHistory?: boolean }) {
     // Rows and summaries are independent requests so the table can paint as
     // soon as its query finishes. A superseding search aborts both requests.
     histogram.value = []
+    latencyTimeseries.value = []
+    latencyHeatmap.value = []
     histogramPhase.value = 'waiting'
     exploreSummaryWarning.value = null
     serverServiceCounts.value = new Map()
@@ -1129,6 +1161,15 @@ async function search(opts?: { skipHistory?: boolean }) {
       include_rows: false,
       include_summary: true,
     }, controller.signal)
+    const latencyPromise = isLogs
+      ? Promise.resolve(null)
+      : settleLatencyTimeseries({
+          time_range: timeRange.value,
+          filters: activeFilters,
+          interval: intervalBucket,
+          search: searchParam,
+          include_heatmap: true,
+        }, controller.signal)
     const response = await api.queryExplore({
       ...request,
       include_rows: true,
@@ -1139,7 +1180,7 @@ async function search(opts?: { skipHistory?: boolean }) {
     queryDurationMs.value = Math.round(performance.now() - searchStart)
     searching.value = false
 
-    const summaryResult = await summaryPromise
+    const [summaryResult, latencyResult] = await Promise.all([summaryPromise, latencyPromise])
     if (controller.signal.aborted || activeSearchController !== controller) return
     if ('response' in summaryResult) {
       applyExploreSummaryResponse(summaryResult.response, isLogs)
@@ -1147,6 +1188,15 @@ async function search(opts?: { skipHistory?: boolean }) {
       api.error.value = null
       exploreSummaryWarning.value = 'Summaries are temporarily unavailable. Results are still complete.'
       histogramPhase.value = 'idle'
+    }
+    if (latencyResult && 'response' in latencyResult) {
+      latencyTimeseries.value = latencyResult.response.buckets as TimeseriesBucket[]
+      latencyHeatmap.value = latencyResult.response.heatmap ?? []
+      if (scatterMode.value === 'heatmap' && !latencyHeatmap.value.length) scatterMode.value = 'trend'
+    } else if (!isLogs) {
+      latencyTimeseries.value = []
+      latencyHeatmap.value = []
+      if (scatterMode.value === 'heatmap') scatterMode.value = 'trend'
     }
   } catch (err: any) {
     if (err?.name !== 'AbortError') {
@@ -1165,7 +1215,7 @@ async function search(opts?: { skipHistory?: boolean }) {
 }
 
 async function loadMore() {
-  if (loadingMore.value || !hasMore.value) return
+  if (scatterCohortRows.value !== null || loadingMore.value || !hasMore.value) return
   loadingMore.value = true
   try {
     const activeFilters = getActiveFilters()
@@ -1486,16 +1536,16 @@ const filledHistogram = computed(() => {
   return filled
 })
 
-const histogramMax = computed(() => Math.max(...filledHistogram.value.map((b) => b.count), 1))
-
 // ═══ Latency over time ═══
 const SCATTER_W = 1000
-const SCATTER_H = 250
-const SCATTER_PAD = { left: 64, right: 20, top: 18, bottom: 34 }
+const SCATTER_H = 300
+const SCATTER_PAD = { left: 76, right: 24, top: 32, bottom: 44 }
 const scatterBrush = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
 const scatterDragging = ref(false)
 const scatterExpanded = ref(true)
-const scatterMode = ref<'dots' | 'density'>('density')
+const scatterMode = ref<'heatmap' | 'trend' | 'dots'>('heatmap')
+const latencyTimeseries = ref<TimeseriesBucket[]>([])
+const latencyHeatmap = ref<LatencyHeatmapCell[]>([])
 const compareModeActive = ref(false)
 const scatterRangeLabel = computed(() => {
   if (customRange.value) return 'Custom'
@@ -1517,9 +1567,110 @@ type ScatterSelection = {
   errorsOnly?: boolean
   queryWide?: boolean
 }
+type PendingLatencyDeepLink = Omit<ScatterSelection, 'rows' | 'queryWide'> & {
+  compare: boolean
+}
+let scatterCohortController: AbortController | null = null
+
+function formattedCohortTotal(): string {
+  const value = scatterCohortTotal.value.toLocaleString()
+  if (scatterCohortTotalKind.value === 'capped') return `${value}+`
+  if (scatterCohortTotalKind.value === 'estimated') return `~${value}`
+  return value
+}
+
+function resetScatterCohortRows() {
+  scatterCohortController?.abort()
+  scatterCohortController = null
+  scatterCohortRows.value = null
+  scatterCohortTotal.value = 0
+  scatterCohortTotalKind.value = 'exact'
+  scatterCohortLoading.value = false
+  scatterCohortError.value = null
+  selectedRowIndex.value = -1
+  inlineTraceRow.value = null
+  inlineTraceData.value = null
+}
+
+async function loadScatterCohortRows(selection: ScatterSelection) {
+  scatterCohortController?.abort()
+  const controller = new AbortController()
+  scatterCohortController = controller
+  scatterCohortRows.value = []
+  scatterCohortTotal.value = 0
+  scatterCohortTotalKind.value = 'exact'
+  scatterCohortLoading.value = true
+  scatterCohortError.value = null
+  selectedRowIndex.value = -1
+  inlineTraceRow.value = null
+  inlineTraceData.value = null
+
+  // The error cohort needs OR semantics across span status and HTTP status.
+  // Until Explore supports grouped filters, keep its already-filtered preview
+  // instead of issuing a narrower and misleading server query.
+  if (selection.errorsOnly) {
+    scatterCohortRows.value = selection.rows
+    scatterCohortTotal.value = selection.rows.length
+    scatterCohortLoading.value = false
+    return
+  }
+
+  const cohortFilters = [...getActiveFilters()]
+  if (selection.minDurationNs !== undefined) {
+    cohortFilters.push({ field: 'duration_ns', op: '>=', value: selection.minDurationNs })
+  }
+  if (selection.maxDurationNs !== undefined) {
+    cohortFilters.push({ field: 'duration_ns', op: '<=', value: selection.maxDurationNs })
+  }
+
+  try {
+    const response = await api.queryEvents({
+      time_range: { from: selection.startTime, to: selection.endTime },
+      filters: cohortFilters,
+      search: searchText.value || undefined,
+      limit: PAGE_SIZE,
+    }, undefined, controller.signal)
+    if (controller.signal.aborted || scatterCohortController !== controller) return
+    scatterCohortRows.value = response.rows
+    scatterCohortTotal.value = response.total
+    scatterCohortTotalKind.value = response.total >= 10_000 ? 'capped' : 'exact'
+  } catch (error: any) {
+    if (error?.name === 'AbortError') return
+    if (scatterCohortController !== controller) return
+    scatterCohortRows.value = selection.rows
+    scatterCohortTotal.value = selection.rows.length
+    scatterCohortError.value = 'Could not load the full cohort. Showing matching spans from the loaded sample.'
+    api.error.value = null
+  } finally {
+    if (scatterCohortController === controller) {
+      scatterCohortController = null
+      scatterCohortLoading.value = false
+    }
+  }
+}
+
+function setScatterSelection(selection: ScatterSelection) {
+  scatterPendingSelection.value = selection
+  void loadScatterCohortRows(selection)
+  syncUrlState()
+}
+
 const scatterPendingSelection = ref<ScatterSelection | null>(null)
 const scatterHoverPoint = ref<ScatterPoint | null>(null)
-const scatterHoverDensity = ref<{ x: number; y: number; count: number; errors: number; minNs: number; maxNs: number } | null>(null)
+type ScatterHeatmapCell = {
+  cell: LatencyHeatmapCell
+  x: number
+  y: number
+  width: number
+  height: number
+  intensity: number
+  minNs: number
+  maxNs: number
+  bucketEndMs: number
+  shareLabel: string
+}
+const scatterHoverHeatmap = ref<ScatterHeatmapCell | null>(null)
+const scatterHoverTrend = ref<{ x: number; y: number; bucket: TimeseriesBucket } | null>(null)
 
 function percentile(values: number[], p: number): number {
   if (!values.length) return 0
@@ -1544,19 +1695,34 @@ const scatterStats = computed(() => {
 const scatterScale = computed(() => {
   const rows = scatterSourceRows.value
   const times = rows.map((row) => Number(row.timestamp) / 1_000_000)
-  const minT = Math.min(...times, Date.now())
-  const maxT = Math.max(...times, minT + 1)
-  const rawMin = Math.max(1_000, scatterStats.value.min)
-  const rawMax = Math.max(rawMin * 1.01, scatterStats.value.max)
+  const sampleMinT = times.length ? Math.min(...times) : Date.now() - 60_000
+  const sampleMaxT = times.length ? Math.max(...times) : Date.now()
+  const selectedMinT = new Date(timeRange.value.from).getTime()
+  const selectedMaxT = new Date(timeRange.value.to).getTime()
+  const minT = Number.isFinite(selectedMinT) ? selectedMinT : sampleMinT
+  const maxT = Number.isFinite(selectedMaxT) && selectedMaxT > minT ? selectedMaxT : Math.max(sampleMaxT, minT + 1)
+  const trendDurations = latencyTimeseries.value.flatMap(bucket => [bucket.p50_ms, bucket.p95_ms, bucket.p99_ms])
+    .filter(value => Number.isFinite(value) && value > 0)
+    .map(value => value * 1_000_000)
+  const heatmapDurations = latencyHeatmap.value.flatMap(cell => [
+    Math.pow(10, cell.latency_bin / 4) * 1_000_000,
+    Math.pow(10, (cell.latency_bin + 1) / 4) * 1_000_000,
+  ])
+  const durationValues = [...scatterSourceRows.value.map(row => row.duration_ns), ...trendDurations, ...heatmapDurations]
+  const rawMin = Math.max(1_000, durationValues.length ? Math.min(...durationValues) : scatterStats.value.min)
+  const rawMax = Math.max(rawMin * 1.01, durationValues.length ? Math.max(...durationValues) : scatterStats.value.max)
   const minLog = Math.floor(Math.log10(rawMin))
   const maxLog = Math.ceil(Math.log10(rawMax))
   return { minT, maxT, minLog, maxLog: Math.max(minLog + 1, maxLog) }
 })
 
-function scatterX(timestamp: number): number {
-  const t = Number(timestamp) / 1_000_000
+function scatterXMillis(t: number): number {
   const s = scatterScale.value
-  return SCATTER_PAD.left + ((t - s.minT) / Math.max(1, s.maxT - s.minT)) * (SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right)
+  const fraction = Math.max(0, Math.min(1, (t - s.minT) / Math.max(1, s.maxT - s.minT)))
+  return SCATTER_PAD.left + fraction * (SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right)
+}
+function scatterX(timestamp: number): number {
+  return scatterXMillis(Number(timestamp) / 1_000_000)
 }
 function scatterY(durationNs: number): number {
   const s = scatterScale.value
@@ -1573,6 +1739,40 @@ const scatterPoints = computed<ScatterPoint[]>(() =>
   }))
 )
 
+const scatterTrendBuckets = computed(() => latencyTimeseries.value
+  .map(bucket => ({ bucket, time: parseBucketUtc(bucket.bucket) }))
+  .filter(item => Number.isFinite(item.time))
+  .sort((a, b) => a.time - b.time))
+
+type ScatterTrendKey = 'p50_ms' | 'p95_ms' | 'p99_ms'
+
+function scatterTrendLinePath(key: ScatterTrendKey): string {
+  return scatterTrendBuckets.value
+    .filter(item => item.bucket[key] > 0)
+    .map((item, index) => `${index === 0 ? 'M' : 'L'} ${scatterXMillis(item.time).toFixed(1)} ${scatterY(item.bucket[key] * 1_000_000).toFixed(1)}`)
+    .join(' ')
+}
+
+function scatterTrendBandPath(highKey: ScatterTrendKey, lowKey: ScatterTrendKey): string {
+  const buckets = scatterTrendBuckets.value.filter(item => item.bucket[highKey] > 0 && item.bucket[lowKey] > 0)
+  if (buckets.length < 2) return ''
+  const upper = buckets.map((item, index) => `${index === 0 ? 'M' : 'L'} ${scatterXMillis(item.time).toFixed(1)} ${scatterY(item.bucket[highKey] * 1_000_000).toFixed(1)}`)
+  const lower = [...buckets].reverse().map(item => `L ${scatterXMillis(item.time).toFixed(1)} ${scatterY(item.bucket[lowKey] * 1_000_000).toFixed(1)}`)
+  return [...upper, ...lower, 'Z'].join(' ')
+}
+
+const scatterTrendHitboxes = computed(() => {
+  const buckets = scatterTrendBuckets.value
+  const plotWidth = SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right
+  const width = Math.max(8, plotWidth / Math.max(1, buckets.length))
+  return buckets.map(item => ({
+    ...item,
+    x: scatterXMillis(item.time),
+    y: scatterY(item.bucket.p95_ms * 1_000_000),
+    width,
+  }))
+})
+
 const scatterYTicks = computed(() => {
   const { minLog, maxLog } = scatterScale.value
   const span = maxLog - minLog
@@ -1587,12 +1787,15 @@ const scatterYTicks = computed(() => {
 
 const scatterXTicks = computed(() => {
   const { minT, maxT } = scatterScale.value
+  const includeDate = maxT - minT >= 24 * 60 * 60 * 1000
   return Array.from({ length: 5 }, (_, i) => {
     const frac = i / 4
     const value = minT + (maxT - minT) * frac
     return {
       x: SCATTER_PAD.left + frac * (SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right),
-      label: new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      label: includeDate
+        ? new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }
   })
 })
@@ -1605,34 +1808,57 @@ const scatterPercentiles = computed(() => [
 
 const scatterSelectedIds = computed(() => new Set(scatterPendingSelection.value?.rows.map((row) => row.span_id) ?? []))
 
-const scatterDensityBins = computed(() => {
-  const bins = new Map<string, { x: number; y: number; count: number; errors: number; minNs: number; maxNs: number }>()
-  const plotW = SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right
-  const plotH = SCATTER_H - SCATTER_PAD.top - SCATTER_PAD.bottom
-  for (const point of scatterPoints.value) {
-    const bx = Math.max(0, Math.min(39, Math.floor(((point.x - SCATTER_PAD.left) / plotW) * 40)))
-    const by = Math.max(0, Math.min(13, Math.floor(((point.y - SCATTER_PAD.top) / plotH) * 14)))
-    const key = `${bx}:${by}`
-    const current = bins.get(key)
-    if (current) {
-      current.count++
-      if (point.error) current.errors++
-      current.minNs = Math.min(current.minNs, point.row.duration_ns)
-      current.maxNs = Math.max(current.maxNs, point.row.duration_ns)
-    } else {
-      bins.set(key, { x: point.x, y: point.y, count: 1, errors: point.error ? 1 : 0, minNs: point.row.duration_ns, maxNs: point.row.duration_ns })
-    }
+const scatterHeatmapCells = computed<ScatterHeatmapCell[]>(() => {
+  const cells = latencyHeatmap.value
+    .map(cell => ({ cell, time: parseBucketUtc(cell.bucket) }))
+    .filter(item => Number.isFinite(item.time) && item.cell.count > 0)
+
+  const bucketWidthMs = selectedPreset.value <= 60
+    ? 60_000
+    : selectedPreset.value <= 360
+      ? 5 * 60_000
+      : 60 * 60_000
+  const counts = cells.map(item => item.cell.count).sort((a, b) => a - b)
+  const robustCeiling = Math.max(4, percentile(counts, .95))
+  const totalsByBucket = new Map<string, number>()
+  for (const { cell } of cells) {
+    totalsByBucket.set(cell.bucket, (totalsByBucket.get(cell.bucket) ?? 0) + cell.count)
   }
-  return [...bins.values()]
+
+  return cells.map(({ cell, time }) => {
+    const minNs = Math.pow(10, cell.latency_bin / 4) * 1_000_000
+    const maxNs = Math.pow(10, (cell.latency_bin + 1) / 4) * 1_000_000
+    const bucketEndMs = Math.min(time + bucketWidthMs, scatterScale.value.maxT)
+    const left = scatterXMillis(time)
+    const right = scatterXMillis(bucketEndMs)
+    const top = scatterY(maxNs)
+    const bottom = scatterY(minNs)
+    const density = Math.min(1, Math.log1p(cell.count) / Math.log1p(robustCeiling))
+    const share = cell.count / Math.max(1, totalsByBucket.get(cell.bucket) ?? cell.count)
+    return {
+      cell,
+      x: left,
+      y: top,
+      width: Math.max(1, right - left - .7),
+      height: Math.max(1, bottom - top - .7),
+      intensity: Math.max(1, Math.min(5, Math.ceil(density * 5))),
+      minNs,
+      maxNs,
+      bucketEndMs,
+      shareLabel: share < .01 ? `${(share * 100).toFixed(1)}%` : `${Math.round(share * 100)}%`,
+    }
+  })
 })
 
 const scatterSelectionSummary = computed(() => {
   const selection = scatterPendingSelection.value
   if (!selection) return null
-  const services = new Set(selection.rows.map((row) => row.service_name)).size
-  const errors = selection.rows.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500).length
+  const previewRows = scatterCohortRows.value ?? selection.rows
+  const services = new Set(previewRows.map((row) => row.service_name)).size
+  const errors = previewRows.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500).length
   return {
-    count: selection.rows.length,
+    count: scatterCohortRows.value !== null ? scatterCohortTotal.value : selection.rows.length,
+    loadedCount: previewRows.length,
     services,
     errors,
     time: `${new Date(selection.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}–${new Date(selection.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
@@ -1656,41 +1882,55 @@ function moveScatterBrush(e: PointerEvent) {
   if (!scatterDragging.value || !scatterBrush.value) return
   const p = scatterCoord(e); scatterBrush.value = { ...scatterBrush.value, x2: p.x, y2: p.y }
 }
+
+function scatterTimeAtX(x: number): number {
+  const plotWidth = SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right
+  const fraction = Math.max(0, Math.min(1, (x - SCATTER_PAD.left) / plotWidth))
+  return scatterScale.value.minT + fraction * (scatterScale.value.maxT - scatterScale.value.minT)
+}
+
+function scatterDurationAtY(y: number): number {
+  const plotHeight = SCATTER_H - SCATTER_PAD.top - SCATTER_PAD.bottom
+  const fraction = 1 - Math.max(0, Math.min(1, (y - SCATTER_PAD.top) / plotHeight))
+  const { minLog, maxLog } = scatterScale.value
+  return Math.pow(10, minLog + fraction * (maxLog - minLog))
+}
+
 function finishScatterBrush() {
   if (!scatterBrush.value) return
   scatterDragging.value = false
   const b = scatterBrush.value
   const left = Math.min(b.x1, b.x2), right = Math.max(b.x1, b.x2)
   const top = Math.min(b.y1, b.y2), bottom = Math.max(b.y1, b.y2)
+  if (right - left < 4 || bottom - top < 4) { clearScatterSelection(); return }
   const selected = scatterPoints.value.filter(p => p.x >= left && p.x <= right && p.y >= top && p.y <= bottom)
-  if (!selected.length) { clearScatterSelection(); return }
-  const times = selected.map(p => Number(p.row.timestamp) / 1_000_000)
-  const durations = selected.map(p => p.row.duration_ns)
-  const from = new Date(Math.min(...times)).toISOString()
-  const to = new Date(Math.max(...times) + 1).toISOString()
-  scatterPendingSelection.value = {
-    label: 'Selected spans',
+  setScatterSelection({
+    label: 'Selected latency window',
     rows: selected.map((point) => point.row),
-    startTime: from,
-    endTime: to,
-    minDurationNs: Math.min(...durations),
-    maxDurationNs: Math.max(...durations),
+    startTime: new Date(scatterTimeAtX(left)).toISOString(),
+    endTime: new Date(scatterTimeAtX(right)).toISOString(),
+    minDurationNs: Math.round(scatterDurationAtY(bottom)),
+    maxDurationNs: Math.round(scatterDurationAtY(top)),
     queryWide: true,
-  }
+  })
 }
 
 function clearScatterSelection() {
   scatterBrush.value = null
   scatterPendingSelection.value = null
+  resetScatterCohortRows()
   scatterHoverPoint.value = null
-  scatterHoverDensity.value = null
+  scatterHoverHeatmap.value = null
+  scatterHoverTrend.value = null
+  syncUrlState()
 }
 
 function toggleScatterExpanded() {
   scatterExpanded.value = !scatterExpanded.value
   if (!scatterExpanded.value) {
     scatterHoverPoint.value = null
-    scatterHoverDensity.value = null
+    scatterHoverHeatmap.value = null
+    scatterHoverTrend.value = null
   }
 }
 
@@ -1699,24 +1939,24 @@ function prepareScatterQuickAnalysis(kind: 'slow' | 'errors' | 'recent') {
   if (!rows.length) return
   if (kind === 'slow') {
     const threshold = percentile(rows.map((row) => row.duration_ns), .95)
-    scatterPendingSelection.value = {
+    setScatterSelection({
       label: 'Slowest 5%', rows: rows.filter((row) => row.duration_ns >= threshold),
       startTime: timeRange.value.from, endTime: timeRange.value.to, minDurationNs: threshold, queryWide: true,
-    }
+    })
   } else if (kind === 'errors') {
-    scatterPendingSelection.value = {
+    setScatterSelection({
       label: 'All errors in this query', rows: rows.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500),
       startTime: timeRange.value.from, endTime: timeRange.value.to, errorsOnly: true, queryWide: true,
-    }
+    })
   } else {
     const fromMs = new Date(timeRange.value.from).getTime()
     const toMs = new Date(timeRange.value.to).getTime()
     const midpoint = fromMs + (toMs - fromMs) / 2
-    scatterPendingSelection.value = {
+    setScatterSelection({
       label: 'Recent half vs earlier half',
       rows: rows.filter((row) => Number(row.timestamp) / 1_000_000 >= midpoint),
       startTime: new Date(midpoint).toISOString(), endTime: timeRange.value.to, queryWide: true,
-    }
+    })
   }
   scatterBrush.value = null
 }
@@ -1730,6 +1970,7 @@ function analyzeScatterSelection() {
     minDurationNs: selection.minDurationNs, maxDurationNs: selection.maxDurationNs,
     errorsOnly: selection.errorsOnly, excludeFromBaseline: true, label: selection.label,
   }
+  syncUrlState()
   void runBubbleUp()
 }
 
@@ -1745,181 +1986,32 @@ function runQuickCompare(kind: 'slow' | 'errors' | 'recent') {
 }
 
 function openScatterSpan(row: RushEvent) {
-  const index = results.value.findIndex((candidate) => candidate.span_id === row.span_id)
+  const index = visibleSpanResults.value.findIndex((candidate) => candidate.span_id === row.span_id)
   if (index >= 0) openDetailModal(index)
 }
 
 function scatterTooltipStyle(x: number, y: number) {
   return {
-    left: `${(x / SCATTER_W) * 100}%`,
-    top: `${(y / SCATTER_H) * 100}%`,
+    left: `${Math.max(18, Math.min(82, (x / SCATTER_W) * 100))}%`,
+    top: `${Math.max(12, (y / SCATTER_H) * 100)}%`,
   }
 }
+
+const scatterHoverPosition = computed(() => {
+  if (scatterHoverPoint.value) return scatterHoverPoint.value
+  if (scatterHoverHeatmap.value) {
+    return {
+      x: scatterHoverHeatmap.value.x + scatterHoverHeatmap.value.width / 2,
+      y: scatterHoverHeatmap.value.y + scatterHoverHeatmap.value.height / 2,
+    }
+  }
+  return scatterHoverTrend.value
+})
 
 function scatterPointLabel(point: ScatterPoint): string {
   const row = point.row
   const operation = `${row.service_name} ${row.http_method || ''} ${row.http_path || '(unknown operation)'}`.replace(/\s+/g, ' ').trim()
   return `${operation}, ${formatDuration(row.duration_ns)}, ${point.error ? 'error' : 'successful span'}`
-}
-
-const hoveredBucket = ref<number | null>(null)
-const tooltipX = ref(0)
-const tooltipY = ref(0)
-
-function onBarEnter(i: number, event: MouseEvent) {
-  hoveredBucket.value = i
-  updateTooltipPos(event)
-}
-
-function onBarMove(event: MouseEvent) {
-  updateTooltipPos(event)
-}
-
-function onBarLeave() {
-  hoveredBucket.value = null
-}
-
-function updateTooltipPos(event: MouseEvent) {
-  const rect = (event.currentTarget as HTMLElement).closest('.histo-bars')?.getBoundingClientRect()
-  if (!rect) return
-  tooltipX.value = event.clientX - rect.left
-  tooltipY.value = event.clientY - rect.top
-}
-
-function formatBucketTime(bucket: string, includeDate = false): string {
-  // bucket is UTC from ClickHouse — convert to local time
-  const d = new Date(parseBucketUtc(bucket))
-  const hh = d.getHours().toString().padStart(2, '0')
-  const mm = d.getMinutes().toString().padStart(2, '0')
-  if (includeDate) {
-    const mon = (d.getMonth() + 1).toString().padStart(2, '0')
-    const day = d.getDate().toString().padStart(2, '0')
-    return `${mon}/${day} ${hh}:${mm}`
-  }
-  return `${hh}:${mm}`
-}
-
-function isMultiDayRange(): boolean {
-  if (customRange.value) {
-    const diffMs = new Date(customRange.value.to).getTime() - new Date(customRange.value.from).getTime()
-    return diffMs >= 24 * 60 * 60 * 1000
-  }
-  return selectedPreset.value >= 1440 // 1 day in minutes
-}
-
-const hoveredBucketData = computed(() => {
-  if (hoveredBucket.value === null) return null
-  const b = filledHistogram.value[hoveredBucket.value]
-  if (!b) return null
-  const okCount = b.count - (b.error_count || 0)
-  const errRate = b.count > 0 ? ((b.error_count || 0) / b.count * 100).toFixed(1) : '0.0'
-  return {
-    time: formatBucketTime(b.bucket, isMultiDayRange()),
-    total: b.count.toLocaleString(),
-    ok: okCount.toLocaleString(),
-    errors: (b.error_count || 0).toLocaleString(),
-    errRate,
-  }
-})
-
-// ═══ Histogram drag-to-select ═══
-const dragActive = ref(false)
-const dragStartIdx = ref(0)
-const dragEndIdx = ref(0)
-
-const dragRange = computed(() => {
-  if (!dragActive.value) return { left: 0, right: 0, visible: false, fromLabel: '', toLabel: '' }
-  const lo = Math.min(dragStartIdx.value, dragEndIdx.value)
-  const hi = Math.max(dragStartIdx.value, dragEndIdx.value)
-  const total = filledHistogram.value.length || 1
-
-  const fromBucket = filledHistogram.value[lo]
-  const toBucket = filledHistogram.value[hi]
-  const showDate = isMultiDayRange()
-  const fromLabel = fromBucket ? formatBucketTime(fromBucket.bucket, showDate) : ''
-  const toLabel = toBucket ? formatBucketTime(toBucket.bucket, showDate) : ''
-
-  return {
-    left: (lo / total) * 100,
-    right: 100 - ((hi + 1) / total) * 100,
-    visible: true,
-    fromLabel,
-    toLabel,
-  }
-})
-
-function getBarIndex(event: MouseEvent): number {
-  const barsEl = (event.currentTarget as HTMLElement).closest('.histo-bars') as HTMLElement | null
-  if (!barsEl) return 0
-  const rect = barsEl.getBoundingClientRect()
-  const x = event.clientX - rect.left
-  const pct = x / rect.width
-  return Math.max(0, Math.min(filledHistogram.value.length - 1, Math.floor(pct * filledHistogram.value.length)))
-}
-
-const histoBarsEl = ref<HTMLElement | null>(null)
-
-function getBarIndexFromGlobal(event: MouseEvent): number {
-  const el = histoBarsEl.value
-  if (!el) return dragEndIdx.value
-  const rect = el.getBoundingClientRect()
-  const x = Math.max(0, Math.min(event.clientX - rect.left, rect.width))
-  const pct = x / rect.width
-  return Math.max(0, Math.min(filledHistogram.value.length - 1, Math.floor(pct * filledHistogram.value.length)))
-}
-
-function onGlobalDragMove(event: MouseEvent) {
-  if (!dragActive.value) return
-  dragEndIdx.value = getBarIndexFromGlobal(event)
-}
-
-const dragShiftHeld = ref(false)
-
-function onHistoDragStart(event: MouseEvent) {
-  const idx = getBarIndex(event)
-  dragActive.value = true
-  dragStartIdx.value = idx
-  dragEndIdx.value = idx
-  dragShiftHeld.value = event.shiftKey
-  // Listen globally so drag works outside the histogram
-  window.addEventListener('mousemove', onGlobalDragMove)
-  window.addEventListener('mouseup', onGlobalDragEnd)
-}
-
-function onGlobalDragEnd() {
-  window.removeEventListener('mousemove', onGlobalDragMove)
-  window.removeEventListener('mouseup', onGlobalDragEnd)
-  if (!dragActive.value) return
-  dragActive.value = false
-  const lo = Math.min(dragStartIdx.value, dragEndIdx.value)
-  const hi = Math.max(dragStartIdx.value, dragEndIdx.value)
-  if (lo === hi) return // single click, ignore
-
-  // Shift+drag = BubbleUp selection, normal drag = zoom
-  if (dragShiftHeld.value) {
-    selectBubbleUpRange(lo, hi)
-    runBubbleUp()
-    return
-  }
-
-  const startBucket = filledHistogram.value[lo]
-  const endBucket = filledHistogram.value[hi]
-  if (!startBucket || !endBucket) return
-
-  // Parse bucket timestamps (UTC format "2026-02-12 22:00:00")
-  const fromDate = new Date(startBucket.bucket + 'Z')
-  const toDate = new Date(endBucket.bucket + 'Z')
-  // Add one interval to end bucket to cover its full range
-  const intervalMs = filledHistogram.value.length > 1
-    ? new Date(filledHistogram.value[1]!.bucket + 'Z').getTime() - new Date(filledHistogram.value[0]!.bucket + 'Z').getTime()
-    : 60000
-  toDate.setTime(toDate.getTime() + intervalMs)
-
-  customRange.value = {
-    from: fromDate.toISOString(),
-    to: toDate.toISOString(),
-  }
-  search()
 }
 
 // ═══ BubbleUp Analysis ═══
@@ -1937,25 +2029,6 @@ const bubbleUpSelection = ref<{
 const bubbleUpResult = ref<BubbleUpResponse | null>(null)
 const bubbleUpLoading = ref(false)
 const bubbleUpError = ref<string | null>(null)
-
-// Overlay computed: shows the amber selection highlight on the histogram while BubbleUp is active
-const bubbleUpOverlay = computed(() => {
-  if (!bubbleUpSelection.value) return { left: 0, right: 0, visible: false, fromLabel: '', toLabel: '' }
-  const { startIdx, endIdx } = bubbleUpSelection.value
-  const lo = Math.min(startIdx, endIdx)
-  const hi = Math.max(startIdx, endIdx)
-  const total = filledHistogram.value.length || 1
-  const fromBucket = filledHistogram.value[lo]
-  const toBucket = filledHistogram.value[hi]
-  const showDate = isMultiDayRange()
-  return {
-    left: (lo / total) * 100,
-    right: 100 - ((hi + 1) / total) * 100,
-    visible: true,
-    fromLabel: fromBucket ? formatBucketTime(fromBucket.bucket, showDate) : '',
-    toLabel: toBucket ? formatBucketTime(toBucket.bucket, showDate) : '',
-  }
-})
 
 function selectBubbleUpRange(lo: number, hi: number) {
   const startBucket = filledHistogram.value[lo]
@@ -1977,6 +2050,34 @@ function selectBubbleUpRange(lo: number, hi: number) {
     excludeFromBaseline: true,
     label: 'Selected time window',
   }
+}
+
+function onTimelineRangeSelect(selection: { startIndex: number; endIndex: number; compare: boolean }) {
+  const { startIndex, endIndex, compare } = selection
+  if (compare) {
+    selectBubbleUpRange(startIndex, endIndex)
+    runBubbleUp()
+    return
+  }
+
+  const startBucket = filledHistogram.value[startIndex]
+  const endBucket = filledHistogram.value[endIndex]
+  if (!startBucket || !endBucket) return
+
+  const fromDate = new Date(`${startBucket.bucket.replace(' ', 'T')}Z`)
+  const toDate = new Date(`${endBucket.bucket.replace(' ', 'T')}Z`)
+  const intervalMs = filledHistogram.value.length > 1
+    ? new Date(`${filledHistogram.value[1]!.bucket.replace(' ', 'T')}Z`).getTime()
+      - new Date(`${filledHistogram.value[0]!.bucket.replace(' ', 'T')}Z`).getTime()
+    : 60_000
+  toDate.setTime(toDate.getTime() + intervalMs)
+  customRange.value = { from: fromDate.toISOString(), to: toDate.toISOString() }
+  search()
+}
+
+function resetTimelineRange() {
+  customRange.value = null
+  search()
 }
 
 async function runBubbleUp() {
@@ -2021,13 +2122,15 @@ function closeBubbleUp() {
   bubbleUpError.value = null
   scatterBrush.value = null
   scatterPendingSelection.value = null
+  resetScatterCohortRows()
   scatterHoverPoint.value = null
-  scatterHoverDensity.value = null
+  scatterHoverHeatmap.value = null
 }
 
 function closeCompareMode() {
   compareModeActive.value = false
   closeBubbleUp()
+  syncUrlState()
 }
 
 const compareSelectionLabel = computed(() => bubbleUpSelection.value?.label || 'Selected cohort')
@@ -2121,7 +2224,7 @@ function openDetailModal(index: number) {
   modalSource.value = 'span'
   modalRowIndex.value = index
   modalLogIndex.value = null
-  const row = results.value[index]
+  const row = visibleSpanResults.value[index]
   if (row) {
     loadApmData(row)
     if (row.trace_id) loadTraceData(row)
@@ -2339,7 +2442,7 @@ function getSpanK8sMeta(attrsJson: string): { key: string; value: string }[] {
 
 function getVisibleRowCount(): number {
   if (viewMode.value === 'logs') return logEntries.value.length
-  return results.value.length
+  return visibleSpanResults.value.length
 }
 
 function scrollSelectedRowIntoView() {
@@ -3622,6 +3725,7 @@ function applyNlQuery() {
 // ═══ Share link ═══
 const shareCopied = ref(false)
 const pendingDeepLink = ref<{ trace: string; span: string } | null>(null)
+const pendingLatencyDeepLink = ref<PendingLatencyDeepLink | null>(null)
 // Deep-link to a specific log line: target timestamp (ns) parsed from the URL,
 // and a transient highlight index applied after we scroll to it.
 const pendingLogDeepLink = ref<number | null>(null)
@@ -3665,6 +3769,16 @@ function buildQueryParams(): Record<string, string> {
     const e = logEntries.value[inlineExpandedLog.value]
     if (e) p.log = String(e.timestamp)
   }
+  const cohort = scatterPendingSelection.value
+  if (cohort) {
+    p.cohort = 'latency'
+    p.cohort_from = cohort.startTime
+    p.cohort_to = cohort.endTime
+    if (cohort.minDurationNs !== undefined) p.cohort_min_ns = String(cohort.minDurationNs)
+    if (cohort.maxDurationNs !== undefined) p.cohort_max_ns = String(cohort.maxDurationNs)
+    if (cohort.errorsOnly) p.cohort_errors = '1'
+    if (bubbleUpSelection.value) p.cohort_compare = '1'
+  }
   return p
 }
 
@@ -3674,12 +3788,21 @@ function buildShareUrl(): string {
   return `${window.location.origin}/${qs ? '?' + qs : ''}`
 }
 
-let skipNextUrlSync = false
+// Searches can overlap during startup. For example, restoring a saved time
+// preset triggers its watcher while the mounted hook also starts a search.
+// Hold every URL write until all deep-link state has been restored so an early
+// search cannot replace a shared link with the default Explore URL.
+let restoringUrlState = true
 
 function syncUrlState() {
-  if (skipNextUrlSync) { skipNextUrlSync = false; return }
+  if (restoringUrlState) return
   const query = buildQueryParams()
   router.replace({ query })
+}
+
+function finishUrlRestore() {
+  restoringUrlState = false
+  syncUrlState()
 }
 
 async function shareLink() {
@@ -3694,7 +3817,6 @@ async function shareLink() {
 function restoreFromUrl() {
   const q = route.query
   if (!q || Object.keys(q).length === 0) return
-  skipNextUrlSync = true
   if (q.q) searchInput.value = String(q.q)
   if (q.mode === 'logs') viewMode.value = 'logs'
   else if (q.mode === 'traces') { viewMode.value = 'spans'; tracesOnly.value = true }
@@ -3728,6 +3850,33 @@ function restoreFromUrl() {
   if (q.log) {
     const ts = Number(q.log)
     if (Number.isFinite(ts)) pendingLogDeepLink.value = ts
+  }
+  if (q.cohort === 'latency' && q.cohort_from && q.cohort_to) {
+    const startTime = new Date(String(q.cohort_from))
+    const endTime = new Date(String(q.cohort_to))
+    const minDurationNs = q.cohort_min_ns === undefined ? undefined : Number(q.cohort_min_ns)
+    const maxDurationNs = q.cohort_max_ns === undefined ? undefined : Number(q.cohort_max_ns)
+    const validMin = minDurationNs === undefined || (Number.isFinite(minDurationNs) && minDurationNs > 0)
+    const validMax = maxDurationNs === undefined || (Number.isFinite(maxDurationNs) && maxDurationNs > 0)
+    const validOrder = minDurationNs === undefined || maxDurationNs === undefined || minDurationNs <= maxDurationNs
+    if (
+      Number.isFinite(startTime.getTime())
+      && Number.isFinite(endTime.getTime())
+      && startTime < endTime
+      && validMin
+      && validMax
+      && validOrder
+    ) {
+      pendingLatencyDeepLink.value = {
+        label: 'Shared latency cohort',
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        minDurationNs,
+        maxDurationNs,
+        errorsOnly: q.cohort_errors === '1',
+        compare: q.cohort_compare === '1',
+      }
+    }
   }
 }
 
@@ -3792,6 +3941,37 @@ onMounted(async () => {
   api.getFeatures().then(f => { exportMaxRows.value = f.export_max_rows || 1000 }).catch(() => { /* keep default */ })
   await search()
   if (viewMode.value === 'logs') await fetchOtelLogs()
+
+  if (pendingLatencyDeepLink.value && viewMode.value === 'spans') {
+    const pending = pendingLatencyDeepLink.value
+    pendingLatencyDeepLink.value = null
+    const selection: ScatterSelection = {
+      label: pending.label,
+      rows: [],
+      startTime: pending.startTime,
+      endTime: pending.endTime,
+      minDurationNs: pending.minDurationNs,
+      maxDurationNs: pending.maxDurationNs,
+      errorsOnly: pending.errorsOnly,
+      queryWide: true,
+    }
+    const clampChartY = (value: number) => Math.max(
+      SCATTER_PAD.top,
+      Math.min(SCATTER_H - SCATTER_PAD.bottom, value),
+    )
+    scatterBrush.value = {
+      x1: scatterXMillis(new Date(selection.startTime).getTime()),
+      x2: scatterXMillis(new Date(selection.endTime).getTime()),
+      y1: selection.maxDurationNs === undefined ? SCATTER_PAD.top : clampChartY(scatterY(selection.maxDurationNs)),
+      y2: selection.minDurationNs === undefined ? SCATTER_H - SCATTER_PAD.bottom : clampChartY(scatterY(selection.minDurationNs)),
+    }
+    setScatterSelection(selection)
+    if (pending.compare) analyzeScatterSelection()
+  }
+
+  // URL writes are safe now. The selected cohort, if present, has been moved
+  // from temporary startup state into the normal shareable selection state.
+  finishUrlRestore()
 
   // Deep-link: scroll to + highlight a specific log line once logs are loaded.
   if (pendingLogDeepLink.value !== null) {
@@ -4934,7 +5114,7 @@ onMounted(async () => {
           :class="{ 'is-collapsed': !scatterExpanded }"
           title="Latency over time"
           description="Inspect span latency, isolate slow or error cohorts, and compare them with the query baseline."
-          :caption="scatterExpanded ? 'Loaded results only · scroll the table to sample up to 500 spans.' : ''"
+          :caption="scatterExpanded ? (scatterMode === 'dots' ? 'Loaded results only · scroll the table to sample up to 500 spans.' : 'All matching spans · bucketed across the selected time range.') : ''"
           :source-label="scatterExpanded ? 'Spans' : ''"
           :range-label="scatterRangeLabel"
         >
@@ -4954,48 +5134,72 @@ onMounted(async () => {
 
           <template #summary>
             <div class="scatter-summary" aria-label="Loaded latency percentiles">
-              <span><small>P50</small><strong class="mono">{{ formatDuration(scatterStats.p50) }}</strong></span>
-              <span><small>P95</small><strong class="mono">{{ formatDuration(scatterStats.p95) }}</strong></span>
-              <span><small>P99</small><strong class="mono">{{ formatDuration(scatterStats.p99) }}</strong></span>
-              <span v-if="scatterStats.errors" class="scatter-error-count"><small>Errors</small><strong class="mono">{{ scatterStats.errors }}</strong></span>
+              <span class="scatter-summary-lead">
+                <small>Loaded sample</small>
+                <strong class="mono">{{ scatterStats.count.toLocaleString() }}</strong>
+                <em>spans</em>
+              </span>
+              <span class="scatter-percentile-stat p50">
+                <small><b>P50</b> typical</small>
+                <strong class="mono">{{ formatDuration(scatterStats.p50) }}</strong>
+              </span>
+              <span class="scatter-percentile-stat p95">
+                <small><b>P95</b> slow boundary</small>
+                <strong class="mono">{{ formatDuration(scatterStats.p95) }}</strong>
+              </span>
+              <span class="scatter-percentile-stat p99">
+                <small><b>P99</b> tail</small>
+                <strong class="mono">{{ formatDuration(scatterStats.p99) }}</strong>
+              </span>
+              <span class="scatter-error-count">
+                <small>Errors</small>
+                <strong class="mono">{{ scatterStats.errors.toLocaleString() }}</strong>
+              </span>
             </div>
           </template>
 
           <div v-if="scatterExpanded" id="latency-over-time-chart" class="scatter-content">
             <div class="scatter-actions">
               <div class="scatter-chart-controls">
-                <span class="scatter-instruction">Each dot is a span. Higher dots took longer. Drag to select a cohort.</span>
+                <span class="scatter-instruction">
+                  <strong>Drag to isolate a cohort</strong>
+                  <span>Select a time and latency region together.</span>
+                </span>
                 <div class="scatter-mode-toggle" role="group" aria-label="Latency chart display">
-                  <button :class="{ active: scatterMode === 'dots' }" @click="scatterMode = 'dots'">Dots</button>
-                  <button :class="{ active: scatterMode === 'density' }" @click="scatterMode = 'density'">Density</button>
+                  <button :class="{ active: scatterMode === 'heatmap' }" :disabled="!scatterHeatmapCells.length" @click="scatterMode = 'heatmap'">Heatmap</button>
+                  <button :class="{ active: scatterMode === 'trend' }" :disabled="!scatterTrendBuckets.length" @click="scatterMode = 'trend'">Trend</button>
+                  <button :class="{ active: scatterMode === 'dots' }" @click="scatterMode = 'dots'">Points</button>
                 </div>
               </div>
-            <div class="scatter-quick-actions" aria-label="Quick latency analyses">
-              <button @click="prepareScatterQuickAnalysis('slow')">Analyze slowest 5%</button>
-              <button @click="prepareScatterQuickAnalysis('errors')">Analyze all errors</button>
-              <button @click="prepareScatterQuickAnalysis('recent')">Compare before / after</button>
-            </div>
+              <div class="scatter-quick-actions" aria-label="Quick latency analyses">
+                <span>Compare</span>
+                <button @click="prepareScatterQuickAnalysis('slow')">Slowest 5%</button>
+                <button @click="prepareScatterQuickAnalysis('errors')">All errors</button>
+                <button @click="prepareScatterQuickAnalysis('recent')">Before vs after</button>
+              </div>
             </div>
 
           <div class="scatter-plot-wrap">
             <svg
               class="scatter-svg"
               :viewBox="`0 0 ${SCATTER_W} ${SCATTER_H}`"
-              preserveAspectRatio="none"
+              preserveAspectRatio="xMidYMid meet"
               role="img"
-              aria-label="Span latency over time. Use pointer drag to select a cohort, or tab to individual dots and press Enter to inspect a span."
+              aria-label="Span latency heatmap on a logarithmic scale. Darker cells contain more spans. Drag to select a cohort, or use Points mode to inspect individual spans."
               @pointerdown="startScatterBrush"
               @pointermove="moveScatterBrush"
               @pointerup="finishScatterBrush"
               @pointercancel="scatterDragging = false"
             >
-              <!-- Slow-tail region above P95. -->
-              <rect
-                :x="SCATTER_PAD.left" :y="SCATTER_PAD.top"
-                :width="SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right"
-                :height="Math.max(0, scatterY(scatterStats.p95) - SCATTER_PAD.top)"
-                class="scatter-slow-zone"
-              />
+              <template v-if="scatterMode !== 'heatmap'">
+                <!-- Slow-tail context is useful for points and trends, but competes with heatmap density. -->
+                <rect
+                  :x="SCATTER_PAD.left" :y="SCATTER_PAD.top"
+                  :width="SCATTER_W - SCATTER_PAD.left - SCATTER_PAD.right"
+                  :height="Math.max(0, scatterY(scatterStats.p95) - SCATTER_PAD.top)"
+                  class="scatter-slow-zone"
+                />
+              </template>
 
               <!-- Real axes and logarithmic duration ticks. -->
               <g v-for="tick in scatterYTicks" :key="`y-${tick.value}`">
@@ -5006,15 +5210,74 @@ onMounted(async () => {
                 <line :x1="tick.x" :x2="tick.x" :y1="SCATTER_PAD.top" :y2="SCATTER_H - SCATTER_PAD.bottom" class="scatter-grid scatter-grid-x" />
                 <text :x="tick.x" :y="SCATTER_H - 10" text-anchor="middle" class="scatter-axis-label">{{ tick.label }}</text>
               </g>
-              <text x="13" :y="SCATTER_H / 2" text-anchor="middle" class="scatter-axis-title" :transform="`rotate(-90 13 ${SCATTER_H / 2})`">Duration · logarithmic</text>
+              <line
+                :x1="SCATTER_PAD.left" :x2="SCATTER_W - SCATTER_PAD.right"
+                :y1="SCATTER_H - SCATTER_PAD.bottom" :y2="SCATTER_H - SCATTER_PAD.bottom"
+                class="scatter-axis-baseline"
+              />
+              <text :x="SCATTER_PAD.left" y="17" class="scatter-axis-title">LATENCY · LOG SCALE</text>
 
-              <!-- P50/P95/P99 establish the service's current latency context. -->
-              <g v-for="line in scatterPercentiles" :key="line.label" :class="`scatter-percentile ${line.cls}`">
-                <line :x1="SCATTER_PAD.left" :x2="SCATTER_W - SCATTER_PAD.right" :y1="line.y" :y2="line.y" />
+              <template v-if="scatterMode !== 'heatmap'">
+                <!-- P50/P95/P99 establish the service's current latency context. -->
+                <g v-for="line in scatterPercentiles" :key="line.label" :class="`scatter-percentile ${line.cls}`">
+                  <line :x1="SCATTER_PAD.left" :x2="SCATTER_W - SCATTER_PAD.right" :y1="line.y" :y2="line.y" />
+                </g>
+                <text :x="SCATTER_PAD.left + 8" :y="SCATTER_PAD.top + 12" class="scatter-slow-label">Slow tail · above P95</text>
+              </template>
+
+              <g v-if="scatterHoverPosition" class="scatter-crosshair" aria-hidden="true">
+                <line
+                  :x1="scatterHoverPosition.x" :x2="scatterHoverPosition.x"
+                  :y1="SCATTER_PAD.top" :y2="SCATTER_H - SCATTER_PAD.bottom"
+                />
+                <line
+                  :x1="SCATTER_PAD.left" :x2="SCATTER_W - SCATTER_PAD.right"
+                  :y1="scatterHoverPosition.y" :y2="scatterHoverPosition.y"
+                />
               </g>
-              <text :x="SCATTER_PAD.left + 8" :y="SCATTER_PAD.top + 12" class="scatter-slow-label">Slow tail · above P95</text>
 
-              <template v-if="scatterMode === 'dots'">
+              <template v-if="scatterMode === 'heatmap'">
+                <g
+                  v-for="heatmapCell in scatterHeatmapCells"
+                  :key="`heatmap-${heatmapCell.cell.bucket}-${heatmapCell.cell.latency_bin}`"
+                  class="scatter-heatmap-cell-group"
+                  @mouseenter="scatterHoverHeatmap = heatmapCell"
+                  @mouseleave="scatterHoverHeatmap = null"
+                >
+                  <rect
+                    :x="heatmapCell.x" :y="heatmapCell.y"
+                    :width="heatmapCell.width" :height="heatmapCell.height"
+                    class="scatter-heatmap-cell"
+                    :class="[`intensity-${heatmapCell.intensity}`, { 'has-errors': heatmapCell.cell.error_count > 0 }]"
+                  />
+                  <circle
+                    v-if="heatmapCell.cell.error_count > 0"
+                    :cx="heatmapCell.x + heatmapCell.width - 2.2"
+                    :cy="heatmapCell.y + 2.2"
+                    r="1.45"
+                    class="scatter-heatmap-error-marker"
+                  />
+                </g>
+              </template>
+              <template v-else-if="scatterMode === 'trend'">
+                <path :d="scatterTrendBandPath('p99_ms', 'p95_ms')" class="scatter-trend-band scatter-trend-band--tail" />
+                <path :d="scatterTrendBandPath('p95_ms', 'p50_ms')" class="scatter-trend-band scatter-trend-band--typical" />
+                <path :d="scatterTrendLinePath('p50_ms')" class="scatter-trend-line p50" />
+                <path :d="scatterTrendLinePath('p95_ms')" class="scatter-trend-line p95" />
+                <path :d="scatterTrendLinePath('p99_ms')" class="scatter-trend-line p99" />
+                <rect
+                  v-for="item in scatterTrendHitboxes"
+                  :key="`trend-${item.bucket.bucket}`"
+                  :x="item.x - item.width / 2"
+                  :y="SCATTER_PAD.top"
+                  :width="item.width"
+                  :height="SCATTER_H - SCATTER_PAD.top - SCATTER_PAD.bottom"
+                  class="scatter-trend-hitbox"
+                  @mouseenter="scatterHoverTrend = { x: item.x, y: item.y, bucket: item.bucket }"
+                  @mouseleave="scatterHoverTrend = null"
+                />
+              </template>
+              <template v-else-if="scatterMode === 'dots'">
                 <circle
                   v-for="point in scatterPoints"
                   :key="point.row.span_id"
@@ -5034,19 +5297,6 @@ onMounted(async () => {
                   @keydown.space.prevent="openScatterSpan(point.row)"
                 />
               </template>
-              <template v-else>
-                <circle
-                  v-for="(bin, i) in scatterDensityBins"
-                  :key="`density-${i}`"
-                  :cx="bin.x" :cy="bin.y" :r="Math.min(15, 3 + Math.sqrt(bin.count) * 2.2)"
-                  class="scatter-density"
-                  :class="{ error: bin.errors / bin.count >= .5 }"
-                  :style="{ opacity: Math.min(.9, .28 + bin.count / 12) }"
-                  @pointerdown.stop
-                  @mouseenter="scatterHoverDensity = bin"
-                  @mouseleave="scatterHoverDensity = null"
-                />
-              </template>
 
               <rect
                 v-if="scatterBrush"
@@ -5064,26 +5314,44 @@ onMounted(async () => {
               <span>{{ formatTimestamp(scatterHoverPoint.row.timestamp) }}</span>
               <em>Click to inspect span</em>
             </div>
-            <div v-else-if="scatterHoverDensity" class="scatter-tooltip" :style="scatterTooltipStyle(scatterHoverDensity.x, scatterHoverDensity.y)">
-              <strong>{{ scatterHoverDensity.count }} spans in this area</strong>
-              <span>{{ formatDuration(scatterHoverDensity.minNs) }}–{{ formatDuration(scatterHoverDensity.maxNs) }}</span>
-              <span>{{ scatterHoverDensity.errors }} errors</span>
+            <div v-else-if="scatterHoverHeatmap" class="scatter-tooltip" :style="scatterTooltipStyle(scatterHoverHeatmap.x + scatterHoverHeatmap.width / 2, scatterHoverHeatmap.y + scatterHoverHeatmap.height / 2)">
+              <strong>{{ scatterHoverHeatmap.cell.count.toLocaleString() }} spans in this latency band</strong>
+              <span><b>{{ formatDuration(scatterHoverHeatmap.minNs) }}–{{ formatDuration(scatterHoverHeatmap.maxNs) }}</b> latency</span>
+              <span>{{ new Date(parseBucketUtc(scatterHoverHeatmap.cell.bucket)).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}–{{ new Date(scatterHoverHeatmap.bucketEndMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span>
+              <span>{{ scatterHoverHeatmap.shareLabel }} of spans in this time bucket</span>
+              <span>{{ scatterHoverHeatmap.cell.error_count.toLocaleString() }} errors</span>
+              <em>Drag around this region to compare it</em>
+            </div>
+            <div v-else-if="scatterHoverTrend" class="scatter-tooltip scatter-tooltip--trend" :style="scatterTooltipStyle(scatterHoverTrend.x, scatterHoverTrend.y)">
+              <strong>{{ new Date(parseBucketUtc(scatterHoverTrend.bucket.bucket)).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}</strong>
+              <span><b>P50</b> {{ formatDuration(scatterHoverTrend.bucket.p50_ms * 1_000_000) }}</span>
+              <span><b>P95</b> {{ formatDuration(scatterHoverTrend.bucket.p95_ms * 1_000_000) }}</span>
+              <span><b>P99</b> {{ formatDuration(scatterHoverTrend.bucket.p99_ms * 1_000_000) }}</span>
+              <em>{{ scatterHoverTrend.bucket.count.toLocaleString() }} spans · {{ scatterHoverTrend.bucket.error_count.toLocaleString() }} errors</em>
             </div>
           </div>
 
           <div class="scatter-footer">
             <div class="scatter-legends">
-              <div class="scatter-percentile-legend" aria-label="Latency percentile reference lines">
+              <div v-if="scatterMode !== 'heatmap'" class="scatter-percentile-legend" aria-label="Latency percentile reference lines">
                 <span v-for="line in scatterPercentiles" :key="`legend-${line.label}`">
                   <i :class="`percentile-swatch ${line.cls}`" />
                   <strong>{{ line.label }}</strong>
                   <b class="mono">{{ formatDuration(line.value) }}</b>
                 </span>
               </div>
-              <div class="scatter-legend">
-                <span><i class="legend-dot normal" /> normal span</span>
-                <span><i class="legend-dot error" /> error / HTTP 5xx</span>
-                <span><i class="legend-dot selected" /> selected</span>
+              <div v-if="scatterMode === 'heatmap'" class="scatter-legend scatter-density-legend" aria-label="Heatmap density">
+                <span>Fewer spans</span>
+                <span class="density-scale" aria-hidden="true">
+                  <i v-for="step in 5" :key="step" :class="`intensity-${step}`" />
+                </span>
+                <span>More spans</span>
+                <span><i class="legend-dot error" /> Contains errors</span>
+              </div>
+              <div v-else-if="scatterMode === 'dots'" class="scatter-legend">
+                <span><i class="legend-dot normal" /> Individual span</span>
+                <span><i class="legend-dot error" /> Error / HTTP 5xx</span>
+                <span v-if="scatterMode === 'dots'"><i class="legend-dot selected" /> Selected cohort</span>
               </div>
             </div>
           </div>
@@ -5093,9 +5361,11 @@ onMounted(async () => {
               <span class="scatter-review-kicker">Ready to compare</span>
               <strong>{{ scatterPendingSelection.label }}</strong>
               <p>
-                All matching spans in the full query · {{ scatterSelectionSummary.time }} · {{ scatterSelectionSummary.duration }}
-                <template v-if="scatterSelectionSummary.count">
-                  · loaded preview: {{ scatterSelectionSummary.count }} spans
+                Selected cohort · {{ scatterSelectionSummary.time }} · {{ scatterSelectionSummary.duration }}
+                <template v-if="scatterCohortLoading"> · loading matching spans below</template>
+                <template v-else-if="scatterCohortError"> · {{ scatterCohortError }}</template>
+                <template v-else-if="scatterSelectionSummary.count">
+                  · showing {{ scatterSelectionSummary.loadedCount.toLocaleString() }} of {{ formattedCohortTotal() }} matching spans
                   <template v-if="scatterSelectionSummary.errors">, {{ scatterSelectionSummary.errors }} errors</template>
                   across {{ scatterSelectionSummary.services }} service{{ scatterSelectionSummary.services === 1 ? '' : 's' }}
                 </template>
@@ -5109,111 +5379,19 @@ onMounted(async () => {
           </div>
         </PanelCard>
 
-        <!-- ═══ Histogram: waiting / loading / ready ═══ -->
-        <div v-if="histogramPhase === 'waiting'" class="histo card" style="min-height:90px;display:flex;align-items:center;justify-content:center">
-          <div style="display:flex;align-items:center;gap:10px">
-            <svg width="20" height="20" viewBox="0 0 20 20" style="flex-shrink:0"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--border)" stroke-width="2"/><circle cx="10" cy="10" r="8" fill="none" stroke="var(--amber)" stroke-width="2" stroke-dasharray="20 32" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 10 10" to="360 10 10" dur="0.7s" repeatCount="indefinite"/></circle></svg>
-            <span class="text-muted" style="font-size:12px">Graph loads once results are returned&hellip;</span>
-          </div>
-        </div>
-        <div v-else-if="histogramPhase === 'loading'" class="histo card" style="min-height:90px;display:flex;align-items:center;justify-content:center">
-          <div style="display:flex;align-items:center;gap:10px">
-            <svg width="20" height="20" viewBox="0 0 20 20" style="flex-shrink:0"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--border)" stroke-width="2"/><circle cx="10" cy="10" r="8" fill="none" stroke="var(--amber)" stroke-width="2" stroke-dasharray="20 32" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 10 10" to="360 10 10" dur="0.7s" repeatCount="indefinite"/></circle></svg>
-            <span class="text-muted" style="font-size:12px">Loading graph&hellip;</span>
-          </div>
-        </div>
-
-        <!-- ═══ Histogram (stacked: ok + errors) ═══ -->
-        <div v-else-if="filledHistogram.length" class="histo card fade-in">
-          <div class="histo-header">
-            <span class="histo-count mono">{{ formattedTotal }} events</span>
-            <div class="histo-legend">
-              <span class="histo-legend-item"><span class="histo-legend-dot histo-dot-ok" /> ok</span>
-              <span class="histo-legend-item"><span class="histo-legend-dot histo-dot-err" /> 5xx / error</span>
-            </div>
-            <span class="histo-range mono text-muted">
-              {{ isMultiDayRange() ? timeRange.from.slice(5, 16).replace('T', ' ') : timeRange.from.slice(11, 19) }} &#8212; {{ isMultiDayRange() ? timeRange.to.slice(5, 16).replace('T', ' ') : timeRange.to.slice(11, 19) }}
-              <button v-if="customRange" class="histo-reset-btn" @click="customRange = null; search()" title="Reset to preset">&#10005;</button>
-            </span>
-          </div>
-          <div
-            ref="histoBarsEl"
-            class="histo-bars"
-            @mousedown.prevent="onHistoDragStart"
-            @mouseleave="onBarLeave"
-          >
-            <!-- Drag selection overlay -->
-            <div
-              v-if="dragRange.visible"
-              class="histo-drag-overlay"
-              :class="{ 'histo-drag-overlay-bubbleup': dragShiftHeld }"
-              :style="{ left: dragRange.left + '%', right: dragRange.right + '%' }"
-            >
-              <span class="drag-label drag-label-start mono">{{ dragRange.fromLabel }}</span>
-              <span class="drag-label drag-label-end mono">{{ dragRange.toLabel }}</span>
-            </div>
-            <!-- BubbleUp persistent selection overlay -->
-            <div
-              v-if="bubbleUpOverlay.visible && !dragRange.visible"
-              class="histo-drag-overlay histo-bubbleup-overlay"
-              :style="{ left: bubbleUpOverlay.left + '%', right: bubbleUpOverlay.right + '%' }"
-            >
-              <span class="drag-label drag-label-start mono">{{ bubbleUpOverlay.fromLabel }}</span>
-              <span class="drag-label drag-label-end mono">{{ bubbleUpOverlay.toLabel }}</span>
-            </div>
-            <div
-              v-for="(bucket, i) in filledHistogram"
-              :key="i"
-              class="histo-col"
-              :class="{ 'histo-col-active': hoveredBucket === i }"
-              @mouseenter="onBarEnter(i, $event)"
-              @mousemove="onBarMove"
-              @mouseleave="onBarLeave"
-            >
-              <div class="histo-stack" :style="{ height: `${(bucket.count / histogramMax) * 100}%` }">
-                <div
-                  class="histo-bar histo-bar-ok"
-                  :style="{ flexBasis: `${((bucket.count - (bucket.error_count || 0)) / bucket.count) * 100}%` }"
-                />
-                <div
-                  v-if="bucket.error_count"
-                  class="histo-bar histo-bar-err"
-                  :style="{ flexBasis: `${(bucket.error_count / bucket.count) * 100}%` }"
-                />
-              </div>
-            </div>
-            <!-- Tooltip -->
-            <div
-              v-if="hoveredBucketData && !dragActive"
-              class="histo-tooltip"
-              :style="{ left: `${tooltipX}px`, top: `${tooltipY - 8}px` }"
-            >
-              <div class="htt-time mono">{{ hoveredBucketData.time }}</div>
-              <div class="htt-row">
-                <span class="htt-label">Total</span>
-                <span class="htt-val mono">{{ hoveredBucketData.total }}</span>
-              </div>
-              <div class="htt-row">
-                <span class="histo-legend-dot histo-dot-ok" />
-                <span class="htt-label">OK</span>
-                <span class="htt-val mono">{{ hoveredBucketData.ok }}</span>
-              </div>
-              <div class="htt-row">
-                <span class="histo-legend-dot histo-dot-err" />
-                <span class="htt-label">Errors</span>
-                <span class="htt-val mono htt-err">{{ hoveredBucketData.errors }}</span>
-              </div>
-              <div class="htt-row htt-rate">
-                <span class="htt-label">Error rate</span>
-                <span class="htt-val mono" :class="{ 'htt-err': parseFloat(hoveredBucketData.errRate) > 0 }">{{ hoveredBucketData.errRate }}%</span>
-              </div>
-            </div>
-          </div>
-          <!-- Shift+drag hint -->
-          <div v-if="!bubbleUpSelection && !bubbleUpResult" class="bubbleup-hint text-muted">
-            <span class="mono" style="font-size:9px">Shift+drag to analyze dimensions (BubbleUp)</span>
-          </div>
-        </div>
+        <SignalTimelinePanel
+          :buckets="filledHistogram"
+          :total="total"
+          :total-kind="totalKind"
+          :signal="viewMode === 'logs' ? 'logs' : 'spans'"
+          :from="timeRange.from"
+          :to="timeRange.to"
+          :loading="histogramPhase === 'waiting' || histogramPhase === 'loading'"
+          :custom-range="Boolean(customRange)"
+          :selection="bubbleUpSelection ? { startIndex: bubbleUpSelection.startIdx, endIndex: bubbleUpSelection.endIdx } : null"
+          @range-select="onTimelineRangeSelect"
+          @reset-range="resetTimelineRange"
+        />
 
         <ExploreResultsState
           v-if="searching || (viewMode !== 'logs' && (api.error.value || !results.length))"
@@ -5254,7 +5432,7 @@ onMounted(async () => {
                preserving global indexes for keyboard navigation and links. -->
           <VirtualTable
             ref="spanVirtualTable"
-            :count="results.length"
+            :count="visibleSpanResults.length"
             :item-key="resultKeyAt"
             :selected-index="selectedRowIndex"
             :follow="liveMode && liveFollowing"
@@ -5381,7 +5559,16 @@ onMounted(async () => {
           <!-- Infinite scroll sentinel -->
           <template #footer>
           <div class="scroll-sentinel">
-            <div v-if="loadingMore" class="loading-more">
+            <div v-if="scatterCohortLoading" class="loading-more">
+              <span class="loading-more-spinner">&#9676;</span> Loading selected cohort…
+            </div>
+            <div v-else-if="scatterCohortError" class="loading-more text-warning">
+              {{ scatterCohortError }}
+            </div>
+            <div v-else-if="scatterCohortRows !== null" class="loading-more text-muted">
+              Showing {{ visibleSpanResults.length.toLocaleString() }} of {{ formattedCohortTotal() }} spans in the selected cohort
+            </div>
+            <div v-else-if="loadingMore" class="loading-more">
               <span class="loading-more-spinner">&#9676;</span> Loading more…
             </div>
             <div v-else-if="hasMore" class="loading-more text-muted">
