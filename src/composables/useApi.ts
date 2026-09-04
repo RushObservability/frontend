@@ -387,6 +387,8 @@ export function useApi() {
     filters: Filter[]
     interval?: string
     group_by?: string
+    search?: string
+    include_heatmap?: boolean
   }, workload?: 'dashboard', signal?: AbortSignal): Promise<TimeseriesResponse> {
     return await request(`/query/timeseries`, {
       method: 'POST',
