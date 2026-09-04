@@ -50,6 +50,56 @@ describe('Explore query plan', () => {
     expect(source).toContain("scatterTrendLinePath('p99_ms')")
   })
 
+  it('loads chart selections into the span table with matching time and duration bounds', () => {
+    const cohortLoader = between('async function loadScatterCohortRows(', 'function setScatterSelection(')
+    expect(cohortLoader).toContain("time_range: { from: selection.startTime, to: selection.endTime }")
+    expect(cohortLoader).toContain("cohortFilters.push({ field: 'duration_ns', op: '>=', value: selection.minDurationNs })")
+    expect(cohortLoader).toContain("cohortFilters.push({ field: 'duration_ns', op: '<=', value: selection.maxDurationNs })")
+    expect(cohortLoader).toContain('await api.queryEvents({')
+    expect(cohortLoader).toContain('scatterCohortController !== controller')
+    expect(cohortLoader).not.toContain('scatterPendingSelection.value !== selection')
+    expect(cohortLoader).toContain('scatterCohortRows.value = response.rows')
+
+    const spanTable = between('<!-- ═══ Event Table (Spans mode) ═══ -->', '<!-- /event-table (spans) -->')
+    expect(spanTable).toContain(':count="visibleSpanResults.length"')
+    expect(spanTable).toContain('spans in the selected cohort')
+    expect(source).toContain('return visibleSpanResults.value[index]!')
+    expect(source).toContain('resetScatterCohortRows()')
+  })
+
+  it('round-trips a selected latency cohort through the Explore URL', () => {
+    const queryParams = between('function buildQueryParams()', 'function buildShareUrl()')
+    expect(queryParams).toContain("p.cohort = 'latency'")
+    expect(queryParams).toContain('p.cohort_from = cohort.startTime')
+    expect(queryParams).toContain('p.cohort_to = cohort.endTime')
+    expect(queryParams).toContain('p.cohort_min_ns = String(cohort.minDurationNs)')
+    expect(queryParams).toContain('p.cohort_max_ns = String(cohort.maxDurationNs)')
+    expect(queryParams).toContain("p.cohort_compare = '1'")
+
+    const restore = between('function restoreFromUrl()', '// ── Export')
+    expect(restore).toContain("q.cohort === 'latency'")
+    expect(restore).toContain('pendingLatencyDeepLink.value = {')
+    expect(restore).toContain('validOrder')
+
+    const mounted = between('onMounted(async () => {', '// Deep-link: scroll to + highlight')
+    expect(mounted).toContain('scatterBrush.value = {')
+    expect(mounted).toContain('setScatterSelection(selection)')
+    expect(mounted).toContain('if (pending.compare) analyzeScatterSelection()')
+
+    const selectionSetter = between('function setScatterSelection(', 'const scatterPendingSelection')
+    expect(selectionSetter).toContain('syncUrlState()')
+  })
+
+  it('does not rewrite a shared cohort URL while startup searches are still running', () => {
+    const sync = between('function syncUrlState()', 'async function shareLink()')
+    expect(sync).toContain('if (restoringUrlState) return')
+    expect(sync).toContain('function finishUrlRestore()')
+    expect(source).not.toContain('skipNextUrlSync')
+
+    const mounted = between('onMounted(async () => {', '// Deep-link: scroll to + highlight')
+    expect(mounted.indexOf('setScatterSelection(selection)')).toBeLessThan(mounted.indexOf('finishUrlRestore()'))
+  })
+
   it('does not render a duplicate logs-only histogram', () => {
     expect(source).not.toContain('Matches over time')
     expect(source).not.toContain('matchHisto')
