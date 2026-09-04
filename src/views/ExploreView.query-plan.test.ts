@@ -10,6 +10,11 @@ function between(start: string, end: string): string {
 }
 
 describe('Explore query plan', () => {
+  it('shows the latency chart by default for trace results', () => {
+    expect(source).toContain('const scatterExpanded = ref(true)')
+    expect(source).toContain('<div v-if="scatterExpanded" id="latency-over-time-chart"')
+  })
+
   it('loads rows and summaries independently for an initial search', () => {
     const search = between('async function search(', 'async function loadMore(')
     expect(search.match(/api\.queryExplore\(/g)).toHaveLength(1)

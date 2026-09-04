@@ -93,6 +93,33 @@ export function semanticRequestKey(scope: AnalyticsRequestScope): string {
   ])
 }
 
+/**
+ * Keep independently rendered Explore rows and summaries from cancelling each
+ * other while retaining latest-request-wins behavior within each lane.
+ */
+export function analyticsSupersessionKey(
+  route: string,
+  method: string,
+  body?: BodyInit | null,
+): string {
+  const base = `${method.toUpperCase()}:${route}`
+  if (route !== '/explore/search' || typeof body !== 'string') return base
+
+  try {
+    const request = JSON.parse(body) as {
+      include_rows?: boolean
+      include_summary?: boolean
+    }
+    const includesRows = request.include_rows !== false
+    const includesSummary = request.include_summary !== false
+    if (includesRows && !includesSummary) return `${base}:rows`
+    if (!includesRows && includesSummary) return `${base}:summary`
+    return `${base}:combined`
+  } catch {
+    return base
+  }
+}
+
 function scopeMatches(
   scope: AnalyticsRequestScope,
   target?: { userId?: string; tenant?: string },
