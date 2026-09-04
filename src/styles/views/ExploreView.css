@@ -804,36 +804,6 @@
 .histo-col:hover .histo-bar-err { background: rgba(229, 88, 79, 0.9); }
 .histo-col-active { z-index: 2; }
 
-/* ── Logs match histogram (adaptive, click-to-zoom) ── */
-/* match-histo is now a PanelCard; the panel body provides padding. */
-.match-histo :deep(.panel-body) { padding: var(--sp-2) var(--sp-3); }
-.match-histo-meta, .match-histo-loading { font-size: 10px; display: inline-flex; align-items: center; gap: 4px; }
-.match-histo-bars { display: flex; align-items: flex-end; height: 44px; gap: 1px; }
-.match-histo-col {
-  flex: 1;
-  height: 100%;
-  display: flex;
-  align-items: flex-end;
-  cursor: pointer;
-  min-width: 1px;
-}
-.match-histo-bar {
-  width: 100%;
-  min-height: 0;
-  background: var(--histogram-bar);
-  border-radius: 1px 1px 0 0;
-  transition: background 0.1s;
-}
-.match-histo-col:hover .match-histo-bar { background: var(--amber); }
-.match-histo-empty { height: 44px; display: flex; align-items: center; justify-content: center; font-size: 11px; }
-.match-histo-axis {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  margin-top: 4px;
-}
-.match-histo-hint { opacity: 0.6; }
-
 /* ── Drag-to-select overlay ── */
 .histo-drag-overlay {
   position: absolute;

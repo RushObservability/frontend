@@ -98,13 +98,6 @@ function resultKeyAt(index: number): string {
   return row?.span_id || `${row?.trace_id || 'span'}:${row?.timestamp || index}:${index}`
 }
 
-// ═══ Logs match histogram (adaptive, click-to-zoom) ═══
-// Time-bucketed count of matching log lines across the selected range, fetched
-// in parallel and non-blocking so rows render immediately. Backed by the
-// dedicated /logs/histogram endpoint (adaptive bucket sizing, ~120 buckets).
-const matchHisto = ref<{ ts: number; count: number }[]>([])
-const matchHistoInterval = ref(0)
-const matchHistoLoading = ref(false)
 const PAGE_SIZE = 100
 const loadingMore = ref(false)
 const nextCursor = ref<string | null>(null)
@@ -945,12 +938,6 @@ const groupLoading = ref(false)
 
 const searchText = ref('')  // free-text portion of search input
 
-function bucketUnixSeconds(bucket: string): number {
-  const normalized = bucket.includes('T') ? bucket : `${bucket.replace(' ', 'T')}Z`
-  const millis = Date.parse(normalized)
-  return Number.isFinite(millis) ? Math.floor(millis / 1000) : 0
-}
-
 function settleExploreRequest(request: ExploreSearchRequest, signal: AbortSignal) {
   return api.queryExplore(request, signal)
     .then(response => ({ response }))
@@ -1010,16 +997,6 @@ function applyExploreSummaryResponse(response: ExploreSearchResponse, isLogs: bo
     count: item.count,
   }))
 
-  if (isLogs) {
-    matchHisto.value = (response.summary.histogram || []).map(bucket => ({
-      ts: bucketUnixSeconds(bucket.bucket),
-      count: bucket.count,
-    })).filter(bucket => bucket.ts > 0)
-    matchHistoInterval.value = response.summary.interval_secs || 0
-  } else {
-    matchHisto.value = []
-  }
-  matchHistoLoading.value = false
 }
 
 function parseSearch() {
@@ -1138,7 +1115,6 @@ async function search(opts?: { skipHistory?: boolean }) {
     serverStatusCounts.value = { ok: 0, clientErr: 0, serverErr: 0 }
     serverMethodCounts.value = new Map()
     groupLoading.value = Boolean(groupByField.value)
-    matchHistoLoading.value = isLogs
     const request: ExploreSearchRequest = {
       signal: isLogs ? 'logs' : 'spans',
       time_range: timeRange.value,
@@ -1171,7 +1147,6 @@ async function search(opts?: { skipHistory?: boolean }) {
       api.error.value = null
       exploreSummaryWarning.value = 'Summaries are temporarily unavailable. Results are still complete.'
       histogramPhase.value = 'idle'
-      matchHistoLoading.value = false
     }
   } catch (err: any) {
     if (err?.name !== 'AbortError') {
@@ -1519,7 +1494,7 @@ const SCATTER_H = 250
 const SCATTER_PAD = { left: 64, right: 20, top: 18, bottom: 34 }
 const scatterBrush = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
 const scatterDragging = ref(false)
-const scatterExpanded = ref(false)
+const scatterExpanded = ref(true)
 const scatterMode = ref<'dots' | 'density'>('density')
 const compareModeActive = ref(false)
 const scatterRangeLabel = computed(() => {
@@ -1785,62 +1760,6 @@ function scatterPointLabel(point: ScatterPoint): string {
   const row = point.row
   const operation = `${row.service_name} ${row.http_method || ''} ${row.http_path || '(unknown operation)'}`.replace(/\s+/g, ' ').trim()
   return `${operation}, ${formatDuration(row.duration_ns)}, ${point.error ? 'error' : 'successful span'}`
-}
-
-// ═══ Logs match histogram: fetch + render + click-to-zoom ═══
-
-const matchHistoMax = computed(() => Math.max(...matchHisto.value.map((b) => b.count), 1))
-const matchHistoTotal = computed(() => matchHisto.value.reduce((s, b) => s + b.count, 0))
-
-function fmtMatchHistoClock(unixSecs: number, withDate: boolean): string {
-  const d = new Date(unixSecs * 1000)
-  const hh = d.getHours().toString().padStart(2, '0')
-  const mm = d.getMinutes().toString().padStart(2, '0')
-  const ss = d.getSeconds().toString().padStart(2, '0')
-  const clock = matchHistoInterval.value < 60 ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`
-  if (withDate) {
-    const mon = (d.getMonth() + 1).toString().padStart(2, '0')
-    const day = d.getDate().toString().padStart(2, '0')
-    return `${mon}/${day} ${clock}`
-  }
-  return clock
-}
-
-function fmtMatchHistoInterval(): string {
-  const s = matchHistoInterval.value
-  if (s <= 0) return ''
-  if (s < 60) return `${s}s`
-  if (s < 3600) return `${Math.round(s / 60)}m`
-  if (s < 86400) return `${Math.round(s / 3600)}h`
-  return `${Math.round(s / 86400)}d`
-}
-
-// min/max time labels at the ends of the sparkline.
-const matchHistoRange = computed(() => {
-  if (!matchHisto.value.length) return { from: '', to: '' }
-  const withDate = isMultiDayRange()
-  const first = matchHisto.value[0]!.ts
-  const last = matchHisto.value[matchHisto.value.length - 1]!.ts + matchHistoInterval.value
-  return { from: fmtMatchHistoClock(first, withDate), to: fmtMatchHistoClock(last, withDate) }
-})
-
-// Per-bar tooltip text (bucket time + count) via the native title attr.
-function matchBarTitle(b: { ts: number; count: number }): string {
-  return `${fmtMatchHistoClock(b.ts, true)} · ${b.count.toLocaleString()} match${b.count === 1 ? '' : 'es'}`
-}
-
-// Clicking a bar zooms the active range to that bucket window and re-runs the
-// search. Reuses the view's existing customRange + search() flow so the URL
-// time params update exactly like a manual range change (shareable / back-button).
-function onMatchBarClick(b: { ts: number; count: number }) {
-  if (matchHistoInterval.value <= 0) return
-  const fromMs = b.ts * 1000
-  const toMs = (b.ts + matchHistoInterval.value) * 1000
-  customRange.value = {
-    from: new Date(fromMs).toISOString(),
-    to: new Date(toMs).toISOString(),
-  }
-  search()
 }
 
 const hoveredBucket = ref<number | null>(null)
@@ -5295,41 +5214,6 @@ onMounted(async () => {
             <span class="mono" style="font-size:9px">Shift+drag to analyze dimensions (BubbleUp)</span>
           </div>
         </div>
-
-        <!-- ═══ Logs match histogram (adaptive, click-to-zoom) ═══ -->
-        <PanelCard
-          v-if="viewMode === 'logs' && (matchHisto.length || matchHistoLoading)"
-          class="match-histo fade-in"
-          title="Matches over time"
-          description="Count of matching log lines per time bucket — click a bar to zoom the range to that window."
-        >
-          <template #actions>
-            <span v-if="matchHistoLoading" class="match-histo-loading text-muted mono">
-              <svg width="11" height="11" viewBox="0 0 20 20" style="vertical-align:-1px"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--border)" stroke-width="2"/><circle cx="10" cy="10" r="8" fill="none" stroke="var(--amber)" stroke-width="2" stroke-dasharray="20 32" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 10 10" to="360 10 10" dur="0.7s" repeatCount="indefinite"/></circle></svg>
-              loading&hellip;
-            </span>
-            <span v-else-if="matchHistoInterval" class="match-histo-meta mono text-muted">
-              {{ matchHistoTotal.toLocaleString() }} matches &middot; {{ fmtMatchHistoInterval() }}/bar
-            </span>
-          </template>
-          <div v-if="matchHisto.length" class="match-histo-bars">
-            <div
-              v-for="(b, i) in matchHisto"
-              :key="i"
-              class="match-histo-col"
-              :title="matchBarTitle(b)"
-              @click="onMatchBarClick(b)"
-            >
-              <div class="match-histo-bar" :style="{ height: `${Math.max((b.count / matchHistoMax) * 100, b.count > 0 ? 6 : 0)}%` }" />
-            </div>
-          </div>
-          <div v-else-if="!matchHistoLoading" class="match-histo-empty text-muted mono">No matches in range</div>
-          <div v-if="matchHisto.length" class="match-histo-axis mono text-muted">
-            <span>{{ matchHistoRange.from }}</span>
-            <span class="match-histo-hint">click a bar to zoom</span>
-            <span>{{ matchHistoRange.to }}</span>
-          </div>
-        </PanelCard>
 
         <ExploreResultsState
           v-if="searching || (viewMode !== 'logs' && (api.error.value || !results.length))"
