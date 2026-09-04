@@ -197,6 +197,11 @@ const router = createRouter({
       component: () => import('./views/SreAgentView.vue'),
     },
     {
+      path: '/sre-agent/:sessionId',
+      name: 'sre-agent-session',
+      component: () => import('./views/SreAgentView.vue'),
+    },
+    {
       // ArgoCD moved into the Integrations area; keep the old path as a redirect.
       path: '/argocd',
       redirect: '/integrations/argocd/applications',
