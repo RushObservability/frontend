@@ -45,11 +45,10 @@ export const SETTINGS_TAB_GROUPS: SettingsTabGroup[] = SETTINGS_GROUP_ORDER.map(
 }))
 
 export const SETTINGS_INTEGRATIONS: SettingsIntegrationNavItem[] = [
-  { key: 'postgresql', label: 'PostgreSQL', desc: 'Database health, query workload, schema, and maintenance.' },
-  { key: 'mysql', label: 'MySQL', desc: 'Query workload, waits, blocking, indexes, replication, and settings.' },
   { key: 'argocd', label: 'ArgoCD', desc: 'Application health and sync status from ArgoCD.' },
   { key: 'fluxcd', label: 'FluxCD', desc: 'Flux v2 Kustomizations, HelmReleases, and Sources.' },
   { key: 'kubernetes', label: 'Kubernetes', desc: 'Read-only browser for cluster workloads and resources.' },
-  { key: 'kubernetes-logging', label: 'Kubernetes logging', desc: 'Record kubectl activity and manage authenticated clients.' },
   { key: 'cloudwatch', label: 'CloudWatch Logs', desc: 'Ingest AWS CloudWatch Logs through Kinesis Data Firehose.' },
+  ...frontendEdition.settingsIntegrations,
 ]
+import { frontendEdition } from '../../edition/manifest'

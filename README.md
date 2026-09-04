@@ -62,6 +62,10 @@ make typecheck
 
 Every pull request runs [CI](.github/workflows/ci.yml): it installs deps, runs the unit tests, and builds the app.
 
+## Frontend editions
+
+Database and Kubernetes product integrations are composed into a separate licensed build. The public repository owns the shared UI and a small build-time extension contract. See [Frontend editions](docs/editions.md) for the boundary and verification command.
+
 ## Part of Rush
 
 - [query-api](https://github.com/RushObservability/query-api) — the backend this reads from
