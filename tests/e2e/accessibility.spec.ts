@@ -152,3 +152,93 @@ test('investigation form is labeled and can complete a streamed result', async (
   await expect(page.getByText('Investigation complete', { exact: true })).toBeVisible({ timeout: 10_000 })
   await expect(page.getByText('The service is healthy.')).toBeVisible()
 })
+
+test('saved SRE investigation opens its transcript without rerunning', async ({ page }) => {
+  await stubAuthenticatedShell(page)
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1_000)
+    .toISOString()
+    .replace('T', ' ')
+    .replace(/\.\d{3}Z$/, '')
+  let investigationRequests = 0
+
+  await page.route('**/api/v1/sessions?limit=8', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      sessions: [{
+        id: 'saved-session',
+        tenant_id: 'default',
+        title: 'Checkout latency',
+        status: 'completed',
+        template_id: '',
+        created_by: 'e2e-user',
+        created_at: twoHoursAgo,
+        updated_at: twoHoursAgo,
+      }],
+    }),
+  }))
+  await page.route('**/api/v1/sessions/saved-session', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      session: {
+        id: 'saved-session',
+        tenant_id: 'default',
+        title: 'Checkout latency',
+        status: 'completed',
+        template_id: '',
+        created_by: 'e2e-user',
+        created_at: twoHoursAgo,
+        updated_at: twoHoursAgo,
+      },
+      turns: [
+        {
+          id: 'turn-user',
+          session_id: 'saved-session',
+          turn_index: 0,
+          role: 'user',
+          content: 'Why is checkout slow?',
+          tool_calls: '[]',
+          report_kind: '',
+          created_at: twoHoursAgo,
+        },
+        {
+          id: 'turn-assistant',
+          session_id: 'saved-session',
+          turn_index: 1,
+          role: 'assistant',
+          content: 'Database saturation was the cause.',
+          tool_calls: JSON.stringify([
+            { type: 'tool_call', name: 'search_logs', args: { service: 'checkout' } },
+            { type: 'tool_result', name: 'search_logs', data: 'Found three timeout errors.' },
+          ]),
+          report_kind: 'final',
+          created_at: twoHoursAgo,
+        },
+      ],
+    }),
+  }))
+  await page.route('**/api/v1/investigate', route => {
+    investigationRequests += 1
+    return route.fulfill({ status: 500, body: 'A saved session must not start a new run.' })
+  })
+
+  await page.goto('/sre-agent')
+
+  await expect(page.getByText('2h ago', { exact: true })).toBeVisible()
+  const savedInvestigation = page.getByRole('link', { name: 'Checkout latency' })
+  await expect(savedInvestigation).toHaveAttribute('href', '/sre-agent/saved-session')
+  await savedInvestigation.click()
+  await expect(page).toHaveURL(/\/sre-agent\/saved-session$/)
+  await expect(page.getByText('SAVED INVESTIGATION', { exact: true })).toBeVisible()
+  await expect(page.getByText('"Why is checkout slow?"', { exact: true })).toBeVisible()
+  await expect(page.getByText('search_logs', { exact: true })).toBeVisible()
+  await expect(page.getByText('Found three timeout errors.', { exact: true })).toBeVisible()
+  await expect(page.getByText('Database saturation was the cause.', { exact: true })).toBeVisible()
+  expect(investigationRequests).toBe(0)
+
+  await page.reload()
+  await expect(page.getByText('SAVED INVESTIGATION', { exact: true })).toBeVisible()
+  await expect(page.getByText('Database saturation was the cause.', { exact: true })).toBeVisible()
+  expect(investigationRequests).toBe(0)
+})

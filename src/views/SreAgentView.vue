@@ -1,14 +1,24 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import type { InvestigationSession, SreAgentModelOption } from '../types'
 import InvestigationPanel from '../components/InvestigationPanel.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
+import { formatInvestigationActivity, parseInvestigationTimestamp } from '../lib/investigationTime'
 
 const { listInvestigationSessions, getSreAgentOptions } = useApi()
+const route = useRoute()
+const router = useRouter()
 
-const question = ref('')
-const started = ref(false)
+function sessionIdFromRoute(): string {
+  const value = route.params.sessionId
+  return Array.isArray(value) ? value[0] || '' : String(value || '')
+}
+
+const selectedSessionId = ref(sessionIdFromRoute())
+const question = ref(selectedSessionId.value ? 'Saved investigation' : '')
+const started = ref(Boolean(selectedSessionId.value))
 
 // ── Model / thinking pickers (admin-defined policy) ──
 // The user picks a model + thinking level per investigation from the allowed
@@ -41,8 +51,10 @@ const agentChecking = ref(true)
 const agentDown = ref(false)
 
 const recentSessions = ref<InvestigationSession[]>([])
+const activityNow = ref(Date.now())
 const helpOpen = ref(false)
 const helpWrapEl = ref<HTMLElement | null>(null)
+let activityTimer: ReturnType<typeof setInterval> | undefined
 
 const historyColumns: DataTableColumn[] = [
   { key: 'title', label: 'Investigation', sortable: true },
@@ -55,19 +67,18 @@ const historySortDirection = ref<'asc' | 'desc'>('desc')
 const historyRows = computed(() => {
   const rows = recentSessions.value.map((session) => ({
     id: session.id,
-    question: session.title,
     title: session.title || 'Untitled investigation',
     status: session.status || 'unknown',
     updated_at: session.updated_at,
-    updated_label: formatDate(session.updated_at),
+    updated_label: formatInvestigationActivity(session.updated_at, activityNow.value),
   }))
 
   return rows.sort((a, b) => {
     const left = historySortKey.value === 'updated_at'
-      ? new Date(a.updated_at).getTime()
+      ? parseInvestigationTimestamp(a.updated_at)
       : String(a[historySortKey.value as 'title' | 'status']).toLowerCase()
     const right = historySortKey.value === 'updated_at'
-      ? new Date(b.updated_at).getTime()
+      ? parseInvestigationTimestamp(b.updated_at)
       : String(b[historySortKey.value as 'title' | 'status']).toLowerCase()
     const comparison = left < right ? -1 : left > right ? 1 : 0
     return historySortDirection.value === 'asc' ? comparison : -comparison
@@ -110,8 +121,12 @@ function onDocKeydown(e: KeyboardEvent) {
 async function checkAgent() {
   agentChecking.value = true
   try {
-    const res = await listInvestigationSessions(undefined, 8)
+    const res = await listInvestigationSessions(8)
     recentSessions.value = res.sessions ?? []
+    const selectedSession = recentSessions.value.find(session => session.id === selectedSessionId.value)
+    if (selectedSession) {
+      question.value = selectedSession.title || 'Untitled investigation'
+    }
     agentDown.value = false
   } catch {
     agentDown.value = true
@@ -127,9 +142,19 @@ watch(selectedModel, () => {
   }
 })
 
+watch(() => route.params.sessionId, () => {
+  const id = sessionIdFromRoute()
+  if (id === selectedSessionId.value) return
+
+  selectedSessionId.value = id
+  started.value = Boolean(id)
+  question.value = id ? 'Saved investigation' : ''
+})
+
 onMounted(async () => {
   document.addEventListener('mousedown', onDocClick)
   document.addEventListener('keydown', onDocKeydown)
+  activityTimer = setInterval(() => { activityNow.value = Date.now() }, 60_000)
   await checkAgent()
   await loadAgentOptions()
 })
@@ -137,13 +162,18 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('mousedown', onDocClick)
   document.removeEventListener('keydown', onDocKeydown)
+  if (activityTimer) clearInterval(activityTimer)
 })
 
 function launch(q?: string) {
   const text = q ?? question.value.trim()
   if (!text) return
+  selectedSessionId.value = ''
   question.value = text
   started.value = true
+  if (route.name === 'sre-agent-session') {
+    void router.replace({ name: 'sre-agent' })
+  }
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -158,23 +188,15 @@ function autoResize(e: Event) {
 
 function reset() {
   started.value = false
+  selectedSessionId.value = ''
   question.value = ''
+  if (route.name === 'sre-agent-session') {
+    void router.push({ name: 'sre-agent' })
+  }
   // Refresh history
-  listInvestigationSessions(undefined, 8)
+  listInvestigationSessions(8)
     .then(r => { recentSessions.value = r.sessions ?? [] })
     .catch(() => {})
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  const now = new Date()
-  const diff = now.getTime() - d.getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
 function onHistorySort(key: string) {
@@ -194,7 +216,22 @@ function historyStatusClass(status: unknown): string {
 }
 
 function onHistoryRowClick(row: Record<string, unknown>) {
-  launch(String(row.question || row.title || ''))
+  const id = String(row.id || '')
+  if (!id) return
+
+  selectedSessionId.value = id
+  question.value = String(row.title || 'Untitled investigation')
+  started.value = true
+  void router.push({ name: 'sre-agent-session', params: { sessionId: id } })
+}
+
+function onSessionLoaded(session: InvestigationSession) {
+  const previousSessionId = selectedSessionId.value
+  selectedSessionId.value = session.id
+  question.value = session.title || 'Untitled investigation'
+  if (session.id !== previousSessionId) {
+    void router.push({ name: 'sre-agent-session', params: { sessionId: session.id } })
+  }
 }
 </script>
 
@@ -344,10 +381,14 @@ function onHistoryRowClick(row: Record<string, unknown>) {
               @row-click="onHistoryRowClick"
             >
               <template #cell-title="{ row }">
-                <div class="history-title-cell">
+                <RouterLink
+                  class="history-title-cell"
+                  :to="{ name: 'sre-agent-session', params: { sessionId: String(row.id) } }"
+                  @click.stop
+                >
                   <span class="history-marker" aria-hidden="true"></span>
                   <span class="history-title">{{ row.title }}</span>
-                </div>
+                </RouterLink>
               </template>
               <template #cell-status="{ row }">
                 <span class="history-status" :class="historyStatusClass(row.status)">{{ row.status }}</span>
@@ -364,12 +405,12 @@ function onHistoryRowClick(row: Record<string, unknown>) {
       <div v-else-if="!agentChecking && started" key="active" class="sre-active">
         <div class="active-topbar">
           <div class="active-identity">
-            <span class="active-kicker">LIVE INVESTIGATION</span>
+            <span class="active-kicker">{{ selectedSessionId ? 'SAVED INVESTIGATION' : 'LIVE INVESTIGATION' }}</span>
             <span class="active-label">SRE Agent</span>
             <span class="active-sep">/</span>
             <span class="active-query">{{ question }}</span>
           </div>
-          <div class="active-meta"><span class="status-pulse"></span>Evidence stream</div>
+          <div class="active-meta"><span class="status-pulse"></span>{{ selectedSessionId ? 'Session history' : 'Evidence stream' }}</div>
           <button class="new-btn" @click="reset">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -378,7 +419,14 @@ function onHistoryRowClick(row: Record<string, unknown>) {
           </button>
         </div>
         <div class="panel-wrap">
-          <InvestigationPanel :question="question" :model="selectedModel" :reasoning-effort="selectedEffort" @close="reset" />
+          <InvestigationPanel
+            :question="question"
+            :initial-session-id="selectedSessionId"
+            :model="selectedModel"
+            :reasoning-effort="selectedEffort"
+            @session-loaded="onSessionLoaded"
+            @close="reset"
+          />
         </div>
       </div>
 
@@ -687,6 +735,21 @@ function onHistoryRowClick(row: Record<string, unknown>) {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.history-title-cell:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--room-blue);
+  outline-offset: 3px;
+}
+
+.history-title-cell:hover .history-title {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--room-blue) 70%, transparent);
+  text-underline-offset: 3px;
 }
 
 .history-marker {

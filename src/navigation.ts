@@ -84,7 +84,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   },
   {
     id: 'sre-agent', label: 'SRE Agent', path: '/sre-agent', icon: '✦', group: 'investigate',
-    routeNames: ['sre-agent', 'investigate'], feature: 'sre_agent', keywords: ['ai', 'troubleshoot', 'investigation'],
+    routeNames: ['sre-agent', 'sre-agent-session', 'investigate'], feature: 'sre_agent', keywords: ['ai', 'troubleshoot', 'investigation'],
   },
   {
     id: 'integrations', label: 'Integrations', path: '/integrations', icon: '↔', group: 'control',
@@ -133,4 +133,3 @@ export function visibleNavigationGroups(context: NavigationContext): NavigationG
 export function navigationItemIsActive(item: NavigationItem, routeName: string | null | undefined): boolean {
   return typeof routeName === 'string' && item.routeNames.includes(routeName)
 }
-
