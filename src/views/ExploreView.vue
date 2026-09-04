@@ -1567,6 +1567,9 @@ type ScatterSelection = {
   errorsOnly?: boolean
   queryWide?: boolean
 }
+type PendingLatencyDeepLink = Omit<ScatterSelection, 'rows' | 'queryWide'> & {
+  compare: boolean
+}
 let scatterCohortController: AbortController | null = null
 
 function formattedCohortTotal(): string {
@@ -1621,35 +1624,35 @@ async function loadScatterCohortRows(selection: ScatterSelection) {
   }
 
   try {
-    const response = await api.queryExplore<RushEvent>({
-      signal: 'spans',
+    const response = await api.queryEvents({
       time_range: { from: selection.startTime, to: selection.endTime },
       filters: cohortFilters,
       search: searchText.value || undefined,
       limit: PAGE_SIZE,
-      include_rows: true,
-      include_summary: false,
-    }, controller.signal)
-    if (controller.signal.aborted || scatterPendingSelection.value !== selection) return
+    }, undefined, controller.signal)
+    if (controller.signal.aborted || scatterCohortController !== controller) return
     scatterCohortRows.value = response.rows
-    scatterCohortTotal.value = response.count.value
-    scatterCohortTotalKind.value = response.count.kind
+    scatterCohortTotal.value = response.total
+    scatterCohortTotalKind.value = response.total >= 10_000 ? 'capped' : 'exact'
   } catch (error: any) {
     if (error?.name === 'AbortError') return
-    if (scatterPendingSelection.value !== selection) return
+    if (scatterCohortController !== controller) return
     scatterCohortRows.value = selection.rows
     scatterCohortTotal.value = selection.rows.length
     scatterCohortError.value = 'Could not load the full cohort. Showing matching spans from the loaded sample.'
     api.error.value = null
   } finally {
-    if (scatterCohortController === controller) scatterCohortController = null
-    if (scatterPendingSelection.value === selection) scatterCohortLoading.value = false
+    if (scatterCohortController === controller) {
+      scatterCohortController = null
+      scatterCohortLoading.value = false
+    }
   }
 }
 
 function setScatterSelection(selection: ScatterSelection) {
   scatterPendingSelection.value = selection
   void loadScatterCohortRows(selection)
+  syncUrlState()
 }
 
 const scatterPendingSelection = ref<ScatterSelection | null>(null)
@@ -1850,10 +1853,12 @@ const scatterHeatmapCells = computed<ScatterHeatmapCell[]>(() => {
 const scatterSelectionSummary = computed(() => {
   const selection = scatterPendingSelection.value
   if (!selection) return null
-  const services = new Set(selection.rows.map((row) => row.service_name)).size
-  const errors = selection.rows.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500).length
+  const previewRows = scatterCohortRows.value ?? selection.rows
+  const services = new Set(previewRows.map((row) => row.service_name)).size
+  const errors = previewRows.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500).length
   return {
-    count: selection.rows.length,
+    count: scatterCohortRows.value !== null ? scatterCohortTotal.value : selection.rows.length,
+    loadedCount: previewRows.length,
     services,
     errors,
     time: `${new Date(selection.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}–${new Date(selection.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
@@ -1917,6 +1922,7 @@ function clearScatterSelection() {
   scatterHoverPoint.value = null
   scatterHoverHeatmap.value = null
   scatterHoverTrend.value = null
+  syncUrlState()
 }
 
 function toggleScatterExpanded() {
@@ -1964,6 +1970,7 @@ function analyzeScatterSelection() {
     minDurationNs: selection.minDurationNs, maxDurationNs: selection.maxDurationNs,
     errorsOnly: selection.errorsOnly, excludeFromBaseline: true, label: selection.label,
   }
+  syncUrlState()
   void runBubbleUp()
 }
 
@@ -2123,6 +2130,7 @@ function closeBubbleUp() {
 function closeCompareMode() {
   compareModeActive.value = false
   closeBubbleUp()
+  syncUrlState()
 }
 
 const compareSelectionLabel = computed(() => bubbleUpSelection.value?.label || 'Selected cohort')
@@ -2216,7 +2224,7 @@ function openDetailModal(index: number) {
   modalSource.value = 'span'
   modalRowIndex.value = index
   modalLogIndex.value = null
-  const row = results.value[index]
+  const row = visibleSpanResults.value[index]
   if (row) {
     loadApmData(row)
     if (row.trace_id) loadTraceData(row)
@@ -3717,6 +3725,7 @@ function applyNlQuery() {
 // ═══ Share link ═══
 const shareCopied = ref(false)
 const pendingDeepLink = ref<{ trace: string; span: string } | null>(null)
+const pendingLatencyDeepLink = ref<PendingLatencyDeepLink | null>(null)
 // Deep-link to a specific log line: target timestamp (ns) parsed from the URL,
 // and a transient highlight index applied after we scroll to it.
 const pendingLogDeepLink = ref<number | null>(null)
@@ -3760,6 +3769,16 @@ function buildQueryParams(): Record<string, string> {
     const e = logEntries.value[inlineExpandedLog.value]
     if (e) p.log = String(e.timestamp)
   }
+  const cohort = scatterPendingSelection.value
+  if (cohort) {
+    p.cohort = 'latency'
+    p.cohort_from = cohort.startTime
+    p.cohort_to = cohort.endTime
+    if (cohort.minDurationNs !== undefined) p.cohort_min_ns = String(cohort.minDurationNs)
+    if (cohort.maxDurationNs !== undefined) p.cohort_max_ns = String(cohort.maxDurationNs)
+    if (cohort.errorsOnly) p.cohort_errors = '1'
+    if (bubbleUpSelection.value) p.cohort_compare = '1'
+  }
   return p
 }
 
@@ -3769,12 +3788,21 @@ function buildShareUrl(): string {
   return `${window.location.origin}/${qs ? '?' + qs : ''}`
 }
 
-let skipNextUrlSync = false
+// Searches can overlap during startup. For example, restoring a saved time
+// preset triggers its watcher while the mounted hook also starts a search.
+// Hold every URL write until all deep-link state has been restored so an early
+// search cannot replace a shared link with the default Explore URL.
+let restoringUrlState = true
 
 function syncUrlState() {
-  if (skipNextUrlSync) { skipNextUrlSync = false; return }
+  if (restoringUrlState) return
   const query = buildQueryParams()
   router.replace({ query })
+}
+
+function finishUrlRestore() {
+  restoringUrlState = false
+  syncUrlState()
 }
 
 async function shareLink() {
@@ -3789,7 +3817,6 @@ async function shareLink() {
 function restoreFromUrl() {
   const q = route.query
   if (!q || Object.keys(q).length === 0) return
-  skipNextUrlSync = true
   if (q.q) searchInput.value = String(q.q)
   if (q.mode === 'logs') viewMode.value = 'logs'
   else if (q.mode === 'traces') { viewMode.value = 'spans'; tracesOnly.value = true }
@@ -3823,6 +3850,33 @@ function restoreFromUrl() {
   if (q.log) {
     const ts = Number(q.log)
     if (Number.isFinite(ts)) pendingLogDeepLink.value = ts
+  }
+  if (q.cohort === 'latency' && q.cohort_from && q.cohort_to) {
+    const startTime = new Date(String(q.cohort_from))
+    const endTime = new Date(String(q.cohort_to))
+    const minDurationNs = q.cohort_min_ns === undefined ? undefined : Number(q.cohort_min_ns)
+    const maxDurationNs = q.cohort_max_ns === undefined ? undefined : Number(q.cohort_max_ns)
+    const validMin = minDurationNs === undefined || (Number.isFinite(minDurationNs) && minDurationNs > 0)
+    const validMax = maxDurationNs === undefined || (Number.isFinite(maxDurationNs) && maxDurationNs > 0)
+    const validOrder = minDurationNs === undefined || maxDurationNs === undefined || minDurationNs <= maxDurationNs
+    if (
+      Number.isFinite(startTime.getTime())
+      && Number.isFinite(endTime.getTime())
+      && startTime < endTime
+      && validMin
+      && validMax
+      && validOrder
+    ) {
+      pendingLatencyDeepLink.value = {
+        label: 'Shared latency cohort',
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        minDurationNs,
+        maxDurationNs,
+        errorsOnly: q.cohort_errors === '1',
+        compare: q.cohort_compare === '1',
+      }
+    }
   }
 }
 
@@ -3887,6 +3941,37 @@ onMounted(async () => {
   api.getFeatures().then(f => { exportMaxRows.value = f.export_max_rows || 1000 }).catch(() => { /* keep default */ })
   await search()
   if (viewMode.value === 'logs') await fetchOtelLogs()
+
+  if (pendingLatencyDeepLink.value && viewMode.value === 'spans') {
+    const pending = pendingLatencyDeepLink.value
+    pendingLatencyDeepLink.value = null
+    const selection: ScatterSelection = {
+      label: pending.label,
+      rows: [],
+      startTime: pending.startTime,
+      endTime: pending.endTime,
+      minDurationNs: pending.minDurationNs,
+      maxDurationNs: pending.maxDurationNs,
+      errorsOnly: pending.errorsOnly,
+      queryWide: true,
+    }
+    const clampChartY = (value: number) => Math.max(
+      SCATTER_PAD.top,
+      Math.min(SCATTER_H - SCATTER_PAD.bottom, value),
+    )
+    scatterBrush.value = {
+      x1: scatterXMillis(new Date(selection.startTime).getTime()),
+      x2: scatterXMillis(new Date(selection.endTime).getTime()),
+      y1: selection.maxDurationNs === undefined ? SCATTER_PAD.top : clampChartY(scatterY(selection.maxDurationNs)),
+      y2: selection.minDurationNs === undefined ? SCATTER_H - SCATTER_PAD.bottom : clampChartY(scatterY(selection.minDurationNs)),
+    }
+    setScatterSelection(selection)
+    if (pending.compare) analyzeScatterSelection()
+  }
+
+  // URL writes are safe now. The selected cohort, if present, has been moved
+  // from temporary startup state into the normal shareable selection state.
+  finishUrlRestore()
 
   // Deep-link: scroll to + highlight a specific log line once logs are loaded.
   if (pendingLogDeepLink.value !== null) {
@@ -5276,9 +5361,11 @@ onMounted(async () => {
               <span class="scatter-review-kicker">Ready to compare</span>
               <strong>{{ scatterPendingSelection.label }}</strong>
               <p>
-                All matching spans in the full query · {{ scatterSelectionSummary.time }} · {{ scatterSelectionSummary.duration }}
-                <template v-if="scatterSelectionSummary.count">
-                  · loaded preview: {{ scatterSelectionSummary.count }} spans
+                Selected cohort · {{ scatterSelectionSummary.time }} · {{ scatterSelectionSummary.duration }}
+                <template v-if="scatterCohortLoading"> · loading matching spans below</template>
+                <template v-else-if="scatterCohortError"> · {{ scatterCohortError }}</template>
+                <template v-else-if="scatterSelectionSummary.count">
+                  · showing {{ scatterSelectionSummary.loadedCount.toLocaleString() }} of {{ formattedCohortTotal() }} matching spans
                   <template v-if="scatterSelectionSummary.errors">, {{ scatterSelectionSummary.errors }} errors</template>
                   across {{ scatterSelectionSummary.services }} service{{ scatterSelectionSummary.services === 1 ? '' : 's' }}
                 </template>
@@ -5345,7 +5432,7 @@ onMounted(async () => {
                preserving global indexes for keyboard navigation and links. -->
           <VirtualTable
             ref="spanVirtualTable"
-            :count="results.length"
+            :count="visibleSpanResults.length"
             :item-key="resultKeyAt"
             :selected-index="selectedRowIndex"
             :follow="liveMode && liveFollowing"
@@ -5472,7 +5559,16 @@ onMounted(async () => {
           <!-- Infinite scroll sentinel -->
           <template #footer>
           <div class="scroll-sentinel">
-            <div v-if="loadingMore" class="loading-more">
+            <div v-if="scatterCohortLoading" class="loading-more">
+              <span class="loading-more-spinner">&#9676;</span> Loading selected cohort…
+            </div>
+            <div v-else-if="scatterCohortError" class="loading-more text-warning">
+              {{ scatterCohortError }}
+            </div>
+            <div v-else-if="scatterCohortRows !== null" class="loading-more text-muted">
+              Showing {{ visibleSpanResults.length.toLocaleString() }} of {{ formattedCohortTotal() }} spans in the selected cohort
+            </div>
+            <div v-else-if="loadingMore" class="loading-more">
               <span class="loading-more-spinner">&#9676;</span> Loading more…
             </div>
             <div v-else-if="hasMore" class="loading-more text-muted">
