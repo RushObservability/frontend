@@ -37,9 +37,15 @@ function onCancel() {
 
 <style scoped>
 .monitor-create-page {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: var(--sp-4) var(--sp-4) var(--sp-8);
+  width: 100%;
+  max-width: 1280px;
+  margin: 0;
+  padding: var(--sp-2) 0 var(--sp-8);
+}
+
+.monitor-create-page :deep(.mf-page) {
+  width: 100%;
+  max-width: none;
 }
 
 .mcp-header {
