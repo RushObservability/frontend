@@ -6,6 +6,7 @@ import { storageUserId } from './storageScope'
 import { safeApiErrorMessage } from '../lib/apiError'
 import {
   analyticsRequestCoordinator,
+  analyticsSupersessionKey,
   invalidateAnalyticsRequests,
   isIdempotentAnalyticsPost,
 } from '../lib/analyticsRequestCache'
@@ -228,7 +229,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       // Only caller-cancellable search surfaces opt into latest-request-wins.
       // Other views intentionally issue different queries to the same route in
       // parallel (for example, one request per correlated service).
-      supersedeKey: options?.signal && workload !== 'dashboard' ? `${method}:${path}` : undefined,
+      supersedeKey: options?.signal && workload !== 'dashboard'
+        ? analyticsSupersessionKey(path, method, options?.body)
+        : undefined,
       ttlMs: workload === 'dashboard' ? 2_000 : 1_500,
       staleMs: workload === 'dashboard' ? 8_000 : 0,
     })

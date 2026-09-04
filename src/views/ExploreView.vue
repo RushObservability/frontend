@@ -1519,7 +1519,7 @@ const SCATTER_H = 250
 const SCATTER_PAD = { left: 64, right: 20, top: 18, bottom: 34 }
 const scatterBrush = ref<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
 const scatterDragging = ref(false)
-const scatterExpanded = ref(false)
+const scatterExpanded = ref(true)
 const scatterMode = ref<'dots' | 'density'>('density')
 const compareModeActive = ref(false)
 const scatterRangeLabel = computed(() => {

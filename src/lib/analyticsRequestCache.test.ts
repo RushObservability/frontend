@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   AnalyticsRequestCoordinator,
   analyticsRequestCoordinator,
+  analyticsSupersessionKey,
   canonicalizeRequestBody,
   flushAnalyticsRequestMetrics,
   invalidateAnalyticsRequests,
@@ -39,6 +40,41 @@ describe('analytics request coordinator', () => {
       .toBe('{"a":{"b":2,"d":4},"list":[3,1],"z":1}')
     expect(semanticRequestKey(scope({ body: '{"b":2,"a":1}' })))
       .toBe(semanticRequestKey(scope({ body: '{"a":1,"b":2}' })))
+  })
+
+  it('uses separate supersession lanes for Explore rows and summaries', () => {
+    const rows = JSON.stringify({ include_rows: true, include_summary: false })
+    const summary = JSON.stringify({ include_rows: false, include_summary: true })
+    const combined = JSON.stringify({})
+
+    expect(analyticsSupersessionKey('/explore/search', 'POST', rows)).toBe('POST:/explore/search:rows')
+    expect(analyticsSupersessionKey('/explore/search', 'POST', summary)).toBe('POST:/explore/search:summary')
+    expect(analyticsSupersessionKey('/explore/search', 'POST', combined)).toBe('POST:/explore/search:combined')
+    expect(analyticsSupersessionKey('/query', 'POST', rows)).toBe('POST:/query')
+  })
+
+  it('runs Explore rows and summaries concurrently without cancellation', async () => {
+    const coordinator = new AnalyticsRequestCoordinator()
+    const rowsResponse = deferred<string>()
+    const summaryResponse = deferred<string>()
+    const rowsBody = JSON.stringify({ include_rows: true, include_summary: false })
+    const summaryBody = JSON.stringify({ include_rows: false, include_summary: true })
+
+    const rows = coordinator.run(
+      scope({ body: rowsBody }),
+      () => rowsResponse.promise,
+      { supersedeKey: analyticsSupersessionKey('/explore/search', 'POST', rowsBody) },
+    )
+    const summary = coordinator.run(
+      scope({ body: summaryBody }),
+      () => summaryResponse.promise,
+      { supersedeKey: analyticsSupersessionKey('/explore/search', 'POST', summaryBody) },
+    )
+
+    rowsResponse.resolve('{"rows":[]}')
+    summaryResponse.resolve('{"summary":{"histogram":[]}}')
+    await expect(rows).resolves.toContain('rows')
+    await expect(summary).resolves.toContain('histogram')
   })
 
   it('reduces fifty identical simultaneous POST queries to one transport call', async () => {
