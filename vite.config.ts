@@ -70,6 +70,11 @@ export default defineConfig({
       allow: [
         // Allow serving files from the SDK directory
         path.resolve(import.meta.dirname, '..'),
+        // A composed edition may reuse this checkout's dependencies from a
+        // sibling working directory during local development.
+        ...(process.env.VITE_ADDITIONAL_FS_ROOT
+          ? [path.resolve(process.env.VITE_ADDITIONAL_FS_ROOT)]
+          : []),
       ],
     },
     proxy: {

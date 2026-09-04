@@ -43,7 +43,7 @@ function toggleTheme() {
 const { features, loadFeatures } = useFeatures()
 const { loadLicense, hasEntitlement } = useLicense()
 const featureOn = (k: string) => !!(features.value as Record<string, boolean | undefined>)[k]
-const hasIntegrations = computed(() => availableAddons(hasEntitlement, featureOn, isAddonEnabled).length > 0)
+const hasIntegrations = computed(() => availableAddons(hasEntitlement, featureOn, isAddonEnabled, isAdmin.value).length > 0)
 const navigationGroups = computed(() => visibleNavigationGroups({
   isAdmin: isAdmin.value,
   features: features.value,

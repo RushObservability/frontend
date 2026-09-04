@@ -4,7 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useLicense } from '../composables/useLicense'
 import { useFeatures } from '../composables/useFeatures'
-import { getAddon, availableAddons } from '../integrations/catalog'
+import { useAuth } from '../composables/useAuth'
+import { getAddon, availableAddons, hasAddonEntitlement } from '../integrations/catalog'
 import { isAddonEnabled } from '../composables/useIntegrationEnabled'
 import '../styles/views/IntegrationsView.css'
 
@@ -13,11 +14,12 @@ const router = useRouter()
 const api = useApi()
 const { loaded, loadLicense, hasEntitlement } = useLicense()
 const { features, loadFeatures } = useFeatures()
+const { isAdmin } = useAuth()
 // A free add-on is platform-enabled per the backend (Helm/env → /api/v1/features).
 const featureOn = (k: string) => !!(features.value as Record<string, boolean | undefined>)[k]
 
 // Rail = free add-ons that are both Helm-enabled and toggled on, plus licensed ones.
-const addons = computed(() => availableAddons(hasEntitlement, featureOn, isAddonEnabled))
+const addons = computed(() => availableAddons(hasEntitlement, featureOn, isAddonEnabled, isAdmin.value))
 
 // ── Resolve current add-on + page from the route ──
 const addonKey = computed(() => (route.params.addon as string) || '')
@@ -26,9 +28,10 @@ const addon = computed(() => getAddon(addonKey.value))
 // Available = (free → Helm-enabled + toggled on) | (licensed → entitled).
 const available = computed(() =>
   !!addon.value &&
+  (!addon.value.adminOnly || isAdmin.value) &&
   (addon.value.free
     ? featureOn(addon.value.key) && isAddonEnabled(addon.value)
-    : !!addon.value.entitlement && hasEntitlement(addon.value.entitlement)),
+    : !!addon.value.entitlement && hasAddonEntitlement(hasEntitlement, addon.value.entitlement)),
 )
 // A free add-on disabled in the Helm chart (feature off) → show a hint to enable it there.
 const helmDisabled = computed(() => !!addon.value?.free && !featureOn(addon.value!.key))

@@ -73,10 +73,11 @@ function saveFlux() {
 }
 
 // ── Integrations (Kubernetes read-only browser; cluster-wide, no namespace) ──
-const k8sAddon = getAddon('kubernetes')!
-const kubernetesEnabled = ref(isAddonEnabled(k8sAddon))
+const k8sAddon = getAddon('kubernetes')
+const kubernetesEnabled = ref(k8sAddon ? isAddonEnabled(k8sAddon) : false)
 const k8sSaved = ref(false)
 function saveKubernetes() {
+  if (!k8sAddon) return
   setAddonEnabled(k8sAddon, kubernetesEnabled.value)
   k8sSaved.value = true
   setTimeout(() => { k8sSaved.value = false }, 2000)

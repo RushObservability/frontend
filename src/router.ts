@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuth } from './composables/useAuth'
+import { frontendEdition } from './edition/manifest'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -239,19 +240,6 @@ const router = createRouter({
       meta: { requiresAdmin: true },
     },
     {
-      path: '/kubernetes-access',
-      name: 'kubernetes-access',
-      component: () => import('./views/KubernetesAccessView.vue'),
-      meta: { requiresAdmin: true },
-    },
-    {
-      path: '/kubernetes-access/login/:code',
-      name: 'kubernetes-access-login',
-      component: () => import('./views/KubernetesLoginView.vue'),
-      props: true,
-      meta: { bareLayout: true },
-    },
-    {
       path: '/settings',
       name: 'settings',
       component: () => import('./views/SettingsView.vue'),
@@ -263,6 +251,7 @@ const router = createRouter({
       component: () => import('./views/SsoSetupView.vue'),
       meta: { public: true },
     },
+    ...frontendEdition.routes,
   ],
 })
 

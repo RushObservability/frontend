@@ -1,4 +1,5 @@
 import type { Features } from './composables/useFeatures'
+import { frontendEdition } from './edition/manifest'
 
 export type NavigationGroupId = 'observe' | 'respond' | 'investigate' | 'control'
 
@@ -100,10 +101,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     routeNames: ['capacity'], adminOnly: true, keywords: ['cluster', 'resources'],
   },
   {
-    id: 'kubernetes-access', label: 'Kubernetes access', path: '/kubernetes-access', icon: '☸', group: 'control',
-    routeNames: ['kubernetes-access'], adminOnly: true, keywords: ['kubectl', 'audit', 'sessions'],
-  },
-  {
     id: 'audit', label: 'Audit', path: '/audit', icon: '✓', group: 'control',
     routeNames: ['audit'], adminOnly: true, keywords: ['events', 'security'],
   },
@@ -111,6 +108,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     id: 'settings', label: 'Settings', path: '/settings', icon: '⚙', group: 'control',
     routeNames: ['settings'], adminOnly: true, keywords: ['configuration', 'users', 'auth'],
   },
+  ...frontendEdition.navigationItems,
 ]
 
 export function navigationItemVisible(item: NavigationItem, context: NavigationContext): boolean {
