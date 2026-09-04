@@ -55,11 +55,13 @@ async function handleSubmit() {
   try {
     await login(username.value, password.value)
     router.replace(loginRedirect.value)
-  } catch (e: any) {
-    if (e.message?.includes('401')) {
-      error.value = 'Invalid username or password.'
+  } catch (e: unknown) {
+    if (e instanceof Error && 'status' in e && e.status === 401) {
+      error.value = 'Incorrect username or password.'
     } else {
-      error.value = e.message || 'Login failed. Please try again.'
+      error.value = e instanceof Error && e.message
+        ? e.message
+        : 'Login failed. Please try again.'
     }
   } finally {
     submitting.value = false

@@ -148,8 +148,12 @@ function parseResponseBody<T>(body: string): T {
   return (body ? JSON.parse(body) : null) as T
 }
 
-function responseError(response: Response, context?: string): Error & { retryAfterMs?: number } {
-  const error: Error & { retryAfterMs?: number } = new Error(safeApiErrorMessage(response.status, context))
+function responseError(response: Response, context?: string): Error & { status: number; retryAfterMs?: number } {
+  const error = new Error(safeApiErrorMessage(response.status, context)) as Error & {
+    status: number
+    retryAfterMs?: number
+  }
+  error.status = response.status
   const retryAfter = response.headers.get('Retry-After')
   if (!retryAfter) return error
   const seconds = Number(retryAfter)
