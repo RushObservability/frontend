@@ -657,8 +657,17 @@ export interface GroupedTimeseriesBucket extends TimeseriesBucket {
   group_key: string
 }
 
+export interface LatencyHeatmapCell {
+  bucket: string
+  /** Quarter-decade bin in milliseconds. The lower bound is 10^(latency_bin / 4). */
+  latency_bin: number
+  count: number
+  error_count: number
+}
+
 export interface TimeseriesResponse {
   buckets: TimeseriesBucket[] | GroupedTimeseriesBucket[]
+  heatmap?: LatencyHeatmapCell[]
   grouped: boolean
 }
 
