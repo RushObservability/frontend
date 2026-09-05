@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
 import { PanelCard, TablePanel, TimeSeriesPanel } from '../components/panels'
+import DeleteConfirmationModal from '../components/DeleteConfirmationModal.vue'
 import type { Monitor, MonitorEvent, MonitorPreview } from '../types'
 
 const props = defineProps<{
@@ -18,6 +19,9 @@ const monitor = ref<Monitor | null>(null)
 const events = ref<MonitorEvent[]>([])
 const preview = ref<MonitorPreview | null>(null)
 const loading = ref(false)
+const showDeleteConfirm = ref(false)
+const deletingMonitor = ref(false)
+const deleteError = ref<string | null>(null)
 
 // ── Live graph lookback window ──
 const lookbackOptions = [
@@ -206,11 +210,30 @@ async function toggleMute() {
 
 async function deleteMonitor() {
   if (!monitor.value) return
-  if (!confirm('Delete this monitor?')) return
+  deletingMonitor.value = true
+  deleteError.value = null
   try {
     await api.deleteMonitor(monitor.value.id)
+    showDeleteConfirm.value = false
     router.push('/alerts')
-  } catch { /* error in api.error */ }
+  } catch (error) {
+    deleteError.value = error instanceof Error
+      ? error.message
+      : api.error.value || 'The alert could not be deleted.'
+  } finally {
+    deletingMonitor.value = false
+  }
+}
+
+function openDeleteConfirm() {
+  deleteError.value = null
+  showDeleteConfirm.value = true
+}
+
+function closeDeleteConfirm() {
+  if (deletingMonitor.value) return
+  showDeleteConfirm.value = false
+  deleteError.value = null
 }
 </script>
 
@@ -266,7 +289,7 @@ async function deleteMonitor() {
           <button class="btn-detail btn-detail-secondary" @click="toggleMute">
             {{ monitor.enabled ? 'Mute' : 'Unmute' }}
           </button>
-          <button class="btn-detail btn-detail-danger" @click="deleteMonitor">Delete</button>
+          <button class="btn-detail btn-detail-danger" @click="openDeleteConfirm">Delete</button>
         </div>
       </div>
 
@@ -455,6 +478,19 @@ async function deleteMonitor() {
         </div>
       </TablePanel>
     </template>
+
+    <DeleteConfirmationModal
+      v-if="monitor"
+      :open="showDeleteConfirm"
+      :title="`Delete ${monitor.name}?`"
+      description="This alert will stop evaluating. This action cannot be undone."
+      confirm-label="Delete alert"
+      cancel-label="Keep alert"
+      :busy="deletingMonitor"
+      :error="deleteError"
+      @cancel="closeDeleteConfirm"
+      @confirm="deleteMonitor"
+    />
   </div>
 </template>
 

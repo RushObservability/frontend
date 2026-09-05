@@ -9,4 +9,13 @@ describe('monitor list refresh', () => {
     expect(source).toContain('refreshLoop.start()')
     expect(source).toContain('onUnmounted(() => refreshLoop.stop())')
   })
+
+  it('uses alert terminology in user-facing copy', () => {
+    expect(source).toContain('<h1 class="monitors-title">Alerts</h1>')
+    expect(source).toContain('New alert')
+    expect(source).toContain('placeholder="Search alerts..."')
+    expect(source).toContain('No alerts configured')
+    expect(source).not.toContain('New Monitor')
+    expect(source).not.toContain('Search monitors...')
+  })
 })

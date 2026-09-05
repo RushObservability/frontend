@@ -145,7 +145,7 @@ async function toggleMute(m: Monitor, ev: Event) {
 
 async function removeMonitor(id: string, ev: Event) {
   ev.stopPropagation()
-  if (!confirm('Delete this monitor?')) return
+  if (!confirm('Delete this alert?')) return
   try {
     await api.deleteMonitor(id)
     monitors.value = monitors.value.filter(m => m.id !== id)
@@ -158,12 +158,12 @@ async function removeMonitor(id: string, ev: Event) {
     <!-- Header -->
     <div class="monitors-header">
       <div class="monitors-header-left">
-        <h1 class="monitors-title">Monitors</h1>
+        <h1 class="monitors-title">Alerts</h1>
         <span class="monitors-count mono text-muted">{{ monitors.length }}</span>
       </div>
       <router-link v-if="canWrite" to="/alerts/new" class="btn-new-monitor">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        New Monitor
+        New alert
       </router-link>
     </div>
 
@@ -229,7 +229,7 @@ async function removeMonitor(id: string, ev: Event) {
             v-model="search"
             type="text"
             class="search-input"
-            placeholder="Search monitors..."
+            placeholder="Search alerts..."
           />
         </div>
       </div>
@@ -237,7 +237,7 @@ async function removeMonitor(id: string, ev: Event) {
 
     <!-- Loading -->
     <div v-if="loading" class="empty-state card">
-      <div class="text-muted">Loading monitors...</div>
+      <div class="text-muted">Loading alerts...</div>
     </div>
 
     <!-- Empty state -->
@@ -245,10 +245,10 @@ async function removeMonitor(id: string, ev: Event) {
       <div class="empty-state-icon">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.3"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       </div>
-      <div v-if="monitors.length === 0">No monitors configured</div>
-      <div v-else>No monitors match your filters</div>
+      <div v-if="monitors.length === 0">No alerts configured</div>
+      <div v-else>No alerts match your filters</div>
       <div class="text-secondary" style="font-size: 11px">
-        <router-link to="/alerts/new" style="color: var(--amber)">Create your first monitor</router-link> to start alerting
+        <router-link to="/alerts/new" style="color: var(--amber)">Create your first alert</router-link> to start alerting
       </div>
     </div>
 
