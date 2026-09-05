@@ -133,7 +133,6 @@ const actions = computed<PaletteAction[]>(() => {
   const quickActions: { title: string; path: string; icon: string; navigationId: string }[] = [
     { title: 'New Dashboard',      path: '/dashboards',       icon: '+', navigationId: 'dashboards' },
     { title: 'New Alert Rule',     path: '/alerts/new',       icon: '+', navigationId: 'alerts' },
-    { title: 'New Detection Rule', path: '/detection/new',    icon: '+', navigationId: 'detection' },
     { title: 'New Investigation',  path: '/investigate',      icon: '+', navigationId: 'sre-agent' },
   ]
 

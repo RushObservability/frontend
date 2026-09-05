@@ -1314,35 +1314,6 @@ export interface SetupTokenValidation {
   provider: string
 }
 
-// ── Detection types ──
-
-export interface DetectionRule {
-  id: string
-  tenant_id: string
-  name: string
-  description: string
-  query_sql: string
-  interval_secs: number
-  threshold: number
-  severity: string  // 'critical' | 'high' | 'medium' | 'low' | 'info'
-  window_secs: number
-  enabled: boolean
-  channels: string[]
-  created_by: string
-  created_at: string
-  updated_at: string
-}
-
-export interface DetectionEvent {
-  id: string
-  rule_id: string
-  tenant_id: string
-  severity: string
-  match_count: number
-  sample_data: any[]
-  created_at: string
-}
-
 // ── BubbleUp types ──
 
 export interface BubbleUpValue {

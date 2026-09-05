@@ -87,20 +87,9 @@ const router = createRouter({
       component: () => import('./views/AlertChannelAddView.vue'),
     },
     {
-      path: '/detection',
-      name: 'detection',
-      component: () => import('./views/DetectionView.vue'),
-    },
-    {
-      path: '/detection/new',
-      name: 'detection-rule-add',
-      component: () => import('./views/DetectionRuleEditView.vue'),
-    },
-    {
-      path: '/detection/:id/edit',
-      name: 'detection-rule-edit',
-      component: () => import('./views/DetectionRuleEditView.vue'),
-      props: true,
+      // Detection rules were folded into Alerts. Preserve old bookmarks.
+      path: '/detection/:pathMatch(.*)*',
+      redirect: '/alerts',
     },
     {
       path: '/slos',

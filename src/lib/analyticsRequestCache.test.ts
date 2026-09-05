@@ -223,7 +223,7 @@ describe('analytics request coordinator', () => {
     for (const route of [
       '/query', '/query/count', '/query/timeseries', '/query/group', '/explore/search', '/logs',
       '/logs/context', '/rum/vitals', '/monitors/preview', '/funnels/abc/run',
-      '/detection/rules/abc/test', '/anomaly-events/abc/analyze',
+      '/anomaly-events/abc/analyze',
     ]) expect(isIdempotentAnalyticsPost(route, 'POST')).toBe(true)
     for (const route of ['/dashboards', '/monitors', '/settings/query-limits', '/auth/logout']) {
       expect(isIdempotentAnalyticsPost(route, 'POST')).toBe(false)
