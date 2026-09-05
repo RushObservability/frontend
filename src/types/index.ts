@@ -1350,6 +1350,8 @@ export interface BubbleUpRequest {
 
 // ── Monitor types ──
 
+export type MonitorComparator = 'above' | 'above_or_equal' | 'equal' | 'below_or_equal' | 'below'
+
 export interface Monitor {
   id: string
   tenant_id: string
@@ -1360,6 +1362,7 @@ export interface Monitor {
   critical_recovery: number | null
   warning: number | null
   warning_recovery: number | null
+  comparator: MonitorComparator
   eval_window_secs: number
   eval_interval_secs: number
   group_by: string[]
@@ -1393,8 +1396,21 @@ export interface MonitorEvent {
 }
 
 export interface MonitorPreview {
-  current_value: number
+  current_value: number | null
   timeseries: { timestamp: string; value: number }[]
+  series?: Array<{
+    group_key: string
+    points: { timestamp: string; value: number }[]
+  }>
+  simulated_events?: Array<{
+    timestamp: string
+    group_key: string
+    previous_state: string
+    state: string
+    value: number
+    threshold: number | null
+  }>
+  bucket_secs?: number
 }
 
 export interface RumIngestPayload {

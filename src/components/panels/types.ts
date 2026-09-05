@@ -32,6 +32,8 @@ export interface TimeSeriesPanelProps extends PanelFrameProps {
   series?: TimeSeriesPanelSeries[]
   deploys?: DeployMarker[]
   thresholds?: Array<{ value: number; color: string; label: string }>
+  /** Keep the chart canvas visible without samples, useful while configuring reference lines. */
+  showChartWhenEmpty?: boolean
   unit?: string
   seriesName?: string
 }

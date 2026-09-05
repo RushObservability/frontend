@@ -8,6 +8,7 @@ const props = withDefaults(defineProps<TimeSeriesPanelProps>(), {
   series: undefined,
   deploys: () => [],
   thresholds: () => [],
+  showChartWhenEmpty: false,
   unit: '',
   seriesName: 'value',
   description: '',
@@ -20,7 +21,12 @@ const props = withDefaults(defineProps<TimeSeriesPanelProps>(), {
   emptyMessage: "Try a wider time range or adjust this panel's query.",
 })
 
-const hasData = () => Boolean(props.series?.some(series => series.points.length) || props.buckets.length)
+const hasData = () => Boolean(
+  props.showChartWhenEmpty
+  || props.thresholds.length
+  || props.series?.some(series => series.points.length)
+  || props.buckets.length,
+)
 </script>
 
 <template>

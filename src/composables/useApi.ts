@@ -1559,14 +1559,31 @@ export function useApi() {
   }
 
   async function previewMonitor(config: Record<string, unknown>): Promise<MonitorPreview> {
-    const { type, eval_window_secs, ...queryFields } = config
+    const {
+      type,
+      eval_window_secs,
+      lookback_secs,
+      group_by,
+      critical,
+      critical_recovery,
+      warning,
+      warning_recovery,
+      comparator,
+      ...queryFields
+    } = config
     return await request('/monitors/preview', {
       method: 'POST',
       body: JSON.stringify({
         type,
         query_config: queryFields,
         eval_window_secs: eval_window_secs || 300,
-        group_by: (queryFields as Record<string, unknown>).group_by || [],
+        lookback_secs: lookback_secs || 10800,
+        group_by: group_by || [],
+        critical,
+        critical_recovery,
+        warning,
+        warning_recovery,
+        comparator: comparator || 'above',
       }),
     })
   }
@@ -1583,10 +1600,12 @@ export function useApi() {
     type: string
     prefix?: string
     metric?: string
+    service?: string
   }): Promise<{ suggestions: string[] }> {
     const q = new URLSearchParams({ type: params.type })
     if (params.prefix) q.set('prefix', params.prefix)
     if (params.metric) q.set('metric', params.metric)
+    if (params.service) q.set('service', params.service)
     return await request(`/monitors/autocomplete?${q.toString()}`)
   }
 

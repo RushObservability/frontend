@@ -1,3 +1,5 @@
+import type { MonitorComparator } from '../types'
+
 export type MonitorType = 'metric' | 'log' | 'apm' | 'composite'
 export type AlertTemplateGroup = 'apm' | 'logs' | 'infrastructure'
 
@@ -9,7 +11,7 @@ interface AlertTemplateBase {
   monitorName: string
   message: string
   evalWindow: number
-  comparator: 'above' | 'below'
+  comparator: MonitorComparator
   criticalThreshold: number
   warningThreshold: number | null
   criticalRecovery: number | null
@@ -21,6 +23,7 @@ export type AlertTemplate = AlertTemplateBase & (
   | {
       monitorType: 'apm'
       query: {
+        service?: string
         metric: string
         endpointFilter?: string
         groupBy?: string[]
@@ -65,7 +68,7 @@ export const ALERT_TEMPLATES: readonly AlertTemplate[] = [
     group: 'apm',
     monitorType: 'apm',
     monitorName: 'Error rate spike',
-    message: 'Request error rate is above 5%.',
+    message: '{{service}} {{endpoint}} error rate is {{value}}%, above {{threshold}}%.',
     evalWindow: 300,
     comparator: 'above',
     criticalThreshold: 5,
@@ -73,7 +76,7 @@ export const ALERT_TEMPLATES: readonly AlertTemplate[] = [
     criticalRecovery: 3,
     warningRecovery: null,
     priority: 2,
-    query: { metric: 'error_rate' },
+    query: { service: '*', metric: 'error_rate', endpointFilter: '*', groupBy: ['service_name', 'endpoint'] },
   },
   {
     id: 'p95-latency',
@@ -82,7 +85,7 @@ export const ALERT_TEMPLATES: readonly AlertTemplate[] = [
     group: 'apm',
     monitorType: 'apm',
     monitorName: 'High p95 latency',
-    message: 'P95 request latency is above 500 ms.',
+    message: '{{service}} {{endpoint}} P95 latency is {{value}} ms, above {{threshold}} ms.',
     evalWindow: 300,
     comparator: 'above',
     criticalThreshold: 500,
@@ -90,7 +93,7 @@ export const ALERT_TEMPLATES: readonly AlertTemplate[] = [
     criticalRecovery: 450,
     warningRecovery: null,
     priority: 2,
-    query: { metric: 'p95_latency' },
+    query: { service: '*', metric: 'p95_latency', endpointFilter: '*', groupBy: ['service_name', 'endpoint'] },
   },
   {
     id: 'p99-latency-regression',
@@ -99,7 +102,7 @@ export const ALERT_TEMPLATES: readonly AlertTemplate[] = [
     group: 'apm',
     monitorType: 'apm',
     monitorName: 'P99 latency regression',
-    message: 'P99 request latency is above 500 ms.',
+    message: '{{service}} {{endpoint}} P99 latency is {{value}} ms, above {{threshold}} ms.',
     evalWindow: 300,
     comparator: 'above',
     criticalThreshold: 500,
@@ -107,7 +110,7 @@ export const ALERT_TEMPLATES: readonly AlertTemplate[] = [
     criticalRecovery: 450,
     warningRecovery: null,
     priority: 2,
-    query: { metric: 'p99_latency' },
+    query: { service: '*', metric: 'p99_latency', endpointFilter: '*', groupBy: ['service_name', 'endpoint'] },
   },
   {
     id: 'request-rate-drop',
@@ -116,7 +119,7 @@ export const ALERT_TEMPLATES: readonly AlertTemplate[] = [
     group: 'apm',
     monitorType: 'apm',
     monitorName: 'Request rate drop',
-    message: 'Request traffic has fallen below the expected rate.',
+    message: '{{service}} {{endpoint}} request rate is {{value}} req/s, below {{threshold}} req/s.',
     evalWindow: 300,
     comparator: 'below',
     criticalThreshold: 1,
@@ -124,7 +127,7 @@ export const ALERT_TEMPLATES: readonly AlertTemplate[] = [
     criticalRecovery: 2,
     warningRecovery: null,
     priority: 2,
-    query: { metric: 'request_rate' },
+    query: { service: '*', metric: 'request_rate', endpointFilter: '*', groupBy: ['service_name', 'endpoint'] },
   },
   {
     id: 'failed-login-brute-force',
