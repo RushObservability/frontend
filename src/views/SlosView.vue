@@ -249,6 +249,9 @@ function humanize(n: number): string {
           <div class="sv-name-meta mono" v-if="slo.slo_type === 'metric' && slo.metric_name">
             {{ slo.metric_name }}
           </div>
+          <div class="sv-name-meta mono" v-else-if="slo.slo_type === 'metric' && slo.total_promql">
+            PromQL
+          </div>
         </div>
 
         <!-- Type -->

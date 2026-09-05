@@ -29,6 +29,13 @@ describe('SLO detail panel queries', () => {
   })
 
   it('gives request SLO charts a two-column layout', () => {
-    expect(source).toContain("'sd-charts-row--availability': isAvailabilitySlo")
+    expect(source).toContain("'sd-charts-row--availability': isAvailabilitySlo || isMetricPromqlSlo")
+  })
+
+  it('charts metric SLOs from their PromQL expressions', () => {
+    expect(source).toContain('api.promQueryRange(slo.value.total_promql')
+    expect(source).toContain('api.promQueryRange(slo.value.error_promql')
+    expect(source).toContain("title: isMetricPromqlSlo.value ? 'Total' : 'Request Rate'")
+    expect(source).toContain("'Error PromQL as a percentage of Total PromQL.'")
   })
 })

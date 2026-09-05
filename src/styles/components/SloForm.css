@@ -228,6 +228,17 @@
 .sf-metric-field {
   animation: sf-slide-in 0.2s ease;
 }
+.sf-promql-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.sf-promql-input {
+  min-height: 76px;
+  resize: vertical;
+  line-height: 1.5;
+  tab-size: 2;
+}
 @keyframes sf-slide-in {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
@@ -285,6 +296,12 @@
 .sf-filter-desc {
   font-size: 10px;
   color: var(--text-muted);
+}
+
+@media (max-width: 760px) {
+  .sf-promql-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── Channels ── */

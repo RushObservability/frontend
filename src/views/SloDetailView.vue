@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
 import { useAuth } from '../composables/useAuth'
-import type { Slo, SloEvent, NotificationChannel, TimeseriesBucket } from '../types'
+import type { Slo, SloEvent, NotificationChannel, TimeseriesBucket, PromMatrixResponse } from '../types'
 import SloForm from '../components/SloForm.vue'
 import { PanelCard, StatPanel, TimeSeriesPanel } from '../components/panels'
 import type { PanelTone, TimeSeriesPanelSeries } from '../components/panels'
@@ -101,6 +101,17 @@ async function loadChartData(rethrow = false, signal?: AbortSignal) {
     // Pick interval based on window size
     const interval = windowMins <= 60 ? '1m' : windowMins <= 1440 ? '5m' : windowMins <= 10080 ? '30m' : '1h'
     chartBucketSeconds.value = intervalSeconds(interval)
+    if (isMetricPromqlSlo.value) {
+      const start = fromDateSeconds(from)
+      const end = fromDateSeconds(to)
+      const [totalResponse, errorResponse] = await Promise.all([
+        api.promQueryRange(slo.value.total_promql, start, end, chartBucketSeconds.value, 'dashboard', signal),
+        api.promQueryRange(slo.value.error_promql, start, end, chartBucketSeconds.value, 'dashboard', signal),
+      ])
+      chartBuckets.value = promMatrixBuckets(totalResponse)
+      errorChartBuckets.value = promMatrixBuckets(errorResponse)
+      return
+    }
     const totalRequest = api.queryTimeseries({
       time_range: { from, to },
       filters: slo.value.total_filters.length ? slo.value.total_filters : [],
@@ -127,6 +138,32 @@ async function loadChartData(rethrow = false, signal?: AbortSignal) {
   } finally {
     if (!rethrow) chartLoading.value = false
   }
+}
+
+function fromDateSeconds(value: string): number {
+  return Math.floor(new Date(value).getTime() / 1_000)
+}
+
+function promMatrixBuckets(response: PromMatrixResponse): TimeseriesBucket[] {
+  const sums = new Map<number, number>()
+  for (const series of response.result || []) {
+    for (const [timestamp, rawValue] of series.values) {
+      const value = Number(rawValue)
+      if (!Number.isFinite(value)) continue
+      sums.set(timestamp, (sums.get(timestamp) ?? 0) + value)
+    }
+  }
+  return [...sums.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([timestamp, count]) => ({
+      bucket: new Date(timestamp * 1_000).toISOString().replace('T', ' ').replace('Z', ''),
+      count,
+      error_count: 0,
+      avg_duration_ms: 0,
+      p50_ms: 0,
+      p95_ms: 0,
+      p99_ms: 0,
+    }))
 }
 
 async function updateSlo(data: Record<string, unknown>) {
@@ -178,6 +215,10 @@ const sloSourceLabel = computed(() => slo.value?.slo_type === 'metric' ? 'Metric
 const sloRangeLabel = computed(() => slo.value ? windowLabel(slo.value.window_type) : '')
 const isTraceLatencySlo = computed(() => slo.value?.slo_type === 'trace' && slo.value.indicator_type === 'latency')
 const isAvailabilitySlo = computed(() => slo.value?.indicator_type === 'availability')
+const isMetricPromqlSlo = computed(() => slo.value?.slo_type === 'metric'
+  && ['availability', 'latency'].includes(slo.value.indicator_type)
+  && !!slo.value.total_promql
+  && !!slo.value.error_promql)
 const latencyThresholdMs = computed(() => isTraceLatencySlo.value ? slo.value?.threshold_ms ?? null : null)
 const sloSuccessDescription = computed(() => {
   if (isTraceLatencySlo.value && latencyThresholdMs.value !== null) {
@@ -289,9 +330,11 @@ interface ChartDef {
 
 const chartDefs = computed<Record<ChartKey, ChartDef>>(() => ({
   rate: {
-    key: 'rate', title: 'Request Rate', values: rateValues.value,
-    color: 'var(--amber)', lineClass: 'sd-c-rate', tickFixed: 1, tickSuffix: ' req/s',
-    fmtVal: (v) => `${v.toLocaleString(undefined, { maximumFractionDigits: 1 })} req/s`,
+    key: 'rate', title: isMetricPromqlSlo.value ? 'Total' : 'Request Rate', values: rateValues.value,
+    color: 'var(--amber)', lineClass: 'sd-c-rate', tickFixed: 1, tickSuffix: isMetricPromqlSlo.value ? '' : ' req/s',
+    fmtVal: (v) => isMetricPromqlSlo.value
+      ? v.toLocaleString(undefined, { maximumFractionDigits: 3 })
+      : `${v.toLocaleString(undefined, { maximumFractionDigits: 1 })} req/s`,
   },
   error: {
     key: 'error', title: 'Error Rate', values: errorValues.value,
@@ -332,17 +375,17 @@ const availabilityChartPoints = computed(() => buildAvailabilityChartPoints(
   errorChartBuckets.value,
   chartBucketSeconds.value,
 ))
-const rateValues = computed(() => isAvailabilitySlo.value
-  ? availabilityChartPoints.value.map(point => point.requestsPerSecond)
+const rateValues = computed(() => isAvailabilitySlo.value || isMetricPromqlSlo.value
+  ? availabilityChartPoints.value.map(point => isMetricPromqlSlo.value ? point.total : point.requestsPerSecond)
   : chartBuckets.value.map(bucket => bucket.count / chartBucketSeconds.value))
-const errorValues = computed(() => isAvailabilitySlo.value
+const errorValues = computed(() => isAvailabilitySlo.value || isMetricPromqlSlo.value
   ? availabilityChartPoints.value.map(point => point.errorRate)
   : chartBuckets.value.map(bucket => bucket.count > 0 ? (bucket.error_count / bucket.count) * 100 : 0))
 const averageLatencyValues = computed(() => chartBuckets.value.map(b => b.avg_duration_ms))
 const p50Values = computed(() => chartBuckets.value.map(b => b.p50_ms))
 const p95Values = computed(() => chartBuckets.value.map(b => b.p95_ms))
 const p99Values = computed(() => chartBuckets.value.map(b => b.p99_ms))
-const sliValues = computed(() => isAvailabilitySlo.value
+const sliValues = computed(() => isAvailabilitySlo.value || isMetricPromqlSlo.value
   ? availabilityChartPoints.value.map(point => point.successRate)
   : chartBuckets.value.map((bucket) => {
       if (bucket.count === 0) return 100
@@ -394,8 +437,12 @@ function chartCaption(key: ChartKey): string {
   if (key === 'p50') return latencyCaption('Median response latency')
   if (key === 'p95') return latencyCaption('95% of requests completed at or below this latency')
   if (key === 'p99') return latencyCaption('99% of requests completed at or below this latency')
-  if (key === 'rate') return 'Average requests per second in each chart bucket.'
-  if (key === 'error') return 'Share of requests matching this SLO\'s error filters.'
+  if (key === 'rate') return isMetricPromqlSlo.value
+    ? 'Value returned by Total PromQL at each evaluation point.'
+    : 'Average requests per second in each chart bucket.'
+  if (key === 'error') return isMetricPromqlSlo.value
+    ? 'Error PromQL as a percentage of Total PromQL.'
+    : 'Share of requests matching this SLO\'s error filters.'
   return 'Success percentage compared with the configured SLO target.'
 }
 
@@ -437,13 +484,20 @@ function yTicks(values: number[], fixed?: number, geo: Geo = geoSmall, maxVal?: 
 function xLabels(geo: Geo = geoSmall): Array<{ label: string; x: number }> {
   const b = chartBuckets.value
   if (b.length < 2) return []
+  const firstTimestamp = parseBucketUtc(b[0]!.bucket)
+  const lastTimestamp = parseBucketUtc(b[b.length - 1]!.bucket)
+  const visibleRangeMs = lastTimestamp - firstTimestamp
   const stepX = geo.innerW / Math.max(b.length - 1, 1)
-  const skip = Math.max(1, Math.floor(b.length / 6))
+  const targetLabels = visibleRangeMs > 24 * 60 * 60_000 ? 4 : 6
+  const skip = Math.max(1, Math.floor(b.length / targetLabels))
   const labels: Array<{ label: string; x: number }> = []
   for (let i = 0; i < b.length; i += skip) {
     const d = new Date(parseBucketUtc(b[i]!.bucket))
+    const time = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
     labels.push({
-      label: `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`,
+      label: visibleRangeMs > 24 * 60 * 60_000
+        ? `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${time}`
+        : time,
       x: geo.pad.left + i * stepX,
     })
   }
@@ -677,7 +731,7 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
       class="sd-charts-row"
       :class="{
         'sd-charts-row--latency': isTraceLatencySlo,
-        'sd-charts-row--availability': isAvailabilitySlo,
+        'sd-charts-row--availability': isAvailabilitySlo || isMetricPromqlSlo,
       }"
       v-if="!showEdit"
     >
@@ -797,6 +851,17 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
             <span class="sd-kv-v mono sd-text-breaching">{{ formatDate(slo.last_breached_at) }}</span>
           </div>
         </template>
+        </div>
+
+        <div class="sd-promql-row" v-if="slo.total_promql || slo.error_promql">
+          <div class="sd-promql-query" v-if="slo.total_promql">
+            <span class="sd-filter-badge sd-badge-total">total</span>
+            <code>{{ slo.total_promql }}</code>
+          </div>
+          <div class="sd-promql-query" v-if="slo.error_promql">
+            <span class="sd-filter-badge sd-badge-error">error</span>
+            <code>{{ slo.error_promql }}</code>
+          </div>
         </div>
 
         <!-- Filters -->

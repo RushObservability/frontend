@@ -2,6 +2,7 @@ import type { TimeseriesBucket } from '../types'
 
 export interface AvailabilityChartPoint {
   bucket: string
+  total: number
   requestsPerSecond: number
   errorRate: number
   successRate: number
@@ -26,6 +27,7 @@ export function buildAvailabilityChartPoints(
   totalBuckets: TimeseriesBucket[],
   errorBuckets: TimeseriesBucket[],
   bucketSeconds: number,
+  nowMs = Date.now(),
 ): AvailabilityChartPoint[] {
   const errorsByBucket = new Map(errorBuckets.map(bucket => [bucket.bucket, bucket.count]))
   const seconds = Math.max(1, bucketSeconds)
@@ -33,9 +35,15 @@ export function buildAvailabilityChartPoints(
   return totalBuckets.map((bucket) => {
     const errors = Math.min(bucket.count, errorsByBucket.get(bucket.bucket) ?? 0)
     const errorRate = bucket.count > 0 ? (errors / bucket.count) * 100 : 0
+    const bucketStartMs = Date.parse(`${bucket.bucket.replace(' ', 'T').replace(/(\.\d{3})\d*$/, '$1')}Z`)
+    const elapsedSeconds = (nowMs - bucketStartMs) / 1_000
+    const observedSeconds = Number.isFinite(elapsedSeconds) && elapsedSeconds > 0 && elapsedSeconds < seconds
+      ? elapsedSeconds
+      : seconds
     return {
       bucket: bucket.bucket,
-      requestsPerSecond: bucket.count / seconds,
+      total: bucket.count,
+      requestsPerSecond: bucket.count / observedSeconds,
       errorRate,
       successRate: 100 - errorRate,
     }
