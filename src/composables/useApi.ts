@@ -28,6 +28,8 @@ import type {
   Widget,
   NotificationChannel,
   NotificationLogEntry,
+  AlertRoute,
+  AlertRouteInput,
   Slo,
   SloEvent,
   DeployMarker,
@@ -528,6 +530,28 @@ export function useApi() {
 
   async function listNotificationLog(): Promise<{ entries: NotificationLogEntry[] }> {
     return await request('/notifications/log')
+  }
+
+  async function listAlertRoutes(): Promise<{ routes: AlertRoute[] }> {
+    return await request('/alert-routes')
+  }
+
+  async function createAlertRoute(data: AlertRouteInput): Promise<AlertRoute> {
+    return await request('/alert-routes', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async function updateAlertRoute(id: string, data: AlertRouteInput): Promise<AlertRoute> {
+    return await request(`/alert-routes/${encodePathSegment(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async function deleteAlertRoute(id: string): Promise<void> {
+    await request(`/alert-routes/${encodePathSegment(id)}`, { method: 'DELETE' })
   }
 
   // Legacy alert-rules API removed — Monitors (listMonitors/…) is the single
@@ -2017,6 +2041,7 @@ export function useApi() {
     exportDashboard, importDashboard, listDashboardTemplates, createFromTemplate,
     createWidget, updateWidget, deleteWidget,
     listChannels, createChannel, updateChannel, deleteChannel, testChannel, notifyChannel, listNotificationLog,
+    listAlertRoutes, createAlertRoute, updateAlertRoute, deleteAlertRoute,
     listMaintenanceWindows, createMaintenanceWindow, deleteMaintenanceWindow,
     listFunnels, createFunnel, deleteFunnel, runFunnel,
     listSlos, createSlo, getSlo, updateSlo, deleteSlo, listSloEvents,

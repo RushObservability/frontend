@@ -1487,6 +1487,10 @@ onUnmounted(() => {
                 No channels configured
               </div>
             </div>
+            <p class="mf-hint text-muted">
+              Direct channels are added to every matching
+              <router-link to="/settings#alerting">routing rule</router-link>.
+            </p>
           </div>
           <div class="mf-field" style="width: 100px;">
             <label class="mf-label">Renotify</label>

@@ -23,6 +23,24 @@
 .monitors-count {
   font-size: 12px;
 }
+.monitors-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.btn-alert-routing {
+  padding: 6px 11px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.btn-alert-routing:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
 .btn-new-monitor {
   display: inline-flex;
   align-items: center;
