@@ -128,8 +128,9 @@
 .capacity-primary span { color: var(--text-muted); font-size: 10px; }
 .meter { height: 5px; overflow: hidden; border-radius: 3px; background: var(--bg-elevated); }
 .meter span { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--blue); transition: width .25s ease; }
+.meter span.warning { background: var(--amber); }
 .meter span.danger { background: var(--error); }
-.compact-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; margin: 17px 0 0; }
+.compact-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 11px; margin: 17px 0 0; }
 .compact-facts dd { overflow: hidden; margin: 4px 0 0; color: var(--text-primary); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
 .recommendations-section,
