@@ -172,6 +172,12 @@
 .sd-charts-row--latency {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+.sd-charts-row--availability {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.sd-charts-row--availability .sd-chart-panel:last-child {
+  grid-column: 1 / -1;
+}
 .sd-latency-objective {
   display: flex;
   flex-wrap: wrap;
