@@ -37,8 +37,17 @@ async function loadPreview() {
   previewLoading.value = true
   previewError.value = null
   try {
-    // Override eval_window_secs so the graph spans the chosen lookback window.
-    preview.value = await api.previewMonitor({ ...m.query_config, eval_window_secs: lookbackSecs.value })
+    preview.value = await api.previewMonitor({
+      ...m.query_config,
+      eval_window_secs: m.eval_window_secs,
+      lookback_secs: lookbackSecs.value,
+      group_by: m.group_by,
+      critical: m.critical,
+      critical_recovery: m.critical_recovery,
+      warning: m.warning,
+      warning_recovery: m.warning_recovery,
+      comparator: m.comparator,
+    })
   } catch (error) {
     previewError.value = error instanceof Error ? error.message : 'Preview data is unavailable.'
   }
@@ -116,12 +125,20 @@ function formatGroupKey(key: string): string {
 // ── Live graph (reusable TimeSeriesPanel) ──
 // Map the preview timeseries to the panel's [epoch-seconds, value] series shape.
 const previewSeries = computed(() => {
-  if (!preview.value || !preview.value.timeseries.length) return []
-  const points = preview.value.timeseries.map((p, i) => {
-    const t = Date.parse(p.timestamp.replace(' ', 'T'))
-    return [Number.isNaN(t) ? i : t / 1000, p.value] as [number, number]
-  })
-  return [{ name: 'value', points }]
+  if (!preview.value) return []
+  const source = preview.value.series?.length
+    ? preview.value.series
+    : [{ group_key: '', points: preview.value.timeseries }]
+  return source.slice(0, 8).map((item) => ({
+    name: item.group_key || 'value',
+    points: item.points.map((point, index) => {
+      const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(point.timestamp)
+        ? point.timestamp
+        : `${point.timestamp.replace(' ', 'T')}Z`
+      const timestamp = Date.parse(normalized)
+      return [Number.isNaN(timestamp) ? index : timestamp / 1000, point.value] as [number, number]
+    }),
+  }))
 })
 
 const previewThresholds = computed(() => {
@@ -164,7 +181,7 @@ const timelineSegments = computed(() => {
 function investigateMonitor() {
   const m = monitor.value
   if (!m) return
-  const ctx = `Monitor "${m.name}" is ${m.state}. Query type: ${m.type}. Current value exceeded threshold.`
+  const ctx = `Monitor "${m.name}" is ${m.state}. Query type: ${m.type}. Current value matched its alert condition.`
   router.push({
     path: '/investigate',
     query: {

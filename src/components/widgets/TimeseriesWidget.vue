@@ -33,7 +33,12 @@ const SERIES_COLORS = [
   '#d97706', '#db2777', '#0891b2', '#65a30d',
   '#f97316', '#6366f1', '#0f766e', '#be123c',
 ]
-const seriesMode = computed(() => !!(props.series && props.series.length))
+const seriesMode = computed(() => props.series !== undefined)
+const hasSamples = computed(() => (
+  seriesMode.value
+    ? Boolean(props.series?.some(series => series.points.length))
+    : props.buckets.length > 0
+))
 
 // Append the unit suffix to a formatted number (axis ticks, legend, tooltip).
 // A leading "%" sticks to the number; everything else gets a thin space.
@@ -426,8 +431,9 @@ function onLeave() { hover.set(null) }
         </div>
       </div>
 
+      <span v-if="!hasSamples && thresholdLines.length" class="ts-no-samples mono">No samples</span>
       <EmptyState
-        v-if="(seriesMode && seriesPaths.length === 0) || (!seriesMode && buckets.length === 0)"
+        v-else-if="!hasSamples"
         title="No samples in this range"
         description="Try a wider time range or review the panel query."
         icon="—"

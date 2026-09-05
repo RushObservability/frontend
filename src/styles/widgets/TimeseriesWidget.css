@@ -15,6 +15,26 @@
   width: 100%;
   height: 100%;
 }
+
+.ts-no-samples {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  padding: 3px 6px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: 2px;
+  font-size: 9px;
+  letter-spacing: .03em;
+}
+
+.ts-plot :deep(.empty-state-block) {
+  position: absolute;
+  inset: 0;
+  align-content: center;
+}
 /* The SVG stretches to fill the cell (preserveAspectRatio="none"), which also
    magnifies viewBox-unit text ~1.5-2x. Shrink axis labels here so they read at
    a normal size on the dashboard without touching the shared .ch-axis (used at

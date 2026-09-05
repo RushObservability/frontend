@@ -3,8 +3,12 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import DOMPurify from 'dompurify'
 import { useApi } from '../composables/useApi'
 import AutocompleteInput from './AutocompleteInput.vue'
+import { TimeSeriesPanel } from './panels'
 import { ALERT_TEMPLATE_GROUPS, ALERT_TEMPLATES } from '../lib/alertTemplates'
-import type { Monitor, MonitorPreview, NotificationChannel } from '../types'
+import { normalizeApmGroups } from '../lib/monitorApm'
+import { normalizeThreshold, thresholdOrderError } from '../lib/monitorThresholds'
+import type { TimeSeriesPanelSeries } from './panels/types'
+import type { Monitor, MonitorComparator, MonitorPreview, NotificationChannel } from '../types'
 
 const props = defineProps<{
   monitorId?: string
@@ -66,7 +70,7 @@ const compositeConfig = ref({
 const evalWindow = ref(300) // 5m default
 
 // ── Section 3: Conditions ──
-const comparator = ref<'above' | 'below'>('above')
+const comparator = ref<MonitorComparator>('above')
 const criticalThreshold = ref<number | null>(null)
 const warningThreshold = ref<number | null>(null)
 const criticalRecovery = ref<number | null>(null)
@@ -76,6 +80,8 @@ const recoveryExpanded = ref(false)
 // ── Section 4: Preview ──
 const preview = ref<MonitorPreview | null>(null)
 const previewLoading = ref(false)
+const previewError = ref<string | null>(null)
+const previewLookbackSecs = ref(10_800)
 let previewTimer: ReturnType<typeof setTimeout> | null = null
 
 // ── Section 5: Smart Suggestions ──
@@ -106,6 +112,16 @@ const evalWindowOptions = [
   { label: '2h', value: 7200 },
   { label: '4h', value: 14400 },
   { label: '24h', value: 86400 },
+]
+
+const previewLookbackOptions = [
+  { label: '1h', value: 3600 },
+  { label: '3h', value: 10800 },
+  { label: '6h', value: 21600 },
+  { label: '12h', value: 43200 },
+  { label: '24h', value: 86400 },
+  { label: '48h', value: 172800 },
+  { label: '7d', value: 604800 },
 ]
 
 const apmMetricOptions = [
@@ -147,6 +163,24 @@ const thresholdUnit = computed(() => (
         : monitorType.value === 'log' ? 'logs'
           : ''
 ))
+const normalizedCriticalThreshold = computed(() => normalizeThreshold(criticalThreshold.value))
+const normalizedWarningThreshold = computed(() => normalizeThreshold(warningThreshold.value))
+const thresholdValidationError = computed(() => thresholdOrderError(
+  comparator.value,
+  normalizedCriticalThreshold.value,
+  normalizedWarningThreshold.value,
+))
+const higherValuesAreWorse = computed(() => (
+  comparator.value === 'above' || comparator.value === 'above_or_equal'
+))
+const lowerValuesAreWorse = computed(() => (
+  comparator.value === 'below' || comparator.value === 'below_or_equal'
+))
+const canSave = computed(() => (
+  Boolean(monitorName.value.trim())
+  && (monitorType.value === 'composite' || normalizedCriticalThreshold.value !== null)
+  && thresholdValidationError.value === null
+))
 
 function applyBlankTemplate() {
   selectedTemplate.value = 'blank'
@@ -172,6 +206,7 @@ function applyBlankTemplate() {
   tags.value = []
   priority.value = 3
   preview.value = null
+  previewError.value = null
 }
 
 function applyTemplate(templateId: string) {
@@ -190,9 +225,9 @@ function applyTemplate(templateId: string) {
 
   if (template.monitorType === 'apm') {
     apmConfig.value = {
-      service: '',
+      service: template.query.service || '*',
       metric: template.query.metric,
-      endpoint_filter: template.query.endpointFilter || '',
+      endpoint_filter: template.query.endpointFilter || '*',
       group_by: [...(template.query.groupBy || [])],
     }
   } else if (template.monitorType === 'log') {
@@ -223,6 +258,7 @@ function applyTemplate(templateId: string) {
   message.value = template.message
   priority.value = template.priority
   preview.value = null
+  previewError.value = null
 }
 
 // ── PromQL expression highlighting ──
@@ -337,7 +373,13 @@ const queryConfig = computed(() => {
 const groupBy = computed(() => {
   if (monitorType.value === 'metric') return metricConfig.value.group_by
   if (monitorType.value === 'log') return logConfig.value.group_by
-  if (monitorType.value === 'apm') return apmConfig.value.group_by
+  if (monitorType.value === 'apm') {
+    return normalizeApmGroups(
+      apmConfig.value.service,
+      apmConfig.value.endpoint_filter,
+      apmConfig.value.group_by,
+    )
+  }
   return []
 })
 
@@ -347,9 +389,9 @@ function buildPayload(): Record<string, unknown> {
     name: monitorName.value,
     type: monitorType.value,
     query_config: queryConfig.value,
-    critical: criticalThreshold.value,
+    critical: normalizedCriticalThreshold.value,
     critical_recovery: criticalRecovery.value,
-    warning: warningThreshold.value,
+    warning: normalizedWarningThreshold.value,
     warning_recovery: warningRecovery.value,
     eval_window_secs: evalWindow.value,
     eval_interval_secs: 60,
@@ -371,33 +413,42 @@ function schedulePreview() {
   previewTimer = setTimeout(fetchPreview, 800)
 }
 
+const previewQueryReady = computed(() => {
+  const cfg = queryConfig.value
+  if (cfg.type === 'metric') return Boolean(cfg.metric_name || cfg.expression)
+  if (cfg.type === 'apm') return Boolean(cfg.service)
+  if (cfg.type === 'log') return Boolean(cfg.search || cfg.service || cfg.severities?.length || cfg.filters?.length)
+  return false
+})
+
 async function fetchPreview() {
   if (monitorType.value === 'composite') return
-  // Don't preview if there's nothing meaningful to query
-  const cfg = queryConfig.value
-  if (cfg.type === 'metric' && !cfg.metric_name && !cfg.expression) {
+  if (!previewQueryReady.value) {
     preview.value = null
-    previewLoading.value = false
-    return
-  }
-  if (cfg.type === 'apm' && !cfg.service) {
-    preview.value = null
-    previewLoading.value = false
-    return
-  }
-  if (cfg.type === 'log' && !cfg.search && !cfg.service && !cfg.severities?.length && !cfg.filters?.length) {
-    preview.value = null
+    previewError.value = null
     previewLoading.value = false
     return
   }
   previewLoading.value = true
+  previewError.value = null
   try {
-    const result = await api.previewMonitor(cfg)
+    const result = await api.previewMonitor({
+      ...queryConfig.value,
+      lookback_secs: previewLookbackSecs.value,
+      group_by: groupBy.value,
+      critical: normalizedCriticalThreshold.value,
+      critical_recovery: criticalRecovery.value,
+      warning: normalizedWarningThreshold.value,
+      warning_recovery: warningRecovery.value,
+      comparator: comparator.value,
+    })
     preview.value = result
-  } catch {
+  } catch (error) {
     preview.value = null
+    previewError.value = error instanceof Error ? error.message : 'The preview request failed.'
+  } finally {
+    previewLoading.value = false
   }
-  previewLoading.value = false
 }
 
 // ── Smart suggestions ──
@@ -434,7 +485,20 @@ function applySuggestion(suggestion: { text: string; severity: string }) {
 
 // Watch query config changes for preview + suggestions
 watch(
-  [metricExpression, metricConfig, logConfig, apmConfig, compositeConfig, evalWindow, monitorType],
+  [
+    metricExpression,
+    metricConfig,
+    logConfig,
+    apmConfig,
+    compositeConfig,
+    evalWindow,
+    monitorType,
+    comparator,
+    criticalThreshold,
+    criticalRecovery,
+    warningThreshold,
+    warningRecovery,
+  ],
   () => {
     schedulePreview()
     scheduleSuggestions()
@@ -442,94 +506,102 @@ watch(
   { deep: true }
 )
 
-// ── SVG chart helpers ──
-const chartWidth = 600
-const chartHeight = 260
-const chartPadding = { top: 12, right: 16, bottom: 32, left: 56 }
-
-// Compute Y-axis range including threshold values so lines are always visible
-const yRange = computed(() => {
-  if (!preview.value || !preview.value.timeseries.length) return { min: 0, max: 1 }
-  const values = preview.value.timeseries.map(p => p.value)
-  let minVal = Math.min(...values)
-  let maxVal = Math.max(...values)
-  // Extend range to include threshold lines
-  if (criticalThreshold.value != null && typeof criticalThreshold.value === 'number') {
-    minVal = Math.min(minVal, criticalThreshold.value)
-    maxVal = Math.max(maxVal, criticalThreshold.value)
+const previewSeriesName = computed(() => {
+  if (monitorType.value === 'log') return 'Matching logs'
+  if (monitorType.value === 'apm') {
+    return {
+      error_rate: 'Error rate',
+      p95_latency: 'P95 latency',
+      p99_latency: 'P99 latency',
+      request_rate: 'Request rate',
+    }[apmConfig.value.metric] || 'APM value'
   }
-  if (warningThreshold.value != null && typeof warningThreshold.value === 'number') {
-    minVal = Math.min(minVal, warningThreshold.value)
-    maxVal = Math.max(maxVal, warningThreshold.value)
-  }
-  // Add 5% padding so lines aren't on the edge
-  const pad = (maxVal - minVal) * 0.05 || 1
-  return { min: minVal - pad, max: maxVal + pad }
+  return metricConfig.value.metric_name || 'Metric value'
 })
 
-const previewPath = computed(() => {
-  if (!preview.value || !preview.value.timeseries.length) return ''
-  const ts = preview.value.timeseries
-  const { min: minVal, max: maxVal } = yRange.value
-  const range = maxVal - minVal || 1
-  const innerW = chartWidth - chartPadding.left - chartPadding.right
-  const innerH = chartHeight - chartPadding.top - chartPadding.bottom
-  const len = ts.length > 1 ? ts.length - 1 : 1
-  return ts.map((p, i) => {
-    const x = chartPadding.left + (i / len) * innerW
-    const y = chartPadding.top + innerH - ((p.value - minVal) / range) * innerH
-    return `${i === 0 ? 'M' : 'L'}${x},${y}`
-  }).join(' ')
-})
+const previewSeriesColors = [
+  'var(--amber)',
+  'var(--ok)',
+  'var(--purple, #8b5cf6)',
+  'var(--warning)',
+  'var(--text-secondary)',
+  'var(--error)',
+]
 
-// Y-axis tick labels
-const yTicks = computed(() => {
-  if (!preview.value || !preview.value.timeseries.length) return []
-  const { min: minVal, max: maxVal } = yRange.value
-  const range = maxVal - minVal || 1
-  const innerH = chartHeight - chartPadding.top - chartPadding.bottom
-  const count = 5
-  return Array.from({ length: count }, (_, i) => {
-    const frac = i / (count - 1)
-    const val = maxVal - frac * range
-    const y = chartPadding.top + frac * innerH
-    let label: string
-    if (Math.abs(val) >= 1_000_000) label = (val / 1_000_000).toFixed(1) + 'M'
-    else if (Math.abs(val) >= 1_000) label = (val / 1_000).toFixed(1) + 'k'
-    else if (Number.isInteger(val) || range > 10) label = Math.round(val).toString()
-    else label = val.toFixed(2)
-    return { y, label }
-  })
-})
-
-// X-axis tick labels
-const xTicks = computed(() => {
-  if (!preview.value || !preview.value.timeseries.length) return []
-  const ts = preview.value.timeseries
-  const innerW = chartWidth - chartPadding.left - chartPadding.right
-  const count = Math.min(ts.length, 5)
-  if (count < 2) return []
-  return Array.from({ length: count }, (_, i) => {
-    const idx = Math.round(i * (ts.length - 1) / (count - 1))
-    const x = chartPadding.left + (idx / (ts.length > 1 ? ts.length - 1 : 1)) * innerW
-    const raw = ts[idx]?.timestamp ?? ''
-    // Extract HH:MM from timestamp string
-    const match = raw.match(/(\d{2}:\d{2})(:\d{2})?$/)
-    const label = match ? match[1] : raw.slice(-5)
-    return { x, label }
-  })
-})
-
-function thresholdY(val: number | null): number | null {
-  if (val === null || typeof val !== 'number' || !preview.value || !preview.value.timeseries.length) return null
-  const { min: minVal, max: maxVal } = yRange.value
-  const range = maxVal - minVal || 1
-  const innerH = chartHeight - chartPadding.top - chartPadding.bottom
-  return chartPadding.top + innerH - ((val - minVal) / range) * innerH
+function previewTimestamp(timestamp: string): number {
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)
+    ? timestamp
+    : `${timestamp.replace(' ', 'T')}Z`
+  return Date.parse(normalized) / 1000
 }
 
-const criticalLineY = computed(() => thresholdY(criticalThreshold.value))
-const warningLineY = computed(() => thresholdY(warningThreshold.value))
+const previewSeries = computed<TimeSeriesPanelSeries[]>(() => {
+  if (!preview.value) return []
+  const source = preview.value.series?.length
+    ? preview.value.series
+    : [{ group_key: '', points: preview.value.timeseries || [] }]
+
+  return source.slice(0, 8).map((item, index) => ({
+    name: item.group_key || previewSeriesName.value,
+    points: item.points
+      .map(({ timestamp, value }) => [previewTimestamp(timestamp), Number(value)] as [number, number])
+      .filter(([timestamp, value]) => Number.isFinite(timestamp) && Number.isFinite(value))
+      .sort(([left], [right]) => left - right),
+    color: previewSeriesColors[index % previewSeriesColors.length],
+    legendValue: source.length === 1 ? preview.value?.current_value ?? undefined : undefined,
+  })).filter(item => item.points.length)
+})
+
+const previewThresholds = computed(() => {
+  const thresholds: Array<{ value: number; color: string; label: string }> = []
+  if (normalizedWarningThreshold.value !== null) {
+    thresholds.push({ value: normalizedWarningThreshold.value, color: 'var(--warning)', label: `Warning ${normalizedWarningThreshold.value}` })
+  }
+  if (normalizedCriticalThreshold.value !== null) {
+    thresholds.push({ value: normalizedCriticalThreshold.value, color: 'var(--error)', label: `Alert ${normalizedCriticalThreshold.value}` })
+  }
+  return thresholds
+})
+
+const previewRangeLabel = computed(() => (
+  previewLookbackOptions.find(option => option.value === previewLookbackSecs.value)?.label || `${previewLookbackSecs.value}s`
+))
+
+const previewEvents = computed(() => preview.value?.simulated_events || [])
+const previewAlertCount = computed(() => previewEvents.value.filter(event => event.state === 'alert').length)
+const previewRecoveryCount = computed(() => previewEvents.value.filter(event => event.state === 'ok').length)
+const hasPreviewThreshold = computed(() => normalizedCriticalThreshold.value !== null || normalizedWarningThreshold.value !== null)
+const previewBucketLabel = computed(() => {
+  const seconds = preview.value?.bucket_secs || evalWindow.value
+  return evalWindowOptions.find(option => option.value === seconds)?.label || `${Math.round(seconds / 60)}m`
+})
+
+function previewEventLabel(state: string): string {
+  if (state === 'alert') return 'Alerted'
+  if (state === 'warn') return 'Warning'
+  return 'Recovered'
+}
+
+function formatPreviewEventTime(timestamp: string): string {
+  const parsed = previewTimestamp(timestamp) * 1000
+  if (!Number.isFinite(parsed)) return timestamp
+  return new Date(parsed).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function formatPreviewValue(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  const formatted = Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(2)
+  return `${formatted}${thresholdUnit.value === '%' ? '%' : thresholdUnit.value ? ` ${thresholdUnit.value}` : ''}`
+}
+
+const previewSourceLabel = computed(() => (
+  monitorType.value === 'apm' ? 'APM' : monitorType.value === 'log' ? 'Logs' : 'Metrics'
+))
 
 // ── Autocomplete fetchers ──
 function fetchMetricNames(prefix: string): Promise<string[]> {
@@ -549,7 +621,7 @@ function fetchServices(prefix: string): Promise<string[]> {
 }
 
 function fetchEndpoints(prefix: string): Promise<string[]> {
-  return api.monitorAutocomplete({ type: 'endpoint', prefix, metric: apmConfig.value.service }).then(r => r.suggestions).catch(() => [])
+  return api.monitorAutocomplete({ type: 'endpoint', prefix, service: apmConfig.value.service }).then(r => r.suggestions).catch(() => [])
 }
 
 function fetchLogServices(prefix: string): Promise<string[]> {
@@ -621,6 +693,24 @@ function removeGroupBy(list: string[], index: number) {
   list.splice(index, 1)
 }
 
+function ensureApmWildcardGroups() {
+  apmConfig.value.group_by = normalizeApmGroups(
+    apmConfig.value.service,
+    apmConfig.value.endpoint_filter,
+    apmConfig.value.group_by,
+  )
+}
+
+function addApmGroupBy() {
+  addGroupBy(apmConfig.value.group_by)
+  ensureApmWildcardGroups()
+}
+
+watch(
+  [() => apmConfig.value.service, () => apmConfig.value.endpoint_filter],
+  ensureApmWildcardGroups,
+)
+
 // ── Tag management ──
 function addTag() {
   const val = tagInput.value.trim()
@@ -672,6 +762,18 @@ function channelIcon(type: string): string {
 // ── Save ──
 async function handleSave() {
   saveError.value = null
+  if (!monitorName.value.trim()) {
+    saveError.value = 'Enter a name for this alert.'
+    return
+  }
+  if (monitorType.value !== 'composite' && normalizedCriticalThreshold.value === null) {
+    saveError.value = 'Set an alert threshold.'
+    return
+  }
+  if (thresholdValidationError.value) {
+    saveError.value = thresholdValidationError.value
+    return
+  }
   saving.value = true
   try {
     if (isEditing.value) {
@@ -710,6 +812,7 @@ onMounted(async () => {
       warningThreshold.value = m.warning
       criticalRecovery.value = m.critical_recovery
       warningRecovery.value = m.warning_recovery
+      comparator.value = m.comparator
       recoveryExpanded.value = m.critical_recovery !== null || m.warning_recovery !== null
       evalWindow.value = m.eval_window_secs
       notificationChannels.value = m.notification_channels
@@ -1054,11 +1157,11 @@ onUnmounted(() => {
           <div class="mf-row-3">
             <div class="mf-field mf-field-grow">
               <label class="mf-label">Service</label>
-              <AutocompleteInput
-                v-model="apmConfig.service"
-                :fetch-suggestions="fetchServices"
-                placeholder="Select service..."
-              />
+            <AutocompleteInput
+              v-model="apmConfig.service"
+              :fetch-suggestions="fetchServices"
+              placeholder="checkout-api or *"
+            />
             </div>
             <div class="mf-field" style="width: 160px;">
               <label class="mf-label">Metric</label>
@@ -1079,8 +1182,9 @@ onUnmounted(() => {
               v-model="apmConfig.endpoint_filter"
               :fetch-suggestions="fetchEndpoints"
               :mono="true"
-              placeholder="/api/checkout"
+              placeholder="/api/checkout or *"
             />
+              <p class="mf-hint text-muted">Leave blank to average across the whole service. Use <code>*</code> or a pattern such as <code>/api/*</code> to split the preview by endpoint.</p>
           </div>
           <div class="mf-field">
             <label class="mf-label">Group by</label>
@@ -1096,7 +1200,7 @@ onUnmounted(() => {
                 :fetch-suggestions="fetchApmGroupFields"
                 :mono="true"
                 placeholder="Add span field..."
-                @select="addGroupBy(apmConfig.group_by)"
+                @select="addApmGroupBy"
               />
             </div>
           </div>
@@ -1140,30 +1244,68 @@ onUnmounted(() => {
       <!-- ═══ Section 3: Conditions ═══ -->
       <div class="mf-section">
         <div class="mf-section-label">Conditions</div>
-        <div class="mf-conditions-row">
-          <span class="mf-cond-text">Alert when value is</span>
-          <select v-model="comparator" class="mf-select mf-select-sm">
-            <option value="above">above</option>
-            <option value="below">below</option>
+        <div class="mf-condition-direction">
+          <span class="mf-cond-text">Trigger when value is</span>
+          <select v-model="comparator" class="mf-select mf-select-sm" aria-label="Alert comparator">
+            <option value="above">greater than (&gt;)</option>
+            <option value="above_or_equal">greater than or equal to (&ge;)</option>
+            <option value="equal">equal to (=)</option>
+            <option value="below_or_equal">less than or equal to (&le;)</option>
+            <option value="below">less than (&lt;)</option>
           </select>
-          <input
-            v-model.number="criticalThreshold"
-            type="number"
-            class="mf-input mf-input-num mono"
-            placeholder="500"
-            step="any"
-          />
-          <span v-if="thresholdUnit" class="mf-threshold-unit">{{ thresholdUnit }}</span>
-          <span class="mf-cond-text mf-cond-sep">Warning at</span>
-          <input
-            v-model.number="warningThreshold"
-            type="number"
-            class="mf-input mf-input-num mono"
-            placeholder="300"
-            step="any"
-          />
-          <span v-if="thresholdUnit" class="mf-threshold-unit">{{ thresholdUnit }}</span>
+          <span class="mf-cond-text">the thresholds below</span>
         </div>
+        <div class="mf-threshold-stack">
+          <label class="mf-threshold-rule is-warning" for="monitor-warning-threshold">
+            <span class="mf-threshold-rule-mark" aria-hidden="true"></span>
+            <span class="mf-threshold-rule-copy">
+              <strong>Warning</strong>
+              <small>Optional</small>
+            </span>
+            <span class="mf-threshold-input-wrap">
+              <input
+                id="monitor-warning-threshold"
+                v-model.number="warningThreshold"
+                type="number"
+                class="mf-input mf-input-num mono"
+                :class="{ 'is-invalid': thresholdValidationError }"
+                :max="higherValuesAreWorse && normalizedCriticalThreshold !== null ? normalizedCriticalThreshold : undefined"
+                :min="lowerValuesAreWorse && normalizedCriticalThreshold !== null ? normalizedCriticalThreshold : undefined"
+                :aria-invalid="Boolean(thresholdValidationError)"
+                :aria-describedby="thresholdValidationError ? 'monitor-threshold-order-error' : undefined"
+                placeholder="Not set"
+                step="any"
+              />
+              <span v-if="thresholdUnit" class="mf-threshold-unit">{{ thresholdUnit }}</span>
+            </span>
+          </label>
+          <label class="mf-threshold-rule is-alert" for="monitor-alert-threshold">
+            <span class="mf-threshold-rule-mark" aria-hidden="true"></span>
+            <span class="mf-threshold-rule-copy">
+              <strong>Alert</strong>
+              <small>Required</small>
+            </span>
+            <span class="mf-threshold-input-wrap">
+              <input
+                id="monitor-alert-threshold"
+                v-model.number="criticalThreshold"
+                type="number"
+                class="mf-input mf-input-num mono"
+                :class="{ 'is-invalid': thresholdValidationError }"
+                :min="higherValuesAreWorse && normalizedWarningThreshold !== null ? normalizedWarningThreshold : undefined"
+                :max="lowerValuesAreWorse && normalizedWarningThreshold !== null ? normalizedWarningThreshold : undefined"
+                :aria-invalid="Boolean(thresholdValidationError)"
+                :aria-describedby="thresholdValidationError ? 'monitor-threshold-order-error' : undefined"
+                placeholder="500"
+                step="any"
+              />
+              <span v-if="thresholdUnit" class="mf-threshold-unit">{{ thresholdUnit }}</span>
+            </span>
+          </label>
+        </div>
+        <p v-if="thresholdValidationError" id="monitor-threshold-order-error" class="mf-threshold-error" role="alert">
+          {{ thresholdValidationError }}
+        </p>
         <div class="mf-conditions-row mf-conditions-recovery" :class="{ expanded: recoveryExpanded }">
           <button v-if="!recoveryExpanded" class="mf-link-btn" @click="recoveryExpanded = true">
             + Recovery thresholds
@@ -1186,107 +1328,84 @@ onUnmounted(() => {
       </div>
 
       <!-- ═══ Section 4: Live Preview ═══ -->
-      <div v-if="monitorType !== 'composite'" class="mf-section mf-preview-section">
-        <div class="mf-section-label">
-          Preview
-          <span v-if="previewLoading" class="mf-preview-loading text-muted">loading...</span>
-          <span v-else-if="preview && preview.current_value != null" class="mf-preview-val mono">
-            current: {{ Number(preview.current_value).toFixed(2) }}
-          </span>
-        </div>
-        <div class="mf-preview-chart">
-          <svg :viewBox="`0 0 ${chartWidth} ${chartHeight}`" class="mf-chart-svg" preserveAspectRatio="none">
-            <!-- Grid lines -->
-            <line
-              v-for="tick in yTicks"
-              :key="'grid-' + tick.label"
-              :x1="chartPadding.left"
-              :y1="tick.y"
-              :x2="chartWidth - chartPadding.right"
-              :y2="tick.y"
-              stroke="var(--border-subtle)"
-              stroke-width="0.5"
-            />
-            <!-- Y-axis labels -->
-            <text
-              v-for="tick in yTicks"
-              :key="'ylabel-' + tick.label"
-              :x="chartPadding.left - 8"
-              :y="tick.y + 3"
-              text-anchor="end"
-              fill="var(--text-muted)"
-              font-size="9"
-              font-family="var(--font-mono)"
-            >{{ tick.label }}</text>
-            <!-- X-axis labels -->
-            <text
-              v-for="tick in xTicks"
-              :key="'xlabel-' + tick.label"
-              :x="tick.x"
-              :y="chartHeight - chartPadding.bottom + 16"
-              text-anchor="middle"
-              fill="var(--text-muted)"
-              font-size="9"
-              font-family="var(--font-mono)"
-            >{{ tick.label }}</text>
-            <!-- Data line -->
-            <path
-              v-if="previewPath"
-              :d="previewPath"
-              fill="none"
-              stroke="var(--amber)"
-              stroke-width="1.5"
-            />
-            <!-- Critical threshold -->
-            <line
-              v-if="criticalLineY !== null"
-              :x1="chartPadding.left"
-              :y1="criticalLineY"
-              :x2="chartWidth - chartPadding.right"
-              :y2="criticalLineY"
-              stroke="var(--error)"
-              stroke-width="1"
-              stroke-dasharray="4,3"
-            />
-            <text
-              v-if="criticalLineY !== null"
-              :x="chartPadding.left + 4"
-              :y="criticalLineY! - 4"
-              fill="var(--error)"
-              font-size="9"
-              font-family="var(--font-mono)"
-            >CRIT {{ criticalThreshold }}</text>
-            <!-- Warning threshold -->
-            <line
-              v-if="warningLineY !== null"
-              :x1="chartPadding.left"
-              :y1="warningLineY"
-              :x2="chartWidth - chartPadding.right"
-              :y2="warningLineY"
-              stroke="var(--warning)"
-              stroke-width="1"
-              stroke-dasharray="4,3"
-            />
-            <text
-              v-if="warningLineY !== null"
-              :x="chartPadding.left + 4"
-              :y="warningLineY! - 4"
-              fill="var(--warning)"
-              font-size="9"
-              font-family="var(--font-mono)"
-            >WARN {{ warningThreshold }}</text>
-            <!-- Empty state -->
-            <text
-              v-if="!preview && !previewLoading"
-              :x="chartWidth / 2"
-              :y="chartHeight / 2"
-              text-anchor="middle"
-              fill="var(--text-muted)"
-              font-size="11"
-            >Configure query to see preview</text>
-          </svg>
-        </div>
-      </div>
+      <TimeSeriesPanel
+        v-if="monitorType !== 'composite'"
+        class="mf-preview-panel"
+        title="Alert preview"
+        description="Recent values for this query with the warning and critical thresholds overlaid."
+        :series="previewSeries"
+        :thresholds="previewThresholds"
+        :unit="thresholdUnit"
+        :series-name="previewSeriesName"
+        :source-label="previewSourceLabel"
+        :loading="previewLoading"
+        show-chart-when-empty
+        :empty-title="previewQueryReady ? 'No samples in this window' : 'Configure the query to see data'"
+        :empty-message="previewQueryReady ? 'No matching data was returned. Try another query or a wider window.' : 'Choose a signal and finish its query fields. The preview updates automatically.'"
+      >
+        <template #actions>
+          <div class="mf-preview-actions">
+            <label class="mf-preview-lookback">
+              <span>Lookback</span>
+              <select v-model="previewLookbackSecs" aria-label="Preview lookback" @change="fetchPreview">
+                <option v-for="option in previewLookbackOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
+          </div>
+        </template>
+        <template #details>
+          <div v-if="previewError" class="mf-preview-error" role="alert">
+            <span aria-hidden="true">!</span>
+            <span>{{ previewError }}</span>
+          </div>
+          <details v-if="previewQueryReady" class="mf-backtest">
+            <summary>
+              <span class="mf-backtest-summary-copy">
+                <strong>Would this alert have fired?</strong>
+                <small v-if="!hasPreviewThreshold">Set a warning or critical threshold to test the selected history.</small>
+                <small v-else-if="previewLoading">Checking {{ previewRangeLabel }} of history…</small>
+                <small v-else-if="previewEvents.length">
+                  {{ previewAlertCount }} alert{{ previewAlertCount === 1 ? '' : 's' }} and {{ previewRecoveryCount }} recover{{ previewRecoveryCount === 1 ? 'y' : 'ies' }} found.
+                </small>
+                <small v-else>No state changes found in the selected history.</small>
+              </span>
+              <span class="mf-backtest-summary-meta mono">{{ previewRangeLabel }}</span>
+              <svg class="mf-backtest-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </summary>
+            <div class="mf-backtest-body">
+              <p class="mf-backtest-note">
+                Replays the current thresholds over {{ previewBucketLabel }} evaluation buckets. Use it to check whether this rule would have caught a past incident.
+              </p>
+              <div v-if="hasPreviewThreshold && previewEvents.length" class="mf-backtest-events">
+                <div
+                  v-for="(event, index) in previewEvents"
+                  :key="`${event.timestamp}-${event.group_key}-${event.state}-${index}`"
+                  class="mf-backtest-event"
+                >
+                  <span class="mf-backtest-state" :class="`is-${event.state}`">
+                    {{ previewEventLabel(event.state) }}
+                  </span>
+                  <span class="mf-backtest-time">{{ formatPreviewEventTime(event.timestamp) }}</span>
+                  <span class="mf-backtest-group" :title="event.group_key || 'All matching data'">
+                    {{ event.group_key || 'All matching data' }}
+                  </span>
+                  <span class="mf-backtest-value mono">
+                    {{ formatPreviewValue(event.value) }}
+                    <small v-if="event.threshold != null">at {{ formatPreviewValue(event.threshold) }}</small>
+                  </span>
+                </div>
+              </div>
+              <div v-else class="mf-backtest-empty">
+                {{ hasPreviewThreshold ? 'No warning, alert, or recovery transitions were found.' : 'Add a threshold, then open this review again.' }}
+              </div>
+            </div>
+          </details>
+        </template>
+      </TimeSeriesPanel>
 
       <!-- ═══ Section 5: Smart Suggestions ═══ -->
       <TransitionGroup name="mf-suggest" tag="div" class="mf-suggestions" v-if="smartSuggestions.length > 0">
@@ -1341,6 +1460,14 @@ onUnmounted(() => {
             rows="3"
             placeholder="Markdown supported. Use {{value}}, {{threshold}} for dynamic values."
           ></textarea>
+          <p class="mf-template-vars text-muted">
+            Use in the name or message:
+            <code v-pre>{{service}}</code>
+            <code v-pre>{{endpoint}}</code>
+            <code v-pre>{{value}}</code>
+            <code v-pre>{{threshold}}</code>
+            <code v-pre>{{state}}</code>
+          </p>
         </div>
         <div class="mf-row-2">
           <div class="mf-field mf-field-grow">
@@ -1390,7 +1517,7 @@ onUnmounted(() => {
         <button class="mf-btn mf-btn-cancel" @click="emit('cancel')">Cancel</button>
         <button
           class="mf-btn mf-btn-save"
-          :disabled="saving || !monitorName.trim()"
+          :disabled="saving || !canSave"
           @click="handleSave"
         >
           {{ saving ? 'Saving...' : (isEditing ? 'Update Monitor' : 'Save Monitor') }}
