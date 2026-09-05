@@ -35,12 +35,50 @@
   inset: 0;
   align-content: center;
 }
-/* The SVG stretches to fill the cell (preserveAspectRatio="none"), which also
-   magnifies viewBox-unit text ~1.5-2x. Shrink axis labels here so they read at
-   a normal size on the dashboard without touching the shared .ch-axis (used at
-   1:1 elsewhere). */
-.ts-svg .ch-axis { font-size: 6px; }
-.ts-svg .ch-threshold-label { font-size: 6px; font-family: var(--font-mono); }
+/* The chart geometry stretches to fill the panel. Axis text lives in an HTML
+   overlay so the non-uniform SVG scale cannot distort its letter shapes. */
+.ts-axis-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ts-axis-label {
+  position: absolute;
+  color: var(--text-muted);
+  font: 500 var(--panel-chart-axis-size) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.025em;
+  white-space: nowrap;
+}
+.ts-axis-label--left { transform: translate(-100%, -50%); }
+.ts-axis-label--right { transform: translateY(-50%); }
+.ts-axis-label--bottom {
+  bottom: 2px;
+  transform: translateX(-50%);
+}
+.ts-reference-label {
+  position: absolute;
+  max-width: 14rem;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--panel-chart-axis-size);
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-threshold-label {
+  margin-left: 4px;
+  font-weight: 600;
+  transform: translateY(calc(-100% - 3px));
+}
+.ts-deploy-label {
+  margin: 6px 0 0 3px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  letter-spacing: -.025em;
+}
 /* line/area/grid/axis come from the shared .ch-* classes (chart.css).
    The widget stretches to fill its cell via preserveAspectRatio="none";
    non-scaling-stroke keeps the line crisp despite the stretch. */
@@ -51,12 +89,6 @@
   opacity: 0.6;
   vector-effect: non-scaling-stroke;
 }
-.deploy-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  fill: var(--text-secondary);
-}
-
 /* Multi-series (metrics/PromQL) legend */
 .ts-legend {
   display: flex;

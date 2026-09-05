@@ -783,7 +783,7 @@ async function handleSave() {
     }
     emit('saved')
   } catch (e: any) {
-    saveError.value = e.message || 'Failed to save monitor'
+    saveError.value = e.message || 'Failed to save alert'
   } finally {
     saving.value = false
   }
@@ -938,7 +938,7 @@ onUnmounted(() => {
 
       <!-- ═══ Section 1: Type Selector ═══ -->
       <div class="mf-section mf-type-section">
-        <div class="mf-section-label">Monitor type</div>
+        <div class="mf-section-label">Alert type</div>
         <div class="mf-type-pills">
           <button
             v-for="t in (['metric', 'log', 'apm', 'composite'] as const)"
@@ -1226,7 +1226,7 @@ onUnmounted(() => {
               </div>
             </div>
             <div v-if="existingMonitors.length === 0" class="text-muted" style="font-size: 11px; padding: var(--sp-3)">
-              No existing monitors
+              No existing alerts
             </div>
           </div>
           <div class="mf-field">
@@ -1236,7 +1236,7 @@ onUnmounted(() => {
               class="mf-input mono"
               placeholder="A && B && !C"
             />
-            <div class="mf-hint text-muted">Use letters to reference monitors. Combine with && (AND), || (OR), ! (NOT)</div>
+            <div class="mf-hint text-muted">Use letters to reference alerts. Combine with && (AND), || (OR), ! (NOT)</div>
           </div>
         </template>
       </div>
@@ -1520,7 +1520,7 @@ onUnmounted(() => {
           :disabled="saving || !canSave"
           @click="handleSave"
         >
-          {{ saving ? 'Saving...' : (isEditing ? 'Update Monitor' : 'Save Monitor') }}
+          {{ saving ? 'Saving...' : (isEditing ? 'Update alert' : 'Save alert') }}
         </button>
       </div>
     </template>

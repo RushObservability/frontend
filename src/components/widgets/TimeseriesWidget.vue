@@ -186,6 +186,9 @@ const seriesXLabels = computed(() => {
   })
 })
 
+const visibleYTicks = computed(() => seriesMode.value ? seriesYTicks.value : yTicks.value)
+const visibleXTicks = computed(() => seriesMode.value ? seriesXLabels.value : xLabels.value)
+
 const deployLines = computed(() => {
   if (!props.deploys || props.deploys.length === 0) return []
   const firstTime = seriesMode.value
@@ -323,10 +326,7 @@ function onLeave() { hover.set(null) }
       <!-- ── Multi-series (metrics/PromQL) mode ── -->
       <svg v-if="seriesMode" :viewBox="`0 0 ${svgWidth} ${svgHeight}`" preserveAspectRatio="none" class="ch-svg ch-animate ts-svg" @pointermove="onHover" @pointerleave="onLeave">
         <line v-for="tick in seriesYTicks" :key="'sy' + tick.value" :x1="padLeft" :y1="tick.y" :x2="svgWidth - padRight" :y2="tick.y" :class="['ch-grid', { 'ch-grid--baseline': tick.value === 0 }]" />
-        <text v-for="tick in seriesYTicks" :key="'syl' + tick.value" :x="padLeft - 6" :y="tick.y + 3" class="ch-axis" text-anchor="end">{{ tick.label }}</text>
-        <text v-for="tick in seriesRightYTicks" :key="'syr' + tick.value" :x="svgWidth - padRight + 6" :y="tick.y + 3" class="ch-axis ts-axis-right" text-anchor="start">{{ tick.label }}</text>
         <line v-for="xl in seriesXLabels" :key="'sv' + xl.x" :x1="xl.x" :y1="padTop" :x2="xl.x" :y2="padTop + plotHeight" class="ch-grid" />
-        <text v-for="xl in seriesXLabels" :key="'sx' + xl.x" :x="xl.x" :y="svgHeight - 4" class="ch-axis" text-anchor="middle">{{ xl.label }}</text>
         <path
           v-for="(sp, i) in seriesPaths"
           :key="'sp' + i"
@@ -338,7 +338,6 @@ function onLeave() { hover.set(null) }
         <!-- Threshold reference lines -->
         <g v-for="(th, i) in thresholdLines" :key="'th' + i">
           <line :x1="padLeft" :y1="th.y" :x2="svgWidth - padRight" :y2="th.y" :stroke="th.color" stroke-width="1" stroke-dasharray="5,4" vector-effect="non-scaling-stroke" />
-          <text :x="padLeft + 4" :y="th.y - 3" :fill="th.color" class="ch-threshold-label">{{ th.label }}</text>
         </g>
         <g v-for="(dl, i) in deployLines" :key="'sd' + i">
           <line
@@ -346,10 +345,6 @@ function onLeave() { hover.set(null) }
             :x2="dl.x" :y2="padTop + plotHeight"
             class="deploy-line"
           />
-          <text
-            :x="dl.x + 3" :y="padTop + 10"
-            class="deploy-label"
-          >{{ dl.label }}</text>
         </g>
       </svg>
 
@@ -363,14 +358,6 @@ function onLeave() { hover.set(null) }
           :x2="svgWidth - padRight" :y2="tick.y"
           :class="['ch-grid', { 'ch-grid--baseline': tick.value === 0 }]"
         />
-        <!-- Y labels -->
-        <text
-          v-for="tick in yTicks"
-          :key="'l' + tick.value"
-          :x="padLeft - 6" :y="tick.y + 3"
-          class="ch-axis"
-          text-anchor="end"
-        >{{ tick.label }}</text>
         <!-- Vertical grid lines (Grafana-style full grid) -->
         <line
           v-for="xl in xLabels"
@@ -379,21 +366,12 @@ function onLeave() { hover.set(null) }
           :x2="xl.x" :y2="padTop + plotHeight"
           class="ch-grid"
         />
-        <!-- X labels -->
-        <text
-          v-for="xl in xLabels"
-          :key="xl.label"
-          :x="xl.x" :y="svgHeight - 4"
-          class="ch-axis"
-          text-anchor="middle"
-        >{{ xl.label }}</text>
         <!-- Area fill + smooth line -->
         <path v-if="areaPath" :d="areaPath" class="ch-area" style="color: var(--amber)" />
         <path v-if="linePath" :d="linePath" class="ch-line ts-line" style="color: var(--amber)" />
         <!-- Threshold reference lines -->
         <g v-for="(th, i) in thresholdLines" :key="'th' + i">
           <line :x1="padLeft" :y1="th.y" :x2="svgWidth - padRight" :y2="th.y" :stroke="th.color" stroke-width="1" stroke-dasharray="5,4" vector-effect="non-scaling-stroke" />
-          <text :x="padLeft + 4" :y="th.y - 3" :fill="th.color" class="ch-threshold-label">{{ th.label }}</text>
         </g>
         <!-- Deploy markers -->
         <g v-for="(dl, i) in deployLines" :key="'d' + i">
@@ -402,12 +380,55 @@ function onLeave() { hover.set(null) }
             :x2="dl.x" :y2="padTop + plotHeight"
             class="deploy-line"
           />
-          <text
-            :x="dl.x + 3" :y="padTop + 10"
-            class="deploy-label"
-          >{{ dl.label }}</text>
         </g>
       </svg>
+
+      <!-- Keep text outside the stretched SVG so glyphs retain their natural proportions. -->
+      <div class="ts-axis-layer" aria-hidden="true">
+        <span
+          v-for="tick in visibleYTicks"
+          :key="`yl-${tick.value}`"
+          class="ts-axis-label ts-axis-label--left"
+          :style="{
+            left: `${((padLeft - 6) / svgWidth) * 100}%`,
+            top: `${(tick.y / svgHeight) * 100}%`,
+          }"
+        >{{ tick.label }}</span>
+        <span
+          v-for="tick in seriesRightYTicks"
+          :key="`yr-${tick.value}`"
+          class="ts-axis-label ts-axis-label--right"
+          :style="{
+            left: `${((svgWidth - padRight + 6) / svgWidth) * 100}%`,
+            top: `${(tick.y / svgHeight) * 100}%`,
+          }"
+        >{{ tick.label }}</span>
+        <span
+          v-for="tick in visibleXTicks"
+          :key="`x-${tick.x}`"
+          class="ts-axis-label ts-axis-label--bottom"
+          :style="{ left: `${(tick.x / svgWidth) * 100}%` }"
+        >{{ tick.label }}</span>
+        <span
+          v-for="(threshold, index) in thresholdLines"
+          :key="`threshold-${index}`"
+          class="ts-reference-label ts-threshold-label"
+          :style="{
+            color: threshold.color,
+            left: `${(padLeft / svgWidth) * 100}%`,
+            top: `${(threshold.y / svgHeight) * 100}%`,
+          }"
+        >{{ threshold.label }}</span>
+        <span
+          v-for="(deploy, index) in deployLines"
+          :key="`deploy-${index}`"
+          class="ts-reference-label ts-deploy-label"
+          :style="{
+            left: `${(deploy.x / svgWidth) * 100}%`,
+            top: `${(padTop / svgHeight) * 100}%`,
+          }"
+        >{{ deploy.label }}</span>
+      </div>
 
       <!-- Shared crosshair (vertical line at the hovered time) -->
       <div

@@ -154,7 +154,7 @@ const previewThresholds = computed(() => {
   return out
 })
 
-const monitorSourceLabel = computed(() => monitor.value ? typeLabel(monitor.value.type) : 'Monitor')
+const monitorSourceLabel = computed(() => monitor.value ? typeLabel(monitor.value.type) : 'Alert')
 const groupPanelRows = computed<Record<string, unknown>[]>(() => groupEntries.value.map(group => ({ ...group })))
 const eventPanelRows = computed<Record<string, unknown>[]>(() => events.value.map(event => ({ ...event })))
 
@@ -185,11 +185,11 @@ const timelineSegments = computed(() => {
 function investigateMonitor() {
   const m = monitor.value
   if (!m) return
-  const ctx = `Monitor "${m.name}" is ${m.state}. Query type: ${m.type}. Current value matched its alert condition.`
+  const ctx = `Alert "${m.name}" is ${m.state}. Query type: ${m.type}. Current value matched its alert condition.`
   router.push({
     path: '/investigate',
     query: {
-      q: `Investigate firing monitor: ${m.name}`,
+      q: `Investigate firing alert: ${m.name}`,
       ctx,
     },
   })
@@ -302,7 +302,7 @@ function closeDeleteConfirm() {
       <TimeSeriesPanel
         class="detail-section detail-live-panel"
         title="Live"
-        description="The monitor's evaluated metric over the selected lookback, with alert thresholds drawn as reference lines."
+        description="The alert's evaluated metric over the selected lookback, with alert thresholds drawn as reference lines."
         caption="Evaluation signal with warning and critical thresholds."
         :source-label="monitorSourceLabel"
         :series="previewSeries"
@@ -329,9 +329,9 @@ function closeDeleteConfirm() {
       <PanelCard
         class="detail-section"
         title="State Timeline"
-        description="Monitor state (OK / alerting / no-data) across the evaluated window."
+        description="Alert state (OK / alerting / no-data) across the evaluated window."
         caption="Recorded state changes from the earliest event through now."
-        source-label="Monitor events"
+        source-label="Alert events"
         :empty="timelineSegments.length === 0"
         empty-title="No state changes yet"
         empty-message="The timeline will appear after this alert records its first transition."
@@ -358,7 +358,7 @@ function closeDeleteConfirm() {
           title="Group Breakdown"
           description="Current state for each evaluated group."
           caption="Groups are ordered by alert severity, then name."
-          source-label="Monitor state"
+          source-label="Alert state"
           range-label="Current"
           :rows="groupPanelRows"
           empty-title="No evaluated groups"
@@ -399,11 +399,11 @@ function closeDeleteConfirm() {
           title="Events"
           description="Recent state changes by group."
           caption="Newest recorded transitions for this alert."
-          source-label="Monitor events"
+          source-label="Alert events"
           :empty="events.length === 0"
           empty-title="No transitions yet"
           empty-message="State changes will appear here after this alert first transitions."
-          aria-label="Grouped monitor events"
+          aria-label="Grouped alert events"
         >
           <template #actions>
             <span class="event-count mono">{{ events.length }}</span>
@@ -441,7 +441,7 @@ function closeDeleteConfirm() {
         title="Events"
         description="Recent state changes with evaluated values and thresholds."
         caption="Newest alert transitions first."
-        source-label="Monitor events"
+        source-label="Alert events"
         :rows="eventPanelRows"
         empty-title="No transitions yet"
         empty-message="State changes will appear here after this alert first transitions."

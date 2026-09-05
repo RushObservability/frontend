@@ -21,9 +21,9 @@ function onCancel() {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="15 18 9 12 15 6"/>
         </svg>
-        Monitors
+        Alerts
       </router-link>
-      <h1 class="mcp-title">New Monitor</h1>
+      <h1 class="mcp-title">New alert</h1>
       <p class="mcp-sub">Define what to watch, when to alert, and who to notify.</p>
     </div>
 
