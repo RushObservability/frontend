@@ -1,6 +1,7 @@
 import { onBeforeUnmount, readonly, ref, type Ref } from 'vue'
 
 export type PollingCategory =
+  | 'alert_list'
   | 'anomaly'
   | 'capacity'
   | 'dashboard'
