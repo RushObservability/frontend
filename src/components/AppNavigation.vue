@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { navigationItemIsActive, type NavigationGroup, type NavigationItem } from '../navigation'
 import { useModalFocus } from '../composables/useModalFocus'
+import { SETTINGS_INTEGRATIONS, SETTINGS_TAB_GROUPS, type SettingsTabId } from '../views/settings/navigation'
 
 const props = defineProps<{
   groups: NavigationGroup[]
@@ -11,7 +12,29 @@ const props = defineProps<{
 const route = useRoute()
 const drawerOpen = ref(false)
 const drawerRef = ref<HTMLElement | null>(null)
+const appMenuOpen = ref(false)
+const settingsIntegrationsOpen = ref(false)
 const mobilePrimaryItems = computed(() => props.groups.flatMap(group => group.items).filter(item => item.mobilePrimary))
+const settingsMode = computed(() => route.name === 'settings')
+const nonSettingsGroups = computed(() => props.groups
+  .map(group => ({ ...group, items: group.items.filter(item => item.id !== 'settings') }))
+  .filter(group => group.items.length))
+
+function settingsHash(): string {
+  return route.hash.replace(/^#/, '') || 'general'
+}
+
+function settingsItemActive(id: SettingsTabId): boolean {
+  return settingsHash().split('/')[0] === id
+}
+
+function settingsIntegrationActive(key: string): boolean {
+  return settingsHash() === `integrations/${key}`
+}
+
+function settingsPath(id: SettingsTabId): { name: string; hash: string } {
+  return { name: 'settings', hash: `#${id}` }
+}
 
 function isActive(item: NavigationItem): boolean {
   return navigationItemIsActive(item, typeof route.name === 'string' ? route.name : null)
@@ -27,12 +50,87 @@ const { handleModalKeydown } = useModalFocus(
   closeDrawer,
 )
 
-watch(() => route.fullPath, closeDrawer)
+watch(() => route.fullPath, () => {
+  closeDrawer()
+  if (!settingsMode.value) return
+  appMenuOpen.value = false
+  if (settingsHash().startsWith('integrations/')) settingsIntegrationsOpen.value = true
+}, { immediate: true })
 </script>
 
 <template>
   <aside class="app-navigation" aria-label="Primary navigation">
-    <nav class="app-navigation-list">
+    <nav v-if="settingsMode" class="settings-navigation-list" aria-label="Settings navigation">
+      <div class="settings-navigation-head">
+        <div>
+          <span>Control</span>
+          <strong>Settings</strong>
+        </div>
+        <router-link to="/" aria-label="Leave settings">×</router-link>
+      </div>
+
+      <section v-for="group in SETTINGS_TAB_GROUPS" :key="group.name" class="settings-navigation-group">
+        <h2>{{ group.name }}</h2>
+        <template v-for="item in group.items" :key="item.id">
+          <div v-if="item.id === 'integrations'" class="settings-navigation-parent">
+            <button
+              type="button"
+              class="settings-navigation-item settings-navigation-disclosure"
+              :class="{ active: settingsItemActive(item.id) }"
+              :aria-expanded="settingsIntegrationsOpen"
+              aria-controls="settings-integration-links"
+              @click="settingsIntegrationsOpen = !settingsIntegrationsOpen"
+            >
+              <span class="app-navigation-dot" aria-hidden="true"></span>
+              <span>{{ item.label }}</span>
+              <span class="settings-navigation-chevron" :class="{ open: settingsIntegrationsOpen }" aria-hidden="true">›</span>
+            </button>
+          </div>
+          <router-link
+            v-else
+            :to="settingsPath(item.id)"
+            class="settings-navigation-item"
+            :class="{ active: settingsItemActive(item.id) }"
+            :aria-current="settingsItemActive(item.id) ? 'page' : undefined"
+          >
+            <span class="app-navigation-dot" aria-hidden="true"></span>
+            <span>{{ item.label }}</span>
+          </router-link>
+
+          <div
+            v-if="item.id === 'integrations'"
+            id="settings-integration-links"
+            class="settings-integration-list"
+            :class="{ open: settingsIntegrationsOpen }"
+          >
+            <router-link
+              v-for="integration in SETTINGS_INTEGRATIONS"
+              :key="integration.key"
+              :to="{ name: 'settings', hash: `#integrations/${integration.key}` }"
+              :class="{ active: settingsIntegrationActive(integration.key) }"
+              :tabindex="settingsIntegrationsOpen ? 0 : -1"
+            >{{ integration.label }}</router-link>
+          </div>
+        </template>
+      </section>
+
+      <div class="app-menu-disclosure">
+        <button type="button" :aria-expanded="appMenuOpen" @click="appMenuOpen = !appMenuOpen">
+          <span>App navigation</span>
+          <span :class="{ open: appMenuOpen }" aria-hidden="true">›</span>
+        </button>
+        <div class="collapsed-app-menu" :class="{ open: appMenuOpen }">
+          <section v-for="group in nonSettingsGroups" :key="group.id">
+            <h3>{{ group.label }}</h3>
+            <router-link v-for="item in group.items" :key="item.id" :to="item.path">
+              <span aria-hidden="true">{{ item.icon }}</span>{{ item.label }}
+            </router-link>
+          </section>
+        </div>
+      </div>
+    </nav>
+
+    <nav v-else class="app-navigation-list">
       <section v-for="group in groups" :key="group.id" class="app-navigation-group">
         <h2 class="app-navigation-label">{{ group.label }}</h2>
         <router-link
@@ -139,6 +237,138 @@ watch(() => route.fullPath, closeDrawer)
   overflow-y: auto;
 }
 
+.settings-navigation-list {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 22px;
+  padding: 22px 14px 24px;
+  overflow-y: auto;
+}
+
+.settings-navigation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 9px 4px;
+}
+.settings-navigation-head div { display: grid; gap: 2px; }
+.settings-navigation-head span {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+.settings-navigation-head strong { color: var(--text-primary); font-size: 17px; font-weight: 650; letter-spacing: -.02em; }
+.settings-navigation-head > a {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  font-size: 18px;
+  line-height: 1;
+}
+.settings-navigation-head > a:hover { color: var(--text-primary); background: var(--bg-raised); border-color: var(--border-default); }
+
+.settings-navigation-group { display: flex; flex-direction: column; gap: 3px; }
+.settings-navigation-group > h2 {
+  margin: 0;
+  padding: 0 10px 6px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.settings-navigation-item {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  transition: color 130ms ease, background 130ms ease;
+}
+.settings-navigation-item:hover { color: var(--text-primary); background: var(--bg-raised); }
+.settings-navigation-item.active { color: var(--accent); background: var(--accent-soft); }
+.settings-navigation-item.active .app-navigation-dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.settings-navigation-item:focus-visible,
+.settings-navigation-parent button:focus-visible,
+.settings-integration-list a:focus-visible,
+.app-menu-disclosure > button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+.settings-navigation-parent { display: block; }
+.settings-navigation-disclosure { grid-template-columns: 6px minmax(0, 1fr) 16px; }
+.settings-navigation-chevron {
+  color: var(--text-muted);
+  font-size: 17px;
+  text-align: center;
+  transition: color 160ms ease, transform 160ms ease;
+}
+.settings-navigation-chevron.open { color: var(--accent); transform: rotate(90deg); }
+.settings-integration-list {
+  display: grid;
+  grid-template-rows: 0fr;
+  margin-left: 18px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-subtle);
+  opacity: 0;
+  transition: grid-template-rows 180ms ease, opacity 140ms ease;
+}
+.settings-integration-list::before { min-height: 0; content: ''; }
+.settings-integration-list.open { grid-template-rows: 1fr; padding-block: 3px; opacity: 1; }
+.settings-integration-list a {
+  min-height: 30px;
+  padding: 7px 8px;
+  overflow: hidden;
+  color: var(--text-muted);
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 16px;
+}
+.settings-integration-list:not(.open) a { display: none; }
+.settings-integration-list a:hover { color: var(--text-primary); background: var(--bg-raised); }
+.settings-integration-list a.active { color: var(--accent); background: var(--accent-soft); font-weight: 650; }
+
+.app-menu-disclosure { margin-top: auto; padding-top: 4px; border-top: 1px solid var(--border-subtle); }
+.app-menu-disclosure > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 9px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font: 650 11px var(--font-ui);
+}
+.app-menu-disclosure > button:hover { color: var(--text-primary); background: var(--bg-raised); }
+.app-menu-disclosure > button span:last-child { font-size: 16px; transition: transform 160ms ease; }
+.app-menu-disclosure > button span:last-child.open { transform: rotate(90deg); }
+.collapsed-app-menu { display: none; padding: 6px 0 0; }
+.collapsed-app-menu.open { display: grid; gap: 12px; }
+.collapsed-app-menu section { display: grid; gap: 2px; }
+.collapsed-app-menu h3 { margin: 0; padding: 0 9px 3px; color: var(--text-muted); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.collapsed-app-menu a { display: flex; align-items: center; gap: 8px; min-height: 31px; padding: 0 9px; color: var(--text-secondary); border-radius: 5px; font-size: 11px; font-weight: 600; }
+.collapsed-app-menu a:hover { color: var(--text-primary); background: var(--bg-raised); }
+.collapsed-app-menu a span { width: 14px; color: var(--text-muted); text-align: center; }
+
 .app-navigation-group { display: flex; flex-direction: column; gap: 5px; }
 .app-navigation-label {
   margin: 0;
@@ -242,4 +472,3 @@ watch(() => route.fullPath, closeDrawer)
   .mobile-menu-enter-active .mobile-menu, .mobile-menu-leave-active .mobile-menu { transition-duration: 1ms; }
 }
 </style>
-
