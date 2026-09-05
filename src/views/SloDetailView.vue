@@ -10,6 +10,7 @@ import SloForm from '../components/SloForm.vue'
 import { PanelCard, StatPanel, TimeSeriesPanel } from '../components/panels'
 import type { PanelTone, TimeSeriesPanelSeries } from '../components/panels'
 import { usePollingTask } from '../composables/usePollingTask'
+import { buildAvailabilityChartPoints, intervalSeconds } from '../lib/sloCharts'
 
 const props = defineProps<{ sloId: string }>()
 const router = useRouter()
@@ -27,6 +28,8 @@ const formError = ref<string | null>(null)
 
 // ── Chart data ──
 const chartBuckets = ref<TimeseriesBucket[]>([])
+const errorChartBuckets = ref<TimeseriesBucket[]>([])
+const chartBucketSeconds = ref(60)
 const chartLoading = ref(false)
 const chartError = ref<string | null>(null)
 
@@ -97,16 +100,27 @@ async function loadChartData(rethrow = false, signal?: AbortSignal) {
     const to = now.toISOString()
     // Pick interval based on window size
     const interval = windowMins <= 60 ? '1m' : windowMins <= 1440 ? '5m' : windowMins <= 10080 ? '30m' : '1h'
-    const res = await api.queryTimeseries({
+    chartBucketSeconds.value = intervalSeconds(interval)
+    const totalRequest = api.queryTimeseries({
       time_range: { from, to },
       filters: slo.value.total_filters.length ? slo.value.total_filters : [],
       interval,
     }, 'dashboard', signal)
-    chartBuckets.value = (res.buckets || []) as TimeseriesBucket[]
+    const errorRequest = slo.value.indicator_type === 'availability' && slo.value.error_filters.length > 0
+      ? api.queryTimeseries({
+          time_range: { from, to },
+          filters: slo.value.error_filters,
+          interval,
+        }, 'dashboard', signal)
+      : Promise.resolve(null)
+    const [totalResponse, errorResponse] = await Promise.all([totalRequest, errorRequest])
+    chartBuckets.value = (totalResponse.buckets || []) as TimeseriesBucket[]
+    errorChartBuckets.value = (errorResponse?.buckets || []) as TimeseriesBucket[]
   } catch (error) {
     if (signal?.aborted) return
     if (!rethrow) {
       chartBuckets.value = []
+      errorChartBuckets.value = []
       chartError.value = error instanceof Error ? error.message : 'SLO chart data is unavailable.'
     }
     if (rethrow) throw error
@@ -163,6 +177,7 @@ const budgetSeverity = computed(() => {
 const sloSourceLabel = computed(() => slo.value?.slo_type === 'metric' ? 'Metrics' : 'Spans')
 const sloRangeLabel = computed(() => slo.value ? windowLabel(slo.value.window_type) : '')
 const isTraceLatencySlo = computed(() => slo.value?.slo_type === 'trace' && slo.value.indicator_type === 'latency')
+const isAvailabilitySlo = computed(() => slo.value?.indicator_type === 'availability')
 const latencyThresholdMs = computed(() => isTraceLatencySlo.value ? slo.value?.threshold_ms ?? null : null)
 const sloSuccessDescription = computed(() => {
   if (isTraceLatencySlo.value && latencyThresholdMs.value !== null) {
@@ -265,6 +280,7 @@ interface ChartDef {
   maxVal?: number
   tickFixed?: number
   tickSuffix: string
+  minVal?: number
   referenceValue?: number
   referenceLabel?: string
   referenceClass?: string
@@ -274,17 +290,19 @@ interface ChartDef {
 const chartDefs = computed<Record<ChartKey, ChartDef>>(() => ({
   rate: {
     key: 'rate', title: 'Request Rate', values: rateValues.value,
-    color: 'var(--amber)', lineClass: 'sd-c-rate', tickSuffix: '',
-    fmtVal: (v) => `${v.toLocaleString()} req`,
+    color: 'var(--amber)', lineClass: 'sd-c-rate', tickFixed: 1, tickSuffix: ' req/s',
+    fmtVal: (v) => `${v.toLocaleString(undefined, { maximumFractionDigits: 1 })} req/s`,
   },
   error: {
     key: 'error', title: 'Error Rate', values: errorValues.value,
-    color: 'var(--error)', lineClass: 'sd-c-error', tickSuffix: '',
-    fmtVal: (v) => `${v.toLocaleString()} errors`,
+    color: 'var(--error)', lineClass: 'sd-c-error', tickFixed: 2, tickSuffix: '%',
+    maxVal: Math.max(...errorValues.value, 0.01) * 1.08,
+    fmtVal: (v) => `${v.toFixed(3)}%`,
   },
   sli: {
     key: 'sli', title: 'SLO', values: sliValues.value,
     color: 'var(--ok)', lineClass: 'sd-c-sli', maxVal: 100, tickFixed: 1, tickSuffix: '%',
+    minVal: sliChartMin.value,
     referenceValue: slo.value?.target_percentage,
     referenceLabel: `${slo.value?.target_percentage ?? 0}% target`,
     fmtVal: (v) => `${v.toFixed(2)}%`,
@@ -309,16 +327,32 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && expanded.value) closeChart()
 }
 
-const rateValues = computed(() => chartBuckets.value.map(b => b.count))
-const errorValues = computed(() => chartBuckets.value.map(b => b.error_count))
+const availabilityChartPoints = computed(() => buildAvailabilityChartPoints(
+  chartBuckets.value,
+  errorChartBuckets.value,
+  chartBucketSeconds.value,
+))
+const rateValues = computed(() => isAvailabilitySlo.value
+  ? availabilityChartPoints.value.map(point => point.requestsPerSecond)
+  : chartBuckets.value.map(bucket => bucket.count / chartBucketSeconds.value))
+const errorValues = computed(() => isAvailabilitySlo.value
+  ? availabilityChartPoints.value.map(point => point.errorRate)
+  : chartBuckets.value.map(bucket => bucket.count > 0 ? (bucket.error_count / bucket.count) * 100 : 0))
 const averageLatencyValues = computed(() => chartBuckets.value.map(b => b.avg_duration_ms))
 const p50Values = computed(() => chartBuckets.value.map(b => b.p50_ms))
 const p95Values = computed(() => chartBuckets.value.map(b => b.p95_ms))
 const p99Values = computed(() => chartBuckets.value.map(b => b.p99_ms))
-const sliValues = computed(() => chartBuckets.value.map(b => {
-  if (b.count === 0) return 100
-  return ((b.count - b.error_count) / b.count) * 100
-}))
+const sliValues = computed(() => isAvailabilitySlo.value
+  ? availabilityChartPoints.value.map(point => point.successRate)
+  : chartBuckets.value.map((bucket) => {
+      if (bucket.count === 0) return 100
+      return ((bucket.count - bucket.error_count) / bucket.count) * 100
+    }))
+const sliChartMin = computed(() => {
+  const values = sliValues.value
+  const floor = Math.min(...values, slo.value?.target_percentage ?? 100)
+  return Math.max(0, Math.floor((floor - 0.1) * 10) / 10)
+})
 
 function latencyChartDef(key: 'avg' | 'p50' | 'p95' | 'p99', title: string, values: number[]): ChartDef {
   const threshold = latencyThresholdMs.value ?? 0
@@ -360,8 +394,8 @@ function chartCaption(key: ChartKey): string {
   if (key === 'p50') return latencyCaption('Median response latency')
   if (key === 'p95') return latencyCaption('95% of requests completed at or below this latency')
   if (key === 'p99') return latencyCaption('99% of requests completed at or below this latency')
-  if (key === 'rate') return 'Evaluated request volume across the SLO window.'
-  if (key === 'error') return 'Requests classified as errors by this SLO definition.'
+  if (key === 'rate') return 'Average requests per second in each chart bucket.'
+  if (key === 'error') return 'Share of requests matching this SLO\'s error filters.'
   return 'Success percentage compared with the configured SLO target.'
 }
 
@@ -372,29 +406,30 @@ function latencyCaption(prefix: string): string {
     : `${prefix}. The dashed line marks the ${threshold} ms SLO limit.`
 }
 
-function valuesToPoints(values: number[], maxVal?: number, geo: Geo = geoSmall): Pt[] {
+function valuesToPoints(values: number[], maxVal?: number, geo: Geo = geoSmall, minVal = 0): Pt[] {
   const mx = maxVal ?? Math.max(...values, 1)
+  const range = Math.max(mx - minVal, Number.EPSILON)
   const stepX = geo.innerW / Math.max(values.length - 1, 1)
   return values.map((v, i) => [
     geo.pad.left + i * stepX,
-    geo.pad.top + geo.innerH - ((v ?? 0) / mx) * geo.innerH,
+    geo.pad.top + geo.innerH - (((v ?? minVal) - minVal) / range) * geo.innerH,
   ] as Pt)
 }
 
-function areaPath(values: number[], maxVal?: number, geo: Geo = geoSmall): string {
+function areaPath(values: number[], maxVal?: number, geo: Geo = geoSmall, minVal = 0): string {
   if (!values.length) return ''
-  return straightAreaPath(valuesToPoints(values, maxVal, geo), geo.pad.top + geo.innerH)
+  return straightAreaPath(valuesToPoints(values, maxVal, geo, minVal), geo.pad.top + geo.innerH)
 }
 
-function linePath(values: number[], maxVal?: number, geo: Geo = geoSmall): string {
+function linePath(values: number[], maxVal?: number, geo: Geo = geoSmall, minVal = 0): string {
   if (!values.length) return ''
-  return straightLinePath(valuesToPoints(values, maxVal, geo))
+  return straightLinePath(valuesToPoints(values, maxVal, geo, minVal))
 }
 
-function yTicks(values: number[], fixed?: number, geo: Geo = geoSmall, maxVal?: number): Array<{ label: string; y: number }> {
+function yTicks(values: number[], fixed?: number, geo: Geo = geoSmall, maxVal?: number, minVal = 0): Array<{ label: string; y: number }> {
   const mx = maxVal ?? Math.max(...values, 1)
   return [0, 0.5, 1].map(s => ({
-    label: fixed !== undefined ? (mx * s).toFixed(fixed) : fmtCompact(mx * s),
+    label: fixed !== undefined ? (minVal + (mx - minVal) * s).toFixed(fixed) : fmtCompact(minVal + (mx - minVal) * s),
     y: geo.pad.top + geo.innerH - s * geo.innerH,
   }))
 }
@@ -428,9 +463,10 @@ function hoverX(idx: number, total: number, geo: Geo = geoSmall): number {
   return geo.pad.left + idx * stepX
 }
 
-function dotY(idx: number, values: number[], maxVal?: number, geo: Geo = geoSmall): number {
+function dotY(idx: number, values: number[], maxVal?: number, geo: Geo = geoSmall, minVal = 0): number {
   const mx = maxVal ?? Math.max(...values, 1)
-  return geo.pad.top + geo.innerH - ((values[idx] ?? 0) / mx) * geo.innerH
+  const range = Math.max(mx - minVal, Number.EPSILON)
+  return geo.pad.top + geo.innerH - (((values[idx] ?? minVal) - minVal) / range) * geo.innerH
 }
 
 function chartMouseMove(e: MouseEvent, geo: Geo = geoSmall) {
@@ -490,7 +526,9 @@ function investigateSlo() {
 
 function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
   const scaleMax = def.maxVal ?? Math.max(...def.values, def.referenceValue ?? 0, 1)
-  return geo.pad.top + geo.innerH - ((def.referenceValue ?? 0) / scaleMax) * geo.innerH
+  const scaleMin = def.minVal ?? 0
+  const range = Math.max(scaleMax - scaleMin, Number.EPSILON)
+  return geo.pad.top + geo.innerH - (((def.referenceValue ?? scaleMin) - scaleMin) / range) * geo.innerH
 }
 </script>
 
@@ -635,7 +673,14 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
       <strong>{{ slo.target_percentage }}% of requests ≤ {{ latencyThresholdMs }} ms</strong>
       <span class="sd-latency-objective-key"><i aria-hidden="true"></i>Dashed line marks the slow-request limit</span>
     </div>
-    <div class="sd-charts-row" :class="{ 'sd-charts-row--latency': isTraceLatencySlo }" v-if="!showEdit">
+    <div
+      class="sd-charts-row"
+      :class="{
+        'sd-charts-row--latency': isTraceLatencySlo,
+        'sd-charts-row--availability': isAvailabilitySlo,
+      }"
+      v-if="!showEdit"
+    >
       <TimeSeriesPanel
         v-for="key in chartKeys"
         :key="key"
@@ -666,7 +711,7 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
           @click="openChart(key)"
         >
           <svg :viewBox="`0 0 ${CW} ${CH}`" class="ch-svg sd-chart-svg" @mousemove="chartMouseMove" @mouseleave="chartMouseLeave">
-            <template v-for="tick in yTicks(chartDefs[key].values, chartDefs[key].tickFixed, geoSmall, chartDefs[key].maxVal)" :key="key + '-y-' + tick.label">
+            <template v-for="tick in yTicks(chartDefs[key].values, chartDefs[key].tickFixed, geoSmall, chartDefs[key].maxVal, chartDefs[key].minVal)" :key="key + '-y-' + tick.label">
               <line :x1="pad.left" :y1="tick.y" :x2="CW - pad.right" :y2="tick.y" class="sd-grid-line ch-grid" />
               <text :x="pad.left - 4" :y="tick.y + 3" class="sd-axis-label ch-axis" text-anchor="end">{{ tick.label }}{{ chartDefs[key].tickSuffix }}</text>
             </template>
@@ -678,11 +723,11 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
               <line :x1="pad.left" :y1="referenceLineY(chartDefs[key])" :x2="CW - pad.right" :y2="referenceLineY(chartDefs[key])" class="sd-target-line ch-threshold" :class="chartDefs[key].referenceClass" />
               <text :x="CW - pad.right - 3" :y="referenceLineY(chartDefs[key]) - 4" class="sd-target-label" :class="chartDefs[key].referenceClass" text-anchor="end">{{ chartDefs[key].referenceLabel }}</text>
             </template>
-            <path :d="areaPath(chartDefs[key].values, chartDefs[key].maxVal)" class="ch-area" :style="{ color: chartDefs[key].color }" />
-            <path :d="linePath(chartDefs[key].values, chartDefs[key].maxVal)" class="sd-line ch-line" :class="chartDefs[key].lineClass" />
+            <path :d="areaPath(chartDefs[key].values, chartDefs[key].maxVal, geoSmall, chartDefs[key].minVal)" class="ch-area" :style="{ color: chartDefs[key].color }" />
+            <path :d="linePath(chartDefs[key].values, chartDefs[key].maxVal, geoSmall, chartDefs[key].minVal)" class="sd-line ch-line" :class="chartDefs[key].lineClass" />
             <template v-if="chartHover">
               <line :x1="hoverX(chartHover.idx, chartDefs[key].values.length)" :y1="pad.top" :x2="hoverX(chartHover.idx, chartDefs[key].values.length)" :y2="CH - pad.bottom" class="sd-hover-line" />
-              <circle :cx="hoverX(chartHover.idx, chartDefs[key].values.length)" :cy="dotY(chartHover.idx, chartDefs[key].values, chartDefs[key].maxVal)" r="3" class="sd-hover-dot" :class="chartDefs[key].lineClass" />
+              <circle :cx="hoverX(chartHover.idx, chartDefs[key].values.length)" :cy="dotY(chartHover.idx, chartDefs[key].values, chartDefs[key].maxVal, geoSmall, chartDefs[key].minVal)" r="3" class="sd-hover-dot" :class="chartDefs[key].lineClass" />
             </template>
             <rect :x="pad.left" :y="pad.top" :width="innerW" :height="innerH" fill="transparent" style="cursor: crosshair" />
           </svg>
@@ -829,7 +874,7 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
             <div class="sd-chart-modal-body">
               <svg :viewBox="`0 0 ${LW} ${LH}`" class="ch-svg sd-chart-modal-svg" @mousemove="(e) => chartMouseMove(e, geoLarge)" @mouseleave="chartMouseLeave">
                 <!-- Y grid + labels -->
-                <template v-for="tick in yTicks(expandedDef.values, expandedDef.tickFixed, geoLarge, expandedDef.maxVal)" :key="'my'+tick.label">
+                <template v-for="tick in yTicks(expandedDef.values, expandedDef.tickFixed, geoLarge, expandedDef.maxVal, expandedDef.minVal)" :key="'my'+tick.label">
                   <line :x1="LPAD.left" :y1="tick.y" :x2="LW - LPAD.right" :y2="tick.y" class="ch-grid" />
                   <text :x="LPAD.left - 8" :y="tick.y + 4" class="ch-axis" text-anchor="end">{{ tick.label }}{{ expandedDef.tickSuffix }}</text>
                 </template>
@@ -844,12 +889,12 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
                   <text :x="LW - LPAD.right - 5" :y="referenceLineY(expandedDef, geoLarge) - 6" class="sd-target-label" :class="expandedDef.referenceClass" text-anchor="end">{{ expandedDef.referenceLabel }}</text>
                 </template>
                 <!-- Series -->
-                <path :d="areaPath(expandedDef.values, expandedDef.maxVal, geoLarge)" class="ch-area" :style="{ color: expandedDef.color }" />
-                <path :d="linePath(expandedDef.values, expandedDef.maxVal, geoLarge)" class="sd-line ch-line" :class="expandedDef.lineClass" />
+                <path :d="areaPath(expandedDef.values, expandedDef.maxVal, geoLarge, expandedDef.minVal)" class="ch-area" :style="{ color: expandedDef.color }" />
+                <path :d="linePath(expandedDef.values, expandedDef.maxVal, geoLarge, expandedDef.minVal)" class="sd-line ch-line" :class="expandedDef.lineClass" />
                 <!-- Hover -->
                 <template v-if="chartHover">
                   <line :x1="hoverX(chartHover.idx, expandedDef.values.length, geoLarge)" :y1="LPAD.top" :x2="hoverX(chartHover.idx, expandedDef.values.length, geoLarge)" :y2="LH - LPAD.bottom" class="sd-hover-line" />
-                  <circle :cx="hoverX(chartHover.idx, expandedDef.values.length, geoLarge)" :cy="dotY(chartHover.idx, expandedDef.values, expandedDef.maxVal, geoLarge)" r="4" class="sd-hover-dot" :class="expandedDef.lineClass" />
+                  <circle :cx="hoverX(chartHover.idx, expandedDef.values.length, geoLarge)" :cy="dotY(chartHover.idx, expandedDef.values, expandedDef.maxVal, geoLarge, expandedDef.minVal)" r="4" class="sd-hover-dot" :class="expandedDef.lineClass" />
                 </template>
                 <rect :x="LPAD.left" :y="LPAD.top" :width="geoLarge.innerW" :height="geoLarge.innerH" fill="transparent" style="cursor: crosshair" />
               </svg>

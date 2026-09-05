@@ -21,4 +21,14 @@ describe('SLO detail panel queries', () => {
     expect(source).toContain("'sd-charts-row--latency': isTraceLatencySlo")
     expect(source).toContain('const CH = 180')
   })
+
+  it('uses the configured SLO error filters for availability charts', () => {
+    expect(source).toContain("slo.value.indicator_type === 'availability' && slo.value.error_filters.length > 0")
+    expect(source).toContain('filters: slo.value.error_filters')
+    expect(source).toContain('buildAvailabilityChartPoints(')
+  })
+
+  it('gives request SLO charts a two-column layout', () => {
+    expect(source).toContain("'sd-charts-row--availability': isAvailabilitySlo")
+  })
 })
