@@ -488,6 +488,8 @@ export interface Slo {
   indicator_type: SloIndicatorType
   service_name: string
   metric_name: string
+  error_promql: string
+  total_promql: string
   window_type: SloWindowType
   target_percentage: number
   threshold_ms: number | null

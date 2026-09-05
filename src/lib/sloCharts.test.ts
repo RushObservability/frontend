@@ -24,6 +24,7 @@ describe('SLO availability chart data', () => {
 
     expect(points).toEqual([{
       bucket: '2026-09-05 10:00:00',
+      total: 3_600,
       requestsPerSecond: 1,
       errorRate: 1,
       successRate: 99,
@@ -39,6 +40,17 @@ describe('SLO availability chart data', () => {
 
     expect(points.map(point => point.errorRate)).toEqual([0, 10])
     expect(points.map(point => point.requestsPerSecond)).toEqual([1, 2])
+  })
+
+  it('does not understate the current partial bucket', () => {
+    const points = buildAvailabilityChartPoints(
+      [bucket('2026-09-05 10:00:00', 1_800)],
+      [],
+      3_600,
+      Date.parse('2026-09-05T10:30:00Z'),
+    )
+
+    expect(points[0]?.requestsPerSecond).toBe(1)
   })
 
   it('parses the intervals used by SLO charts', () => {
