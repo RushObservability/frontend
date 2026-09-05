@@ -101,7 +101,7 @@ async function loadChartData(rethrow = false, signal?: AbortSignal) {
       time_range: { from, to },
       filters: slo.value.total_filters.length ? slo.value.total_filters : [],
       interval,
-    }, undefined, signal)
+    }, 'dashboard', signal)
     chartBuckets.value = (res.buckets || []) as TimeseriesBucket[]
   } catch (error) {
     if (signal?.aborted) return
@@ -162,6 +162,21 @@ const budgetSeverity = computed(() => {
 
 const sloSourceLabel = computed(() => slo.value?.slo_type === 'metric' ? 'Metrics' : 'Spans')
 const sloRangeLabel = computed(() => slo.value ? windowLabel(slo.value.window_type) : '')
+const isTraceLatencySlo = computed(() => slo.value?.slo_type === 'trace' && slo.value.indicator_type === 'latency')
+const latencyThresholdMs = computed(() => isTraceLatencySlo.value ? slo.value?.threshold_ms ?? null : null)
+const sloSuccessDescription = computed(() => {
+  if (isTraceLatencySlo.value && latencyThresholdMs.value !== null) {
+    return `Requests completed at or below the ${latencyThresholdMs.value} ms latency limit.`
+  }
+  return 'Successful requests as a percentage of evaluated requests.'
+})
+const requestCountDescription = computed(() => {
+  if (isTraceLatencySlo.value && latencyThresholdMs.value !== null) {
+    return `Slow and total requests evaluated against the ${latencyThresholdMs.value} ms latency limit.`
+  }
+  return 'Error and total requests evaluated for the current SLO window.'
+})
+const badRequestLabel = computed(() => isTraceLatencySlo.value ? 'Over limit' : 'Errors')
 const sloPanelTone = computed<PanelTone>(() => slo.value?.state === 'breaching' ? 'danger' : slo.value?.state === 'compliant' ? 'positive' : 'default')
 const budgetPanelTone = computed<PanelTone>(() => budgetSeverity.value === 'critical' ? 'danger' : budgetSeverity.value === 'warning' ? 'warning' : budgetSeverity.value === 'healthy' ? 'positive' : 'default')
 
@@ -218,7 +233,7 @@ function thresholdOpLabel(op: string | null): string {
 // ── Chart helpers ──
 
 const CW = 600
-const CH = 120
+const CH = 180
 const pad = { top: 8, right: 8, bottom: 20, left: 44 }
 const innerW = CW - pad.left - pad.right
 const innerH = CH - pad.top - pad.bottom
@@ -235,9 +250,11 @@ const geoLarge: Geo = { W: LW, H: LH, pad: LPAD, innerW: LW - LPAD.left - LPAD.r
 const chartHover = ref<{ idx: number } | null>(null)
 
 // ── Expand-to-modal ──
-type ChartKey = 'rate' | 'error' | 'sli'
+type ChartKey = 'rate' | 'error' | 'sli' | 'avg' | 'p50' | 'p95' | 'p99'
 const expanded = ref<ChartKey | null>(null)
-const chartKeys: ChartKey[] = ['rate', 'error', 'sli']
+const chartKeys = computed<ChartKey[]>(() => (
+  isTraceLatencySlo.value ? ['avg', 'p50', 'p95', 'p99'] : ['rate', 'error', 'sli']
+))
 
 interface ChartDef {
   key: ChartKey
@@ -248,26 +265,34 @@ interface ChartDef {
   maxVal?: number
   tickFixed?: number
   tickSuffix: string
-  showTarget: boolean
+  referenceValue?: number
+  referenceLabel?: string
+  referenceClass?: string
   fmtVal: (v: number) => string
 }
 
 const chartDefs = computed<Record<ChartKey, ChartDef>>(() => ({
   rate: {
     key: 'rate', title: 'Request Rate', values: rateValues.value,
-    color: 'var(--amber)', lineClass: 'sd-c-rate', tickSuffix: '', showTarget: false,
+    color: 'var(--amber)', lineClass: 'sd-c-rate', tickSuffix: '',
     fmtVal: (v) => `${v.toLocaleString()} req`,
   },
   error: {
     key: 'error', title: 'Error Rate', values: errorValues.value,
-    color: 'var(--error)', lineClass: 'sd-c-error', tickSuffix: '', showTarget: false,
+    color: 'var(--error)', lineClass: 'sd-c-error', tickSuffix: '',
     fmtVal: (v) => `${v.toLocaleString()} errors`,
   },
   sli: {
     key: 'sli', title: 'SLO', values: sliValues.value,
-    color: 'var(--ok)', lineClass: 'sd-c-sli', maxVal: 100, tickFixed: 1, tickSuffix: '%', showTarget: true,
+    color: 'var(--ok)', lineClass: 'sd-c-sli', maxVal: 100, tickFixed: 1, tickSuffix: '%',
+    referenceValue: slo.value?.target_percentage,
+    referenceLabel: `${slo.value?.target_percentage ?? 0}% target`,
     fmtVal: (v) => `${v.toFixed(2)}%`,
   },
+  avg: latencyChartDef('avg', 'Average Latency', averageLatencyValues.value),
+  p50: latencyChartDef('p50', 'P50 Latency', p50Values.value),
+  p95: latencyChartDef('p95', 'P95 Latency', p95Values.value),
+  p99: latencyChartDef('p99', 'P99 Latency', p99Values.value),
 }))
 
 const expandedDef = computed<ChartDef | null>(() => (expanded.value ? chartDefs.value[expanded.value] : null))
@@ -286,10 +311,32 @@ function onKeydown(e: KeyboardEvent) {
 
 const rateValues = computed(() => chartBuckets.value.map(b => b.count))
 const errorValues = computed(() => chartBuckets.value.map(b => b.error_count))
+const averageLatencyValues = computed(() => chartBuckets.value.map(b => b.avg_duration_ms))
+const p50Values = computed(() => chartBuckets.value.map(b => b.p50_ms))
+const p95Values = computed(() => chartBuckets.value.map(b => b.p95_ms))
+const p99Values = computed(() => chartBuckets.value.map(b => b.p99_ms))
 const sliValues = computed(() => chartBuckets.value.map(b => {
   if (b.count === 0) return 100
   return ((b.count - b.error_count) / b.count) * 100
 }))
+
+function latencyChartDef(key: 'avg' | 'p50' | 'p95' | 'p99', title: string, values: number[]): ChartDef {
+  const threshold = latencyThresholdMs.value ?? 0
+  return {
+    key,
+    title,
+    values,
+    color: key === 'avg' ? '#3b82f6' : key === 'p50' ? 'var(--ok)' : key === 'p95' ? 'var(--amber)' : 'var(--error)',
+    lineClass: `sd-c-${key}`,
+    maxVal: Math.max(...values, threshold, 1) * 1.08,
+    tickFixed: 0,
+    tickSuffix: 'ms',
+    referenceValue: threshold || undefined,
+    referenceLabel: threshold ? `${threshold} ms limit` : undefined,
+    referenceClass: 'sd-latency-limit',
+    fmtVal: (v) => `${v.toFixed(v < 10 ? 1 : 0)} ms`,
+  }
+}
 
 function parseBucketUtc(bucket: string): number {
   const iso = bucket.replace(' ', 'T').replace(/(\.\d{3})\d*$/, '$1') + 'Z'
@@ -309,9 +356,20 @@ function chartPanelSeries(def: ChartDef): TimeSeriesPanelSeries[] {
 }
 
 function chartCaption(key: ChartKey): string {
+  if (key === 'avg') return latencyCaption('Mean latency across every matching request')
+  if (key === 'p50') return latencyCaption('Median response latency')
+  if (key === 'p95') return latencyCaption('95% of requests completed at or below this latency')
+  if (key === 'p99') return latencyCaption('99% of requests completed at or below this latency')
   if (key === 'rate') return 'Evaluated request volume across the SLO window.'
   if (key === 'error') return 'Requests classified as errors by this SLO definition.'
   return 'Success percentage compared with the configured SLO target.'
+}
+
+function latencyCaption(prefix: string): string {
+  const threshold = latencyThresholdMs.value
+  return threshold === null
+    ? `${prefix}.`
+    : `${prefix}. The dashed line marks the ${threshold} ms SLO limit.`
 }
 
 function valuesToPoints(values: number[], maxVal?: number, geo: Geo = geoSmall): Pt[] {
@@ -333,8 +391,8 @@ function linePath(values: number[], maxVal?: number, geo: Geo = geoSmall): strin
   return straightLinePath(valuesToPoints(values, maxVal, geo))
 }
 
-function yTicks(values: number[], fixed?: number, geo: Geo = geoSmall): Array<{ label: string; y: number }> {
-  const mx = Math.max(...values, 1)
+function yTicks(values: number[], fixed?: number, geo: Geo = geoSmall, maxVal?: number): Array<{ label: string; y: number }> {
+  const mx = maxVal ?? Math.max(...values, 1)
   return [0, 0.5, 1].map(s => ({
     label: fixed !== undefined ? (mx * s).toFixed(fixed) : fmtCompact(mx * s),
     y: geo.pad.top + geo.innerH - s * geo.innerH,
@@ -430,11 +488,9 @@ function investigateSlo() {
   })
 }
 
-// Target line for SLI chart
-function targetLineY(geo: Geo = geoSmall): number {
-  if (!slo.value) return geo.pad.top
-  const target = slo.value.target_percentage
-  return geo.pad.top + geo.innerH - (target / 100) * geo.innerH
+function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
+  const scaleMax = def.maxVal ?? Math.max(...def.values, def.referenceValue ?? 0, 1)
+  return geo.pad.top + geo.innerH - ((def.referenceValue ?? 0) / scaleMax) * geo.innerH
 }
 </script>
 
@@ -492,7 +548,7 @@ function targetLineY(geo: Geo = geoSmall): number {
         v-if="successRate !== null"
         class="sd-hero-card sd-hero-sli"
         title="Current SLO"
-        description="Successful requests as a percentage of evaluated requests."
+        :description="sloSuccessDescription"
         :value="successRate"
         :precision="3"
         unit="%"
@@ -505,7 +561,7 @@ function targetLineY(geo: Geo = geoSmall): number {
         v-else
         class="sd-hero-card"
         title="Current SLO"
-        description="Successful requests as a percentage of evaluated requests."
+        :description="sloSuccessDescription"
         :empty="true"
         empty-title="No SLI data"
         empty-message="This SLO has not evaluated enough requests yet."
@@ -550,7 +606,7 @@ function targetLineY(geo: Geo = geoSmall): number {
       <PanelCard
         class="sd-hero-card"
         title="Request Counts"
-        description="Error and total requests evaluated for the current SLO window."
+        :description="requestCountDescription"
         :range-label="sloRangeLabel"
         :source-label="sloSourceLabel"
         variant="stat"
@@ -558,7 +614,7 @@ function targetLineY(geo: Geo = geoSmall): number {
         <div class="sd-counts-grid">
           <div class="sd-count-item">
             <div class="sd-count-val mono sd-count-err">{{ slo.error_count !== null ? slo.error_count.toLocaleString() : '-' }}</div>
-            <div class="sd-count-label">Errors</div>
+            <div class="sd-count-label">{{ badRequestLabel }}</div>
           </div>
           <div class="sd-count-item">
             <div class="sd-count-val mono">{{ slo.total_count !== null ? slo.total_count.toLocaleString() : '-' }}</div>
@@ -569,7 +625,17 @@ function targetLineY(geo: Geo = geoSmall): number {
     </div>
 
     <!-- ═══ Charts ═══ -->
-    <div class="sd-charts-row" v-if="!showEdit">
+    <div
+      v-if="!showEdit && isTraceLatencySlo && latencyThresholdMs !== null"
+      class="sd-latency-objective"
+      role="note"
+      :aria-label="`${slo.target_percentage}% of requests must complete at or below ${latencyThresholdMs} milliseconds`"
+    >
+      <span class="sd-latency-objective-label">Latency objective</span>
+      <strong>{{ slo.target_percentage }}% of requests ≤ {{ latencyThresholdMs }} ms</strong>
+      <span class="sd-latency-objective-key"><i aria-hidden="true"></i>Dashed line marks the slow-request limit</span>
+    </div>
+    <div class="sd-charts-row" :class="{ 'sd-charts-row--latency': isTraceLatencySlo }" v-if="!showEdit">
       <TimeSeriesPanel
         v-for="key in chartKeys"
         :key="key"
@@ -600,7 +666,7 @@ function targetLineY(geo: Geo = geoSmall): number {
           @click="openChart(key)"
         >
           <svg :viewBox="`0 0 ${CW} ${CH}`" class="ch-svg sd-chart-svg" @mousemove="chartMouseMove" @mouseleave="chartMouseLeave">
-            <template v-for="tick in yTicks(chartDefs[key].values, chartDefs[key].tickFixed)" :key="key + '-y-' + tick.label">
+            <template v-for="tick in yTicks(chartDefs[key].values, chartDefs[key].tickFixed, geoSmall, chartDefs[key].maxVal)" :key="key + '-y-' + tick.label">
               <line :x1="pad.left" :y1="tick.y" :x2="CW - pad.right" :y2="tick.y" class="sd-grid-line ch-grid" />
               <text :x="pad.left - 4" :y="tick.y + 3" class="sd-axis-label ch-axis" text-anchor="end">{{ tick.label }}{{ chartDefs[key].tickSuffix }}</text>
             </template>
@@ -608,9 +674,9 @@ function targetLineY(geo: Geo = geoSmall): number {
               <line :x1="lbl.x" :y1="pad.top" :x2="lbl.x" :y2="CH - pad.bottom" class="ch-grid" />
               <text :x="lbl.x" :y="CH - 2" class="sd-axis-label ch-axis" text-anchor="middle">{{ lbl.label }}</text>
             </template>
-            <template v-if="chartDefs[key].showTarget">
-              <line :x1="pad.left" :y1="targetLineY()" :x2="CW - pad.right" :y2="targetLineY()" class="sd-target-line ch-threshold" />
-              <text :x="CW - pad.right + 2" :y="targetLineY() + 3" class="sd-target-label">{{ slo.target_percentage }}%</text>
+            <template v-if="chartDefs[key].referenceValue !== undefined">
+              <line :x1="pad.left" :y1="referenceLineY(chartDefs[key])" :x2="CW - pad.right" :y2="referenceLineY(chartDefs[key])" class="sd-target-line ch-threshold" :class="chartDefs[key].referenceClass" />
+              <text :x="CW - pad.right - 3" :y="referenceLineY(chartDefs[key]) - 4" class="sd-target-label" :class="chartDefs[key].referenceClass" text-anchor="end">{{ chartDefs[key].referenceLabel }}</text>
             </template>
             <path :d="areaPath(chartDefs[key].values, chartDefs[key].maxVal)" class="ch-area" :style="{ color: chartDefs[key].color }" />
             <path :d="linePath(chartDefs[key].values, chartDefs[key].maxVal)" class="sd-line ch-line" :class="chartDefs[key].lineClass" />
@@ -738,7 +804,7 @@ function targetLineY(geo: Geo = geoSmall): number {
             </div>
             <div class="sd-timeline-msg mono">{{ ev.message }}</div>
             <div class="sd-timeline-meta mono">
-              {{ ev.error_count.toLocaleString() }} errors / {{ ev.total_count.toLocaleString() }} total
+              {{ ev.error_count.toLocaleString() }} {{ isTraceLatencySlo ? 'over limit' : 'errors' }} / {{ ev.total_count.toLocaleString() }} total
               &middot; budget {{ (ev.error_budget_remaining * 100).toFixed(3) }}%
             </div>
           </div>
@@ -763,7 +829,7 @@ function targetLineY(geo: Geo = geoSmall): number {
             <div class="sd-chart-modal-body">
               <svg :viewBox="`0 0 ${LW} ${LH}`" class="ch-svg sd-chart-modal-svg" @mousemove="(e) => chartMouseMove(e, geoLarge)" @mouseleave="chartMouseLeave">
                 <!-- Y grid + labels -->
-                <template v-for="tick in yTicks(expandedDef.values, expandedDef.tickFixed, geoLarge)" :key="'my'+tick.label">
+                <template v-for="tick in yTicks(expandedDef.values, expandedDef.tickFixed, geoLarge, expandedDef.maxVal)" :key="'my'+tick.label">
                   <line :x1="LPAD.left" :y1="tick.y" :x2="LW - LPAD.right" :y2="tick.y" class="ch-grid" />
                   <text :x="LPAD.left - 8" :y="tick.y + 4" class="ch-axis" text-anchor="end">{{ tick.label }}{{ expandedDef.tickSuffix }}</text>
                 </template>
@@ -772,10 +838,10 @@ function targetLineY(geo: Geo = geoSmall): number {
                   <line :x1="lbl.x" :y1="LPAD.top" :x2="lbl.x" :y2="LH - LPAD.bottom" class="ch-grid" />
                   <text :x="lbl.x" :y="LH - 10" class="ch-axis" text-anchor="middle">{{ lbl.label }}</text>
                 </template>
-                <!-- Target line (SLI only) -->
-                <template v-if="expandedDef.showTarget">
-                  <line :x1="LPAD.left" :y1="targetLineY(geoLarge)" :x2="LW - LPAD.right" :y2="targetLineY(geoLarge)" class="sd-target-line ch-threshold" />
-                  <text :x="LW - LPAD.right + 4" :y="targetLineY(geoLarge) + 4" class="sd-target-label">{{ slo.target_percentage }}%</text>
+                <!-- SLO target or latency limit -->
+                <template v-if="expandedDef.referenceValue !== undefined">
+                  <line :x1="LPAD.left" :y1="referenceLineY(expandedDef, geoLarge)" :x2="LW - LPAD.right" :y2="referenceLineY(expandedDef, geoLarge)" class="sd-target-line ch-threshold" :class="expandedDef.referenceClass" />
+                  <text :x="LW - LPAD.right - 5" :y="referenceLineY(expandedDef, geoLarge) - 6" class="sd-target-label" :class="expandedDef.referenceClass" text-anchor="end">{{ expandedDef.referenceLabel }}</text>
                 </template>
                 <!-- Series -->
                 <path :d="areaPath(expandedDef.values, expandedDef.maxVal, geoLarge)" class="ch-area" :style="{ color: expandedDef.color }" />
