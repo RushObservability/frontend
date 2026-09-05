@@ -468,6 +468,26 @@ export interface NotificationLogEntry {
   created_at: string
 }
 
+export interface AlertRoute {
+  id: string
+  tenant_id: string
+  name: string
+  enabled: boolean
+  priorities: number[]
+  tag_matchers: Record<string, string>
+  channel_ids: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface AlertRouteInput {
+  name: string
+  enabled: boolean
+  priorities: number[]
+  tag_matchers: Record<string, string>
+  channel_ids: string[]
+}
+
 // Legacy alert-rules types removed — Monitors (see Monitor) is the single
 // alerting system. Notification-channel types remain (shared infrastructure).
 

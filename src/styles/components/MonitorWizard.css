@@ -562,6 +562,10 @@
   font-size: 10px;
 }
 
+.mf-hint a {
+  color: var(--accent);
+}
+
 .mf-hint code,
 .mf-template-vars code {
   color: var(--text-secondary);

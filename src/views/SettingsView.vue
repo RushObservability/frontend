@@ -9,6 +9,7 @@ import { apiBaseUrl } from '../config'
 import type { ApiKey, ApiKeyCreated, ServiceLink, CustomSkill, Group, Tenant, TenantRetention, TenantSignals, GlobalRetention, User, AuthSession, SsoProvider, IdpGroupMapping, SetupToken, NotificationChannel, MetricFirewallRule, MetricFirewallInput, LicenseStatus, QueryLimitsConfig, QueryWorkloadBudget, QueryWorkloadClass, KubernetesClientSession, KubernetesGatewayCluster, KubernetesLoggingSettings, KubernetesRbacGrant, KubernetesRbacGrantInput, KubernetesRbacRoleKind, KubernetesRbacScope, KubernetesRbacClusterMatch, LlmProvider, LlmProviderInput, LlmProviderKind, LlmModel, LlmModelInput } from '../types'
 import SkillEditDialog from '../components/SkillEditDialog.vue'
 import ChannelForm from '../components/ChannelForm.vue'
+import AlertRoutingRules from '../components/AlertRoutingRules.vue'
 import RegexHelp from '../components/RegexHelp.vue'
 import SettingsNavigation from '../components/SettingsNavigation.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -5926,6 +5927,7 @@ function formatDate(ts: string): string {
             </div>
           </div>
         </div>
+        <AlertRoutingRules :channels="alertChannels" />
       </div>
     </div>
 
