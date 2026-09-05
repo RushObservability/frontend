@@ -1528,8 +1528,8 @@ export function useApi() {
 
   // ── Monitor API ──
 
-  async function listMonitors(): Promise<{ monitors: Monitor[] }> {
-    return await request('/monitors')
+  async function listMonitors(signal?: AbortSignal): Promise<{ monitors: Monitor[] }> {
+    return await request('/monitors', { signal })
   }
 
   async function getMonitor(id: string): Promise<{ monitor: Monitor; events: MonitorEvent[] }> {

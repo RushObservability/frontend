@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
+import { usePollingTask } from '../composables/usePollingTask'
 import type { Monitor } from '../types'
 
 const api = useApi()
@@ -28,14 +29,30 @@ function monitorMatchesService(m: Monitor): boolean {
   })
 }
 
+async function loadMonitors(rethrow = false, signal?: AbortSignal) {
+  try {
+    const res = await api.listMonitors(signal)
+    monitors.value = res.monitors
+  } catch (error) {
+    if (signal?.aborted) return
+    if (rethrow) throw error
+  }
+}
+
+const refreshLoop = usePollingTask({
+  category: 'alert_list',
+  intervalMs: 10_000,
+  run: ({ signal }) => loadMonitors(true, signal),
+})
+
 onMounted(async () => {
   loading.value = true
-  try {
-    const res = await api.listMonitors()
-    monitors.value = res.monitors
-  } catch { /* error in api.error */ }
-  finally { loading.value = false }
+  await loadMonitors()
+  loading.value = false
+  refreshLoop.start()
 })
+
+onUnmounted(() => refreshLoop.stop())
 
 const filteredMonitors = computed(() => {
   let result = monitors.value

@@ -277,7 +277,7 @@ async function deleteMonitor() {
 
       <!-- Live graph -->
       <TimeSeriesPanel
-        class="detail-section"
+        class="detail-section detail-live-panel"
         title="Live"
         description="The monitor's evaluated metric over the selected lookback, with alert thresholds drawn as reference lines."
         caption="Evaluation signal with warning and critical thresholds."
@@ -620,8 +620,8 @@ async function deleteMonitor() {
 .monitor-loading-panel {
   min-height: 220px;
 }
-.detail-section :deep(.ts-widget) {
-  min-height: clamp(280px, 38vw, 450px);
+.detail-live-panel :deep(.ts-widget) {
+  height: clamp(320px, 36vw, 440px);
 }
 
 /* ── Chart ── */

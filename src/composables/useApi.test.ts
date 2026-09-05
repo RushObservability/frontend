@@ -128,6 +128,29 @@ describe('tenant-aware API transport', () => {
     ])
   })
 
+  it('passes an abort signal to monitor list refreshes', async () => {
+    let requestSignal: AbortSignal | undefined
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener('abort', () => reject(requestSignal?.reason), { once: true })
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { useApi } = await import('./useApi')
+    const controller = new AbortController()
+    const request = useApi().listMonitors(controller.signal)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/monitors')
+    expect(requestSignal?.aborted).toBe(false)
+    controller.abort()
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    expect(requestSignal?.aborted).toBe(true)
+  })
+
   it('uses the admin-only inventory and revocation routes for session controls', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ sessions: [] }), { status: 200 }))
