@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { useFeatures } from '../composables/useFeatures'
@@ -26,6 +26,7 @@ import {
 
 const api = useApi()
 const router = useRouter()
+const route = useRoute()
 const { user: currentUser } = useAuth()
 const { features, loadFeatures } = useFeatures()
 const { activeTenantName } = useTenant()
@@ -464,39 +465,6 @@ async function loadRuntimeConfig() {
   }
 }
 
-// Status per integration: helm-gated ones (argocd/fluxcd/kubernetes) are
-// "unavailable" unless their Helm feature flag is on; licensed add-ons are
-// enabled when the server reports the required entitlement.
-function integrationStatus(key: string): 'enabled' | 'disabled' | 'unavailable' {
-  if (key === 'postgresql') {
-    return license.value?.valid && (license.value.entitlements ?? []).includes('postgres') ? 'enabled' : 'unavailable'
-  }
-  if (key === 'mysql') {
-    return license.value?.valid && (license.value.entitlements ?? []).includes('mysql') ? 'enabled' : 'unavailable'
-  }
-  if (key === 'cloudwatch') return cloudwatchEnabled.value ? 'enabled' : 'disabled'
-  if (key === 'kubernetes-logging') return featureOn('kubernetes_logging') ? 'enabled' : 'unavailable'
-  if (!featureOn(key)) return 'unavailable'
-  const en = key === 'argocd' ? argocdEnabled.value
-    : key === 'fluxcd' ? fluxcdEnabled.value
-    : kubernetesEnabled.value
-  return en ? 'enabled' : 'disabled'
-}
-const statusLabels: Record<string, string> = {
-  enabled: 'Enabled', disabled: 'Disabled', unavailable: 'Unavailable',
-}
-const integrationRows = computed(() => integrationsMeta.map(m => {
-  const status = integrationStatus(m.key)
-  return { ...m, status, statusLabel: statusLabels[status] }
-}))
-
-// Click the parent / "all integrations": show the overview table.
-function selectIntegrations() {
-  activeTab.value = 'integrations'
-  integrationsExpanded.value = true
-  activeIntegration.value = ''
-  navHash('#integrations')
-}
 // Open one integration's own page.
 function selectIntegration(key: string) {
   activeTab.value = 'integrations'
@@ -616,14 +584,21 @@ function onHashChange() {
   if (tab !== activeTab.value) activeTab.value = tab
   if (tab === 'integrations') {
     integrationsExpanded.value = true
-    // sub names a specific integration; '' shows the overview table.
-    activeIntegration.value = integrationsMeta.some(m => m.key === sub) ? sub : ''
+    const integration = integrationsMeta.find(item => item.key === sub) ?? integrationsMeta[0]
+    if (!integration) return
+    if (sub !== integration.key) {
+      void router.replace({ name: 'settings', hash: `#integrations/${integration.key}` })
+      return
+    }
+    activeIntegration.value = integration.key
     if (activeIntegration.value === 'kubernetes-logging' && isAdmin.value && !kubernetesLogging.value) loadKubernetesLoggingSettings()
   }
   if (tab === 'agent') activeAgentSubtab.value = validAgentSubtab(sub)
   if (tab === 'config' && !runtimeConfig.value) loadRuntimeConfig()
   if (tab === 'performance' && isAdmin.value && !queryLimits.value) loadQueryLimits()
 }
+
+watch(() => route.hash, onHashChange)
 
 // ── Data export (max rows) ──
 const exportMaxRows = ref(1000)
@@ -2862,7 +2837,13 @@ onMounted(async () => {
     activeTab.value = parsed.tab
     if (parsed.tab === 'integrations') {
       integrationsExpanded.value = true
-      activeIntegration.value = integrationsMeta.some(m => m.key === parsed.sub) ? parsed.sub : ''
+      const integration = integrationsMeta.find(item => item.key === parsed.sub) ?? integrationsMeta[0]
+      if (integration) {
+        activeIntegration.value = integration.key
+        if (parsed.sub !== integration.key) {
+          await router.replace({ name: 'settings', hash: `#integrations/${integration.key}` })
+        }
+      }
     }
     if (parsed.tab === 'agent') activeAgentSubtab.value = validAgentSubtab(parsed.sub)
   }
@@ -3007,13 +2988,13 @@ function formatDate(ts: string): string {
   <div class="settings-page">
     <div class="settings-shell">
       <SettingsNavigation
+        :show-rail="false"
         :groups="groupedTabs"
         :integrations="integrationSubItems"
         :active-tab="activeTab"
         :active-integration="activeIntegration"
         :integrations-expanded="integrationsExpanded"
         @select-tab="setTab"
-        @select-integrations="selectIntegrations"
         @select-integration="selectIntegration"
         @toggle-integrations="integrationsExpanded = !integrationsExpanded"
       />
@@ -3935,34 +3916,7 @@ function formatDate(ts: string): string {
       class="section"
       role="tabpanel"
     >
-      <!-- ── Overview table: what's available and what's on ── -->
-      <div v-if="!activeIntegration" class="int-table">
-        <div class="int-table-head">
-          <span>Integration</span>
-          <span>Status</span>
-          <span class="int-col-go"></span>
-        </div>
-        <button
-          v-for="row in integrationRows"
-          :key="row.key"
-          class="int-row"
-          @click="selectIntegration(row.key)"
-        >
-          <span class="int-row-main">
-            <span class="int-name">{{ row.label }}</span>
-            <span class="int-desc">{{ row.desc }}</span>
-          </span>
-          <span class="int-status" :class="`int-status--${row.status}`">
-            <span class="int-dot"></span>{{ row.statusLabel }}
-          </span>
-          <span class="int-go" aria-hidden="true">Manage ›</span>
-        </button>
-      </div>
-
       <!-- ── Per-integration page (deep-linkable: #integrations/<key>) ── -->
-      <template v-else>
-        <button class="int-back" @click="selectIntegrations">‹ All integrations</button>
-
       <div v-if="activeIntegration === 'postgresql'" id="integration-postgresql" class="set-card">
         <div class="set-card-head">
           <h2 class="card-title">PostgreSQL</h2>
@@ -4431,7 +4385,6 @@ function formatDate(ts: string): string {
           </div>
         </template>
       </div>
-      </template>
     </div>
 
     <!-- Runtime Configuration Section -->
