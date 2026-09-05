@@ -75,8 +75,6 @@ import type {
   CustomSkill,
   CreateCustomSkillRequest,
   UpdateCustomSkillRequest,
-  DetectionRule,
-  DetectionEvent,
   Group,
   Tenant,
   TenantRetention,
@@ -1156,44 +1154,6 @@ export function useApi() {
     await request(`/custom-skills/${encodePathSegment(id)}`, { method: 'DELETE' })
   }
 
-  // ── Detection API ──
-
-  async function listDetectionRules(): Promise<{ rules: DetectionRule[] }> {
-    return await request('/detection/rules')
-  }
-
-  async function getDetectionRule(id: string): Promise<DetectionRule> {
-    return await request(`/detection/rules/${encodePathSegment(id)}`)
-  }
-
-  async function createDetectionRule(data: Record<string, unknown>): Promise<DetectionRule> {
-    return await request('/detection/rules', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  }
-
-  async function updateDetectionRule(id: string, data: Record<string, unknown>): Promise<DetectionRule> {
-    return await request(`/detection/rules/${encodePathSegment(id)}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    })
-  }
-
-  async function deleteDetectionRule(id: string): Promise<void> {
-    await request(`/detection/rules/${encodePathSegment(id)}`, { method: 'DELETE' })
-  }
-
-  async function testDetectionRule(id: string): Promise<{ rows: any[] }> {
-    return await request(`/detection/rules/${encodePathSegment(id)}/test`, {
-      method: 'POST',
-    })
-  }
-
-  async function listDetectionEvents(): Promise<{ events: DetectionEvent[] }> {
-    return await request('/detection/events')
-  }
-
   // ── Group API ──
 
   async function listGroups(): Promise<{ groups: Group[] }> {
@@ -2057,7 +2017,6 @@ export function useApi() {
     getFluxResources, getFluxSources, getFluxResource,
     getK8sSummary, getK8sNamespaces, getK8sResources, getK8sResource,
     listCustomSkills, getCustomSkill, createCustomSkill, updateCustomSkill, deleteCustomSkill,
-    listDetectionRules, getDetectionRule, createDetectionRule, updateDetectionRule, deleteDetectionRule, testDetectionRule, listDetectionEvents,
     getSsoStatus, listSsoProviders, saveSsoProvider, deleteSsoProvider, listIdpGroupMappings, createIdpGroupMapping, updateIdpGroupMapping, deleteIdpGroupMapping, createSetupToken, exchangeSetupToken, validateSetupSession, completeSetupSession,
     listGroups, createGroup, updateGroup, deleteGroup, setGroupTenants, getUserGroups, setUserGroups,
     listTenants, createTenant, deleteTenant, toggleTenant, setTenantAuthRequired, setTenantIngestAuthRequired, getTenantRetention, setTenantRetention, deleteTenantRetention, getTenantSignals, setTenantSignals, getGlobalRetention, setGlobalRetention,

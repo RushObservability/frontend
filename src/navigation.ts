@@ -68,10 +68,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     mobilePrimary: true, keywords: ['monitors', 'notifications'],
   },
   {
-    id: 'detection', label: 'Detection', path: '/detection', icon: '◆', group: 'respond',
-    routeNames: ['detection', 'detection-rule-add', 'detection-rule-edit'], keywords: ['rules'],
-  },
-  {
     id: 'anomaly', label: 'Anomaly', path: '/anomaly', icon: '∿', group: 'respond',
     routeNames: ['anomaly', 'anomaly-detail', 'anomaly-add'], keywords: ['detection'],
   },

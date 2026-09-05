@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import DOMPurify from 'dompurify'
 import { useApi } from '../composables/useApi'
 import AutocompleteInput from './AutocompleteInput.vue'
+import { ALERT_TEMPLATE_GROUPS, ALERT_TEMPLATES } from '../lib/alertTemplates'
 import type { Monitor, MonitorPreview, NotificationChannel } from '../types'
 
 const props = defineProps<{
@@ -16,6 +17,8 @@ const emit = defineEmits<{
 }>()
 
 const api = useApi()
+const selectedTemplate = ref('blank')
+const templatesExpanded = ref(false)
 
 // ── Loading & saving state ──
 const loading = ref(false)
@@ -42,6 +45,7 @@ const logConfig = ref({
   search: '',
   service: '',
   severities: [] as string[],
+  filters: [] as { field: string; op: '=' | '!=' | 'LIKE'; value: string }[],
   group_by: [] as string[],
 })
 
@@ -124,9 +128,102 @@ const renotifyOptions = [
   { label: '4h', value: 14400 },
 ]
 
-const severityOptions = ['ERROR', 'WARN', 'INFO', 'DEBUG']
+const severityOptions = ['FATAL', 'ERROR', 'WARN', 'INFO', 'DEBUG']
 
 const isEditing = computed(() => !!props.monitorId)
+const templateGroups = computed(() => ALERT_TEMPLATE_GROUPS.map(group => ({
+  ...group,
+  templates: ALERT_TEMPLATES.filter(template => template.group === group.id),
+})))
+const selectedTemplateName = computed(() => (
+  selectedTemplate.value === 'blank'
+    ? 'Start blank'
+    : ALERT_TEMPLATES.find(template => template.id === selectedTemplate.value)?.name || 'Choose a template'
+))
+const thresholdUnit = computed(() => (
+  monitorType.value === 'apm' && apmConfig.value.metric.includes('latency') ? 'ms'
+    : monitorType.value === 'apm' && apmConfig.value.metric === 'error_rate' ? '%'
+      : monitorType.value === 'apm' && apmConfig.value.metric === 'request_rate' ? 'req/s'
+        : monitorType.value === 'log' ? 'logs'
+          : ''
+))
+
+function applyBlankTemplate() {
+  selectedTemplate.value = 'blank'
+  templatesExpanded.value = false
+  monitorType.value = 'metric'
+  metricExpression.value = ''
+  useVisualBuilder.value = true
+  metricConfig.value = { metric_name: '', aggregation: 'avg', filters: [], group_by: [] }
+  logConfig.value = { search: '', service: '', severities: [], filters: [], group_by: [] }
+  apmConfig.value = { service: '', metric: 'error_rate', endpoint_filter: '', group_by: [] }
+  compositeConfig.value = { formula: '', monitor_ids: [] }
+  evalWindow.value = 300
+  comparator.value = 'above'
+  criticalThreshold.value = null
+  warningThreshold.value = null
+  criticalRecovery.value = null
+  warningRecovery.value = null
+  recoveryExpanded.value = false
+  monitorName.value = ''
+  message.value = ''
+  notificationChannels.value = []
+  renotifyInterval.value = null
+  tags.value = []
+  priority.value = 3
+  preview.value = null
+}
+
+function applyTemplate(templateId: string) {
+  const template = ALERT_TEMPLATES.find(item => item.id === templateId)
+  if (!template) return
+
+  selectedTemplate.value = template.id
+  templatesExpanded.value = false
+  metricExpression.value = ''
+  useVisualBuilder.value = true
+  metricConfig.value = { metric_name: '', aggregation: 'avg', filters: [], group_by: [] }
+  logConfig.value = { search: '', service: '', severities: [], filters: [], group_by: [] }
+  apmConfig.value = { service: '', metric: 'error_rate', endpoint_filter: '', group_by: [] }
+  compositeConfig.value = { formula: '', monitor_ids: [] }
+  monitorType.value = template.monitorType
+
+  if (template.monitorType === 'apm') {
+    apmConfig.value = {
+      service: '',
+      metric: template.query.metric,
+      endpoint_filter: template.query.endpointFilter || '',
+      group_by: [...(template.query.groupBy || [])],
+    }
+  } else if (template.monitorType === 'log') {
+    logConfig.value = {
+      search: template.query.search || '',
+      service: template.query.service || '',
+      severities: [...(template.query.severities || [])],
+      filters: (template.query.filters || []).map(filter => ({ ...filter })),
+      group_by: [...(template.query.groupBy || [])],
+    }
+  } else {
+    metricConfig.value = {
+      metric_name: template.query.metricName,
+      aggregation: template.query.aggregation,
+      filters: (template.query.filters || []).map(filter => ({ ...filter })),
+      group_by: [...(template.query.groupBy || [])],
+    }
+    buildExpressionFromVisual()
+  }
+  evalWindow.value = template.evalWindow
+  comparator.value = template.comparator
+  criticalThreshold.value = template.criticalThreshold
+  warningThreshold.value = template.warningThreshold
+  criticalRecovery.value = template.criticalRecovery
+  warningRecovery.value = template.warningRecovery
+  recoveryExpanded.value = template.criticalRecovery !== null || template.warningRecovery !== null
+  monitorName.value = template.monitorName
+  message.value = template.message
+  priority.value = template.priority
+  preview.value = null
+}
 
 // ── PromQL expression highlighting ──
 const highlightedExpression = computed(() => {
@@ -217,6 +314,7 @@ const queryConfig = computed(() => {
       search: logConfig.value.search,
       service: logConfig.value.service,
       severities: logConfig.value.severities,
+      filters: logConfig.value.filters,
       eval_window_secs: evalWindow.value,
     }
   }
@@ -287,7 +385,7 @@ async function fetchPreview() {
     previewLoading.value = false
     return
   }
-  if (cfg.type === 'log' && !cfg.search && !cfg.service) {
+  if (cfg.type === 'log' && !cfg.search && !cfg.service && !cfg.severities?.length && !cfg.filters?.length) {
     preview.value = null
     previewLoading.value = false
     return
@@ -502,6 +600,14 @@ function removeFilter(config: { filters: { key: string; value: string }[] }, ind
   config.filters.splice(index, 1)
 }
 
+function addLogFilter() {
+  logConfig.value.filters.push({ field: '', op: '=', value: '' })
+}
+
+function removeLogFilter(index: number) {
+  logConfig.value.filters.splice(index, 1)
+}
+
 // ── Group by management ──
 const groupByInput = ref('')
 function addGroupBy(list: string[]) {
@@ -627,6 +733,7 @@ onMounted(async () => {
         logConfig.value.search = qc.search || ''
         logConfig.value.service = qc.service || ''
         logConfig.value.severities = qc.severities || []
+        logConfig.value.filters = qc.filters || []
         logConfig.value.group_by = m.group_by || []
       } else if (m.type === 'apm') {
         apmConfig.value.service = qc.service || ''
@@ -662,6 +769,70 @@ onUnmounted(() => {
     </div>
 
     <template v-if="!loading">
+      <div v-if="!isEditing" class="mf-section mf-template-section" :class="{ open: templatesExpanded }">
+        <button
+          type="button"
+          class="mf-template-toggle"
+          aria-controls="alert-template-drawer"
+          :aria-expanded="templatesExpanded"
+          @click="templatesExpanded = !templatesExpanded"
+        >
+          <span class="mf-template-toggle-copy">
+            <span class="mf-template-toggle-label">Alert template</span>
+            <span class="mf-template-toggle-value">{{ selectedTemplateName }}</span>
+          </span>
+          <span class="mf-template-toggle-hint">
+            {{ templatesExpanded ? 'Close templates' : 'Choose a prebuilt starting point' }}
+          </span>
+          <svg class="mf-template-chevron" :class="{ open: templatesExpanded }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+
+        <div id="alert-template-drawer" class="mf-template-drawer" :aria-hidden="!templatesExpanded" :inert="!templatesExpanded">
+          <div class="mf-template-drawer-inner">
+            <div class="mf-template-content">
+              <div class="mf-template-heading">
+                <p class="mf-template-intro">Pick a starting point, then choose the service or labels it applies to.</p>
+                <button
+                  type="button"
+                  class="mf-blank-template"
+                  :class="{ active: selectedTemplate === 'blank' }"
+                  :aria-pressed="selectedTemplate === 'blank'"
+                  @click="applyBlankTemplate"
+                >
+                  Start blank
+                </button>
+              </div>
+              <div class="mf-template-groups" aria-label="Alert templates">
+                <section v-for="group in templateGroups" :key="group.id" class="mf-template-group">
+                  <header class="mf-template-group-header">
+                    <span>{{ group.label }}</span>
+                    <small>{{ group.description }}</small>
+                  </header>
+                  <button
+                    v-for="template in group.templates"
+                    :key="template.id"
+                    type="button"
+                    class="mf-template-option"
+                    :class="{ active: selectedTemplate === template.id }"
+                    :aria-pressed="selectedTemplate === template.id"
+                    @click="applyTemplate(template.id)"
+                  >
+                    <span class="mf-template-copy">
+                      <span class="mf-template-name">{{ template.name }}</span>
+                      <span class="mf-template-description">{{ template.description }}</span>
+                    </span>
+                    <span class="mf-template-check" aria-hidden="true">{{ selectedTemplate === template.id ? '✓' : '→' }}</span>
+                  </button>
+                </section>
+              </div>
+              <p class="mf-template-hint">Templates only fill the form. Nothing is saved until you review and create the alert.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ═══ Section 1: Type Selector ═══ -->
       <div class="mf-section mf-type-section">
         <div class="mf-section-label">Monitor type</div>
@@ -838,6 +1009,27 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="mf-field">
+            <label class="mf-label">Field filters</label>
+            <div class="mf-filters">
+              <div v-for="(filter, i) in logConfig.filters" :key="i" class="mf-filter-row">
+                <AutocompleteInput
+                  v-model="filter.field"
+                  :fetch-suggestions="fetchLogFields"
+                  :mono="true"
+                  placeholder="field"
+                />
+                <select v-model="filter.op" class="mf-select mf-filter-select" aria-label="Filter operator">
+                  <option value="=">=</option>
+                  <option value="!=">!=</option>
+                  <option value="LIKE">contains</option>
+                </select>
+                <input v-model="filter.value" class="mf-input mono mf-filter-value" placeholder="value" />
+                <button class="mf-filter-rm" title="Remove" @click="removeLogFilter(i)">&times;</button>
+              </div>
+              <button class="mf-link-btn" @click="addLogFilter">+ Add field filter</button>
+            </div>
+          </div>
+          <div class="mf-field">
             <label class="mf-label">Group by</label>
             <div class="mf-chips">
               <span v-for="(g, i) in logConfig.group_by" :key="g" class="mf-chip">
@@ -961,6 +1153,7 @@ onUnmounted(() => {
             placeholder="500"
             step="any"
           />
+          <span v-if="thresholdUnit" class="mf-threshold-unit">{{ thresholdUnit }}</span>
           <span class="mf-cond-text mf-cond-sep">Warning at</span>
           <input
             v-model.number="warningThreshold"
@@ -969,6 +1162,7 @@ onUnmounted(() => {
             placeholder="300"
             step="any"
           />
+          <span v-if="thresholdUnit" class="mf-threshold-unit">{{ thresholdUnit }}</span>
         </div>
         <div class="mf-conditions-row mf-conditions-recovery" :class="{ expanded: recoveryExpanded }">
           <button v-if="!recoveryExpanded" class="mf-link-btn" @click="recoveryExpanded = true">
