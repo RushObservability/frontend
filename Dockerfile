@@ -1,7 +1,7 @@
 # ── Build stage ──────────────────────────────────────────────────────────────
 # Chainguard node (-dev has npm + a shell for the RUN steps; this stage is
 # discarded, so its footprint doesn't affect the final image's CVE posture).
-FROM cgr.dev/chainguard/node@sha256:f819ce9bc54ff2a771a6849ec8453aaab9bb697873f3f6b91039ed07a3626748 AS builder
+FROM cgr.dev/chainguard/node@sha256:753a66014b1310b8f93c76d4cac41d039958b9a86dd44a245289d6cb85455582 AS builder
 # Chainguard node runs as non-root by default; the build writes to /app and the
 # npm cache, so run this (discarded) stage as root to avoid permission errors.
 USER root
