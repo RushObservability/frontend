@@ -75,15 +75,6 @@
 
 /* Data table */
 .table-wrap { overflow-x: auto; }
-.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.data-table th {
-  text-align: left; padding: 8px 12px;
-  border-bottom: 2px solid var(--border-default);
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
-  color: var(--text-secondary); font-weight: 500;
-}
-.data-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }
-.data-table tbody tr:hover { background: var(--bg-overlay); }
 .cell-name { font-size: 12px; color: var(--text-primary); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 

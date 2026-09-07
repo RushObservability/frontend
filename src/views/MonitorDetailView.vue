@@ -5,6 +5,7 @@ import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
 import { PanelCard, TablePanel, TimeSeriesPanel } from '../components/panels'
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal.vue'
+import DataTable from '../components/DataTable.vue'
 import type { Monitor, MonitorEvent, MonitorPreview } from '../types'
 
 const props = defineProps<{
@@ -372,7 +373,7 @@ function closeDeleteConfirm() {
           </template>
 
           <div class="detail-table-scroll">
-            <table class="groups-table">
+            <DataTable class="groups-table" bare>
               <thead>
                 <tr>
                   <th>Group</th>
@@ -390,7 +391,7 @@ function closeDeleteConfirm() {
                   </td>
                 </tr>
               </tbody>
-            </table>
+            </DataTable>
           </div>
         </TablePanel>
 
@@ -447,7 +448,7 @@ function closeDeleteConfirm() {
         empty-message="State changes will appear here after this alert first transitions."
       >
         <div class="detail-table-scroll">
-          <table class="events-table">
+          <DataTable class="events-table" bare>
             <thead>
               <tr>
                 <th>Time</th>
@@ -474,7 +475,7 @@ function closeDeleteConfirm() {
                 <td class="event-message-cell text-secondary">{{ ev.message || '-' }}</td>
               </tr>
             </tbody>
-          </table>
+          </DataTable>
         </div>
       </TablePanel>
     </template>
@@ -744,25 +745,6 @@ function closeDeleteConfirm() {
 }
 .groups-table {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.groups-table th {
-  text-align: left;
-  padding: var(--sp-2);
-  font-size: 10px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border-default);
-}
-.groups-table td {
-  padding: var(--sp-2);
-  border-bottom: 1px solid var(--border-subtle);
-}
-.groups-table tr:hover {
-  background: var(--bg-hover);
 }
 .group-key-cell {
   max-width: 0;
@@ -886,26 +868,6 @@ function closeDeleteConfirm() {
 /* ── Events table ── */
 .events-table {
   min-width: 760px;
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-}
-.events-table th {
-  text-align: left;
-  padding: var(--sp-2);
-  font-size: 10px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border-default);
-}
-.events-table td {
-  padding: var(--sp-1) var(--sp-2);
-  border-bottom: 1px solid var(--border-subtle);
-}
-.events-table tr:hover {
-  background: var(--bg-hover);
 }
 .event-message-cell {
   max-width: 300px;

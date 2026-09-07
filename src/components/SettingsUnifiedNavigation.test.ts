@@ -34,6 +34,13 @@ describe('unified Settings navigation', () => {
     expect(settingsViewSource).toContain("hash: `#integrations/${integration.key}`")
   })
 
+  it('shows enabled integrations as their own primary-navigation group', () => {
+    expect(appNavigationSource).toContain("group.id === 'integrations' && hasAppIntegrationChildren")
+    expect(appNavigationSource).toContain('v-for="integration in integrations"')
+    expect(appNavigationSource).toContain('appIntegrationActive')
+    expect(appNavigationSource).not.toContain('app-integration-links')
+  })
+
   it('switches to one mobile picker when the main sidebar becomes bottom navigation', () => {
     expect(settingsNavigationSource).toContain('v-if="showRail"')
     expect(settingsNavigationSource).toContain('@media (max-width: 760px)')

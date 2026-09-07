@@ -154,11 +154,8 @@
 .recommendation-action b { color: var(--amber); font-weight: 650; }
 
 .guide-table-wrap { overflow-x: auto; margin-top: 13px; border: 1px solid var(--border-default); border-radius: 5px; }
-.guide-table { width: 100%; border-collapse: collapse; min-width: 720px; }
-.guide-table th { background: var(--bg-elevated); color: var(--text-muted); font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: .1em; text-align: left; text-transform: uppercase; }
-.guide-table th, .guide-table td { border-bottom: 1px solid var(--border-subtle); padding: 11px 13px; vertical-align: top; }
-.guide-table tr:last-child td { border-bottom: 0; }
-.guide-table td { color: var(--text-secondary); font-size: 11px; line-height: 1.4; }
+.guide-table { min-width: 720px; }
+.guide-table td { line-height: 1.4; vertical-align: top; }
 .guide-table td:first-child { color: var(--text-primary); font-weight: 600; }
 .guide-table td:nth-child(2) { color: var(--amber); font-size: 10px; }
 

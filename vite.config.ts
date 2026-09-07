@@ -50,7 +50,7 @@ function runtimeConfigDev(): Plugin {
 export default defineConfig({
   plugins: [vue(), runtimeConfigDev()],
   test: {
-    // The Remotion demo is a separate npm project nested under web-ui. Exclude
+    // The Remotion demo is a separate npm project nested under frontend. Exclude
     // all dependency trees so Vitest never discovers their bundled test files.
     exclude: ['**/node_modules/**', '**/dist/**', 'tests/e2e/**'],
   },

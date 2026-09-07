@@ -1,7 +1,7 @@
 import type { Features } from './composables/useFeatures'
 import { frontendEdition } from './edition/manifest'
 
-export type NavigationGroupId = 'observe' | 'respond' | 'investigate' | 'control'
+export type NavigationGroupId = 'observe' | 'respond' | 'integrations' | 'investigate' | 'control'
 
 export interface NavigationItem {
   id: string
@@ -33,6 +33,7 @@ export interface NavigationContext {
 export const NAVIGATION_GROUPS: Array<{ id: NavigationGroupId; label: string }> = [
   { id: 'observe', label: 'Observe' },
   { id: 'respond', label: 'Respond' },
+  { id: 'integrations', label: 'Integrations' },
   { id: 'investigate', label: 'Investigate' },
   { id: 'control', label: 'Control' },
 ]
@@ -84,7 +85,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     routeNames: ['sre-agent', 'sre-agent-session', 'investigate'], feature: 'sre_agent', keywords: ['ai', 'troubleshoot', 'investigation'],
   },
   {
-    id: 'integrations', label: 'Integrations', path: '/integrations', icon: '↔', group: 'control',
+    id: 'integrations', label: 'Integrations', path: '/integrations', icon: '↔', group: 'integrations',
     routeNames: ['integrations', 'integration-page'], requiresIntegrations: true,
     keywords: ['postgresql', 'mysql', 'kubernetes', 'argocd'],
   },

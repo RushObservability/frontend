@@ -61,6 +61,7 @@ const panelProps = computed<Record<string, unknown>>(() => {
     ...base,
     buckets: props.data?.buckets || [],
     series: props.data?.series,
+    timeDomain: props.data?.time_domain,
     deploys: props.deploys || [],
     unit: props.unit || '',
   }

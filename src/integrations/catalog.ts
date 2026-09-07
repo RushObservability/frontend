@@ -93,3 +93,10 @@ export function availableAddons(
       : !!a.entitlement && hasAddonEntitlement(hasEntitlement, a.entitlement)),
   )
 }
+
+export const MAX_INTEGRATION_NAV_CHILDREN = 5
+
+/** Keep the primary navigation compact until a larger integration picker exists. */
+export function integrationNavigationChildren(addons: AddonDef[]): AddonDef[] {
+  return addons.length <= MAX_INTEGRATION_NAV_CHILDREN ? addons : []
+}

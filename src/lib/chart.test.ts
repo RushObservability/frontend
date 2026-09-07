@@ -6,8 +6,27 @@ import {
   straightAreaPath,
   niceMax,
   fmtAxis,
+  resolveTimeDomain,
   type Pt,
 } from './chart'
+
+describe('resolveTimeDomain', () => {
+  it('keeps the requested lookback when samples start later', () => {
+    const day = 86_400
+    expect(resolveTimeDomain(6 * day, 7 * day, { from: 0, to: 7 * day })).toEqual({
+      from: 0,
+      to: 7 * day,
+    })
+  })
+
+  it('falls back to sample bounds without a requested window', () => {
+    expect(resolveTimeDomain(100, 200)).toEqual({ from: 100, to: 200 })
+  })
+
+  it('gives a single sample a non-zero domain', () => {
+    expect(resolveTimeDomain(100, 100)).toEqual({ from: 100, to: 101 })
+  })
+})
 
 describe('straightLinePath', () => {
   it('returns empty for no points', () => {

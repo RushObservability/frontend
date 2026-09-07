@@ -124,32 +124,6 @@
   overflow-x: auto;
 }
 
-.usage-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.usage-table th {
-  text-align: left;
-  padding: 8px 12px;
-  border-bottom: 2px solid var(--border-default);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.usage-table td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-default);
-}
-
-.usage-table tbody tr:hover {
-  background: var(--bg-overlay);
-}
-
 .signal-name {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 12px;
@@ -316,29 +290,6 @@
   font-weight: 500;
 }
 
-/* Breakdown table */
-.breakdown-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.breakdown-table th {
-  text-align: left;
-  padding: 6px 10px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-secondary);
-  font-weight: 500;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.breakdown-table td {
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
 .label-key {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 12px;
@@ -424,11 +375,6 @@
 .timeline-labels { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 9px; }
 .tenant-ranking-section { margin-top: 16px; }
 .tenant-ranking-table-wrap { overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: var(--r-sm); }
-.tenant-ranking-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.tenant-ranking-table th { padding: 9px 11px; color: var(--text-muted); background: var(--bg-raised); border-bottom: 1px solid var(--border-default); font: 700 9px var(--font-mono); letter-spacing: .08em; text-align: left; text-transform: uppercase; }
-.tenant-ranking-table td { padding: 10px 11px; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
-.tenant-ranking-table tr:last-child td { border-bottom: 0; }
-.tenant-ranking-table tbody tr:hover { background: var(--bg-hover); }
 .tenant-ranking-table .num { text-align: right; }
 .tenant-name-cell { color: var(--text-primary); font: 600 11px var(--font-mono); }
 .tenant-signal-mix { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -556,9 +502,7 @@
 .tier-dot-local { background: var(--amber); }
 .tier-dot-object { background: #5b8dd9; }
 .storage-table-wrap, .partition-table-wrap { overflow-x: auto; }
-.storage-table { width: 100%; min-width: 680px; border-collapse: collapse; }
-.storage-table th { padding: 9px 12px; border-bottom: 1px solid var(--border-default); background: var(--bg-overlay); color: var(--text-muted); font: 700 9px var(--font-mono); letter-spacing: .08em; text-align: left; text-transform: uppercase; }
-.storage-table td { padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 10px; }
+.storage-table { min-width: 680px; }
 .storage-table td:first-child { color: var(--text-primary); }
 .storage-total td { border-bottom: 0; color: var(--text-primary); font-weight: 650; }
 .partition-toggle { display: flex; align-items: center; gap: 7px; width: 100%; border-top: 1px solid var(--border-subtle); padding: 11px 14px; color: var(--text-secondary); cursor: pointer; font-size: 10px; text-align: left; }
@@ -868,10 +812,6 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-sm);
   background: var(--bg-raised);
-}
-
-.usage-section .usage-table th {
-  background: var(--bg-overlay);
 }
 
 .usage-section .empty-state {

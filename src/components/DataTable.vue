@@ -4,8 +4,9 @@ import EmptyState from './EmptyState.vue'
 /**
  * Shared operational table for catalog and integration views.
  *
- * Use cell-{column.key} slots when a value needs domain-specific formatting;
- * the default renderer keeps plain values useful without forcing a schema.
+ * Prefer columns/rows with cell-{column.key} slots for standard result sets.
+ * A default slot may provide thead/tbody when a table needs irregular rows,
+ * nested details, or another shape that cannot be expressed as flat columns.
  */
 export interface DataTableColumn {
   key: string
@@ -19,8 +20,8 @@ export interface DataTableColumn {
 type DataTableRow = Record<string, unknown>
 
 const props = withDefaults(defineProps<{
-  columns: DataTableColumn[]
-  rows: DataTableRow[]
+  columns?: DataTableColumn[]
+  rows?: DataTableRow[]
   rowKey?: string | ((row: DataTableRow, index: number) => string | number)
   loading?: boolean
   loadingRows?: number
@@ -33,6 +34,8 @@ const props = withDefaults(defineProps<{
   /** Render without the default card shell when embedded in another panel. */
   bare?: boolean
 }>(), {
+  columns: () => [],
+  rows: () => [],
   rowKey: 'id',
   loading: false,
   loadingRows: 5,
@@ -94,70 +97,73 @@ function rowClassFor(row: DataTableRow, index: number): string | undefined {
 <template>
   <div :class="['data-table-wrap', { card: !bare }]">
     <table class="data-table">
-      <thead>
-        <tr>
-          <th
-            v-for="column in columns"
-            :key="column.key"
-            :class="[
-              column.headerClass,
-              column.align ? `data-table-col-${column.align}` : '',
-              { sortable: column.sortable },
-            ]"
-            :aria-sort="ariaSort(column)"
-          >
-            <button
-              v-if="column.sortable"
-              type="button"
-              class="data-table-sort-button"
-              @click="emit('sort', column.key)"
+      <slot v-if="$slots.default" />
+      <template v-else>
+        <thead>
+          <tr>
+            <th
+              v-for="column in columns"
+              :key="column.key"
+              :class="[
+                column.headerClass,
+                column.align ? `data-table-col-${column.align}` : '',
+                { sortable: column.sortable },
+              ]"
+              :aria-sort="ariaSort(column)"
             >
-              <span>{{ column.label }}</span>
-              <span class="data-table-sort-indicator" aria-hidden="true">{{ sortIndicator(column) }}</span>
-            </button>
-            <span v-else>{{ column.label }}</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <template v-if="loading">
-          <tr v-for="i in loadingRows" :key="`loading-${i}`" class="data-table-loading-row" aria-hidden="true">
-            <td v-for="column in columns" :key="column.key" :class="[cellClassFor(column), column.align ? `data-table-col-${column.align}` : '']">
-              <span class="data-table-placeholder"></span>
-            </td>
+              <button
+                v-if="column.sortable"
+                type="button"
+                class="data-table-sort-button"
+                @click="emit('sort', column.key)"
+              >
+                <span>{{ column.label }}</span>
+                <span class="data-table-sort-indicator" aria-hidden="true">{{ sortIndicator(column) }}</span>
+              </button>
+              <span v-else>{{ column.label }}</span>
+            </th>
           </tr>
-        </template>
-        <template v-else-if="rows.length">
-          <template v-for="(row, index) in rows" :key="rowId(row, index)">
-            <tr
-              :class="[rowClassFor(row, index), { 'data-table-row-clickable': clickableRows }]"
-              :tabindex="clickableRows ? 0 : undefined"
-              :aria-expanded="clickableRows && expandedRowKey !== null ? isExpanded(row, index) : undefined"
-              @click="clickableRows && emit('rowClick', row, index)"
-              @keydown.enter="clickableRows && emit('rowClick', row, index)"
-              @keydown.space.prevent="clickableRows && emit('rowClick', row, index)"
-            >
-              <td v-for="column in columns" :key="column.key" :class="[cellClassFor(column, row), column.align ? `data-table-col-${column.align}` : '']">
-                <slot :name="`cell-${column.key}`" :row="row" :value="valueFor(row, column)" :column="column">
-                  {{ defaultValue(valueFor(row, column)) }}
-                </slot>
-              </td>
-            </tr>
-            <tr v-if="isExpanded(row, index)" class="data-table-detail-row">
-              <td :colspan="columns.length">
-                <slot name="row-detail" :row="row" :index="index" />
+        </thead>
+        <tbody>
+          <template v-if="loading">
+            <tr v-for="i in loadingRows" :key="`loading-${i}`" class="data-table-loading-row" aria-hidden="true">
+              <td v-for="column in columns" :key="column.key" :class="[cellClassFor(column), column.align ? `data-table-col-${column.align}` : '']">
+                <span class="data-table-placeholder"></span>
               </td>
             </tr>
           </template>
-        </template>
-        <tr v-else>
-          <td :colspan="columns.length" class="data-table-empty">
-            <slot name="empty">
-              <EmptyState :title="emptyLabel" icon="◇" compact />
-            </slot>
-          </td>
-        </tr>
-      </tbody>
+          <template v-else-if="rows.length">
+            <template v-for="(row, index) in rows" :key="rowId(row, index)">
+              <tr
+                :class="[rowClassFor(row, index), { 'data-table-row-clickable': clickableRows }]"
+                :tabindex="clickableRows ? 0 : undefined"
+                :aria-expanded="clickableRows && expandedRowKey !== null ? isExpanded(row, index) : undefined"
+                @click="clickableRows && emit('rowClick', row, index)"
+                @keydown.enter="clickableRows && emit('rowClick', row, index)"
+                @keydown.space.prevent="clickableRows && emit('rowClick', row, index)"
+              >
+                <td v-for="column in columns" :key="column.key" :class="[cellClassFor(column, row), column.align ? `data-table-col-${column.align}` : '']">
+                  <slot :name="`cell-${column.key}`" :row="row" :value="valueFor(row, column)" :column="column">
+                    {{ defaultValue(valueFor(row, column)) }}
+                  </slot>
+                </td>
+              </tr>
+              <tr v-if="isExpanded(row, index)" class="data-table-detail-row">
+                <td :colspan="columns.length">
+                  <slot name="row-detail" :row="row" :index="index" />
+                </td>
+              </tr>
+            </template>
+          </template>
+          <tr v-else>
+            <td :colspan="columns.length" class="data-table-empty">
+              <slot name="empty">
+                <EmptyState :title="emptyLabel" icon="◇" compact />
+              </slot>
+            </td>
+          </tr>
+        </tbody>
+      </template>
     </table>
   </div>
 </template>

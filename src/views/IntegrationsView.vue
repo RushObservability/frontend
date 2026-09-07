@@ -40,7 +40,28 @@ const activePage = computed(() => {
   if (!a) return undefined
   return a.pages.find((p) => p.key === pageKey.value) ?? a.pages[0]
 })
-const condensedNavigation = computed(() => (addon.value?.pages.length ?? 0) > 7)
+const expandedNavigation = computed(() => addon.value?.key === 'postgresql')
+const expandedGroups = computed(() => {
+  if (!addon.value || !expandedNavigation.value) return []
+  const preferredOrder = ['Core', 'Workload', 'Storage', 'Operations', 'Posture']
+  const groups = new Map<string, typeof addon.value.pages>()
+  for (const page of addon.value.pages) {
+    const group = page.group || 'More'
+    const pages = groups.get(group) ?? []
+    pages.push(page)
+    groups.set(group, pages)
+  }
+  return Array.from(groups, ([label, pages]) => ({
+    label,
+    pages,
+    key: label.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+  })).sort((a, b) => {
+    const aIndex = preferredOrder.indexOf(a.label)
+    const bIndex = preferredOrder.indexOf(b.label)
+    return (aIndex < 0 ? preferredOrder.length : aIndex) - (bIndex < 0 ? preferredOrder.length : bIndex)
+  })
+})
+const condensedNavigation = computed(() => !expandedNavigation.value && (addon.value?.pages.length ?? 0) > 7)
 const primaryPages = computed(() => {
   if (!addon.value || !condensedNavigation.value) return addon.value?.pages ?? []
   const visible = new Set(['overview', 'checks', 'queries', 'tables'])
@@ -131,12 +152,6 @@ function selectDb(value: string) {
   router.replace({ params: route.params, query: { ...route.query, host: host || undefined, db: db || undefined } })
 }
 
-function go(addonK: string, pageK?: string) {
-  const a = getAddon(addonK)
-  const page = pageK || a?.pages[0]?.key || 'overview'
-  router.push({ name: 'integration-page', params: { addon: addonK, page } })
-}
-
 // ── Default routing: land on the first entitled add-on / first page ──
 function ensureRoute() {
   if (!loaded.value) return
@@ -164,31 +179,14 @@ watch(loaded, ensureRoute)
 </script>
 
 <template>
-  <div class="integrations-shell">
-    <!-- Left rail: entitled add-ons -->
-    <aside class="integrations-rail" aria-label="Add-ons">
-      <div class="rail-brand">Integrations</div>
-      <div class="rail-group">
-        <button
-          v-for="a in addons"
-          :key="a.key"
-          :class="['rail-item', { active: a.key === addonKey }]"
-          @click="go(a.key)"
-        >
-          {{ a.label }}
-        </button>
-        <div v-if="!addons.length" class="rail-empty">
-          No add-ons entitled. Add an entitlement to your license to enable one.
-        </div>
-      </div>
-    </aside>
-
-    <!-- Main pane -->
+  <div :class="['integrations-shell', { 'integration-postgresql': addonKey === 'postgresql' }]">
     <section class="integrations-main">
       <template v-if="addon && available">
         <header class="integrations-head">
           <div class="head-left">
+            <div v-if="expandedNavigation" class="integration-kicker">Database intelligence</div>
             <h1 class="content-title">{{ addon.label }}</h1>
+            <p v-if="expandedNavigation" class="integration-scope">Workload, storage, and operational posture</p>
           </div>
           <div class="head-selects">
             <div v-if="servers.length > 1" class="server-select">
@@ -207,8 +205,29 @@ watch(loaded, ensureRoute)
           </div>
         </header>
 
-        <!-- Page sub-nav -->
-        <nav class="page-tabs" role="tablist" :aria-label="addon.label + ' views'">
+        <!-- PostgreSQL has enough horizontal room to expose its complete diagnostic catalog. -->
+        <nav v-if="expandedNavigation" class="page-tab-groups" :aria-label="addon.label + ' views'">
+          <section
+            v-for="group in expandedGroups"
+            :key="group.label"
+            :class="['page-tab-group', `page-tab-group-${group.key}`]"
+          >
+            <h2 class="page-tab-group-label">{{ group.label }}</h2>
+            <div class="page-tab-group-links" role="tablist" :aria-label="group.label + ' views'">
+              <router-link
+                v-for="p in group.pages"
+                :key="p.key"
+                :to="{ name: 'integration-page', params: { addon: addon.key, page: p.key }, query: route.query }"
+                :class="['page-tab', { active: p.key === activePage?.key }]"
+                role="tab"
+                :aria-selected="p.key === activePage?.key"
+              >{{ p.label }}</router-link>
+            </div>
+          </section>
+        </nav>
+
+        <!-- Compact navigation remains available for integrations with less room. -->
+        <nav v-else class="page-tabs" role="tablist" :aria-label="addon.label + ' views'">
           <router-link
             v-for="p in primaryPages"
             :key="p.key"

@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
+import DataTable from '../components/DataTable.vue'
 import type { Dashboard, DashboardTemplate, DashboardExport } from '../types'
 
 const router = useRouter()
@@ -409,7 +410,7 @@ function formatDate(ts: string): string {
     </div>
 
     <div v-else-if="sortedDashboards.length" class="dashboard-table-wrap">
-      <table class="dashboard-table">
+      <DataTable class="dashboard-table" bare>
         <thead>
           <tr>
             <th class="dt-col-name sortable" @click="setSort('name')">Dashboard<span class="dt-sort">{{ sortInd('name') }}</span></th>
@@ -455,7 +456,7 @@ function formatDate(ts: string): string {
             </td>
           </tr>
         </tbody>
-      </table>
+      </DataTable>
     </div>
 
     <div v-else-if="dashboards.length" class="no-results">

@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import TimePicker from '../components/TimePicker.vue'
+import DataTable from '../components/DataTable.vue'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import type {
   StatsResponse, TableStorage, UsageResponse,
@@ -579,7 +580,7 @@ const localPct = computed(() => {
             <span class="badge-count badge-muted" v-if="unusedList.length > 0">{{ unusedList.length }} unused</span>
           </div>
           <div class="table-wrap card">
-            <table class="data-table cardinality-table">
+            <DataTable class="cardinality-table" bare>
               <thead><tr><th>Metric Name</th><th class="num">Series</th><th class="num">Labels</th><th class="num">% of Total</th></tr></thead>
               <tbody>
                 <tr v-for="(row, i) in cardinalityList" :key="i" class="card-row" @click="goToMetric(row.metric_name)">
@@ -592,7 +593,7 @@ const localPct = computed(() => {
                   <td class="num mono"><span :class="cardinalityLevel(row.series_count)">{{ cardinalityPct(row.series_count).toFixed(1) }}%</span></td>
                 </tr>
               </tbody>
-            </table>
+            </DataTable>
           </div>
         </section>
 
@@ -603,7 +604,7 @@ const localPct = computed(() => {
             <span class="badge-count badge-muted">{{ filteredUsage.length }}</span>
           </div>
           <div class="table-wrap card">
-            <table class="data-table">
+            <DataTable bare>
               <thead><tr><th>Signal Name</th><th>Source</th><th>Last Queried</th><th class="num">Queries</th></tr></thead>
               <tbody>
                 <tr v-for="(row, i) in filteredUsage" :key="i">
@@ -613,7 +614,7 @@ const localPct = computed(() => {
                   <td class="num mono">{{ row.query_count }}</td>
                 </tr>
               </tbody>
-            </table>
+            </DataTable>
           </div>
         </section>
 
@@ -625,10 +626,10 @@ const localPct = computed(() => {
           </div>
           <p class="section-desc">Collected but not queried in the last {{ Math.max(1, Math.ceil(selectedPreset / 1440)) }} days.</p>
           <div class="table-wrap card">
-            <table class="data-table">
+            <DataTable bare>
               <thead><tr><th>Metric Name</th></tr></thead>
               <tbody><tr v-for="(row, i) in unusedList" :key="i"><td class="mono cell-name cell-unused">{{ row.metric_name }}</td></tr></tbody>
-            </table>
+            </DataTable>
           </div>
         </section>
 
@@ -648,7 +649,7 @@ const localPct = computed(() => {
             <span class="badge-count badge-muted">{{ filteredUsage.length }}</span>
           </div>
           <div class="table-wrap card">
-            <table class="data-table">
+            <DataTable bare>
               <thead><tr><th>Signal Name</th><th>Source</th><th>Last Queried</th><th class="num">Queries</th></tr></thead>
               <tbody>
                 <tr v-for="(row, i) in filteredUsage" :key="i">
@@ -658,7 +659,7 @@ const localPct = computed(() => {
                   <td class="num mono">{{ row.query_count }}</td>
                 </tr>
               </tbody>
-            </table>
+            </DataTable>
           </div>
         </section>
 
@@ -678,7 +679,7 @@ const localPct = computed(() => {
             <span class="badge-count badge-muted">{{ filteredUsage.length }}</span>
           </div>
           <div class="table-wrap card">
-            <table class="data-table">
+            <DataTable bare>
               <thead><tr><th>Signal Name</th><th>Source</th><th>Last Queried</th><th class="num">Queries</th></tr></thead>
               <tbody>
                 <tr v-for="(row, i) in filteredUsage" :key="i">
@@ -688,7 +689,7 @@ const localPct = computed(() => {
                   <td class="num mono">{{ row.query_count }}</td>
                 </tr>
               </tbody>
-            </table>
+            </DataTable>
           </div>
         </section>
 

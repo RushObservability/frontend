@@ -17,16 +17,20 @@ export function useWidgetData() {
     const queries = effectiveQueries(qc)
     const visibleQueries = queries.filter(query => !query.hidden)
     const rangeMin = rangeMinutes ?? qc.time_range_minutes ?? 60
+    const to = new Date()
+    const from = new Date(to.getTime() - rangeMin * 60 * 1000)
+    const timeRange = { from: from.toISOString(), to: to.toISOString() }
+    const timeDomain = { from: from.getTime() / 1000, to: to.getTime() / 1000 }
 
     if (!visibleQueries.length) {
-      return { type: widget.widget_type, series: [] }
+      return { type: widget.widget_type, series: [], time_domain: timeDomain }
     }
 
     // Time-series panels are the multi-source surface: each query is executed
     // independently, then normalized into a common [unixSec, value] series model.
     if (widget.widget_type === 'timeseries' && qc.queries?.length) {
       const settled = await Promise.allSettled(
-        visibleQueries.map(query => fetchQueryData('timeseries', query, varValues, rangeMin, signal)),
+        visibleQueries.map(query => fetchQueryData('timeseries', query, varValues, timeRange, signal)),
       )
       const series: NonNullable<WidgetData['series']> = []
       const queryErrors: NonNullable<WidgetData['query_errors']> = []
@@ -65,30 +69,27 @@ export function useWidgetData() {
       if (!series.length && queryErrors.length) {
         throw new Error(queryErrors.map(error => `${error.ref_id}: ${error.message}`).join(' · '))
       }
-      return { type: 'timeseries', series, query_errors: queryErrors }
+      return { type: 'timeseries', series, query_errors: queryErrors, time_domain: timeDomain }
     }
 
     // Stat/bar/table panels use the first visible query for now. The editor
     // communicates that multiple overlaid queries are a time-series feature.
-    return fetchQueryData(widget.widget_type, visibleQueries[0]!, varValues, rangeMin, signal)
+    const data = await fetchQueryData(widget.widget_type, visibleQueries[0]!, varValues, timeRange, signal)
+    return widget.widget_type === 'timeseries' ? { ...data, time_domain: timeDomain } : data
   }
 
   async function fetchQueryData(
     widgetType: WidgetType,
     query: WidgetPanelQuery,
     varValues: Record<string, string>,
-    rangeMinutes: number,
+    timeRange: { from: string; to: string },
     signal?: AbortSignal,
   ): Promise<WidgetData> {
-    const now = new Date()
-    const from = new Date(now.getTime() - rangeMinutes * 60 * 1000)
-    const timeRange = { from: from.toISOString(), to: now.toISOString() }
-
     if (query.source === 'metrics') {
       const promql = substitute(query.promql || '', varValues, '.*')
       if (!promql.trim()) return { type: widgetType, series: [] }
-      const startSec = Math.floor(from.getTime() / 1000)
-      const endSec = Math.floor(now.getTime() / 1000)
+      const startSec = Math.floor(new Date(timeRange.from).getTime() / 1000)
+      const endSec = Math.floor(new Date(timeRange.to).getTime() / 1000)
       const step = Math.max(1, Math.floor((endSec - startSec) / 250))
       const res = await api.promQueryRange(promql, startSec, endSec, step, 'dashboard', signal)
       const results = res.result || []

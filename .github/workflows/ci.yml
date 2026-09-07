@@ -47,14 +47,14 @@ jobs:
         run: npm run test:e2e
 
       - name: Build production security-header image
-        run: docker build --platform linux/amd64 -t rush-web-ui:csp-test .
+        run: docker build --platform linux/amd64 -t rush-frontend:csp-test .
 
       - name: Run production CSP route matrix
         run: |
-          docker run --rm -d --name rush-web-ui-csp-test \
+          docker run --rm -d --name rush-frontend-csp-test \
             --read-only --tmpfs /tmp:rw,noexec,nosuid,size=32m \
-            -p 127.0.0.1:4174:8080 rush-web-ui:csp-test
-          trap 'docker stop rush-web-ui-csp-test >/dev/null 2>&1 || true' EXIT
+            -p 127.0.0.1:4174:8080 rush-frontend:csp-test
+          trap 'docker stop rush-frontend-csp-test >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 20); do
             curl --fail --silent http://127.0.0.1:4174/ >/dev/null && break
             sleep 1

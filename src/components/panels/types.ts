@@ -1,4 +1,4 @@
-import type { CountBucket, DeployMarker, WidgetQueryConfig } from '../../types'
+import type { CountBucket, DeployMarker, TimeDomain, WidgetQueryConfig } from '../../types'
 import type { TableWidgetColumn } from '../widgets/table'
 
 export type PanelVariant = 'chart' | 'stat' | 'bar' | 'table'
@@ -30,6 +30,7 @@ export interface TimeSeriesPanelSeries {
 export interface TimeSeriesPanelProps extends PanelFrameProps {
   buckets?: CountBucket[]
   series?: TimeSeriesPanelSeries[]
+  timeDomain?: TimeDomain
   deploys?: DeployMarker[]
   thresholds?: Array<{ value: number; color: string; label: string }>
   /** Keep the chart canvas visible without samples, useful while configuring reference lines. */

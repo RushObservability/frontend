@@ -5,7 +5,7 @@ import { useAuth } from './composables/useAuth'
 import { useTenant } from './composables/useTenant'
 import { useFeatures } from './composables/useFeatures'
 import { useLicense } from './composables/useLicense'
-import { availableAddons } from './integrations/catalog'
+import { availableAddons, integrationNavigationChildren } from './integrations/catalog'
 import { isAddonEnabled } from './composables/useIntegrationEnabled'
 import { onSessionExpired } from './composables/authSession'
 import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from './composables/storageScope'
@@ -43,7 +43,9 @@ function toggleTheme() {
 const { features, loadFeatures } = useFeatures()
 const { loadLicense, hasEntitlement } = useLicense()
 const featureOn = (k: string) => !!(features.value as Record<string, boolean | undefined>)[k]
-const hasIntegrations = computed(() => availableAddons(hasEntitlement, featureOn, isAddonEnabled, isAdmin.value).length > 0)
+const enabledIntegrations = computed(() => availableAddons(hasEntitlement, featureOn, isAddonEnabled, isAdmin.value))
+const integrationNavigation = computed(() => integrationNavigationChildren(enabledIntegrations.value))
+const hasIntegrations = computed(() => enabledIntegrations.value.length > 0)
 const navigationGroups = computed(() => visibleNavigationGroups({
   isAdmin: isAdmin.value,
   features: features.value,
@@ -247,7 +249,7 @@ watch(isAuthenticated, async (authed) => {
       </div>
     </header>
     <div v-if="!usesBareLayout" class="app-frame">
-      <AppNavigation :groups="navigationGroups" />
+      <AppNavigation :groups="navigationGroups" :integrations="integrationNavigation" />
       <main id="main-content" class="main" tabindex="-1">
         <router-view />
       </main>
@@ -283,6 +285,9 @@ watch(isAuthenticated, async (authed) => {
   --text-secondary: #8b94aa;
   --text-muted:     #6b7490;
   --text-inverse:   #060710;
+  /* Alias: integration views label their dimmest text "tertiary". Without this
+     the var is undefined and those labels inherit full-strength body colour. */
+  --text-tertiary:  var(--text-muted);
 
   /* ── Accent ── */
   --accent:       #3b82f6;
@@ -321,6 +326,13 @@ watch(isAuthenticated, async (authed) => {
   --text-sm: 12px;
   --text-md: 14px;
   --text-lg: 18px;
+
+  /* ── Operational tables ── */
+  --table-head-height: 28px;
+  --table-row-height: 30px;
+  --table-cell-padding: 10px;
+  --table-head-size: 10px;
+  --table-row-size: 11px;
 
   /* ── Spacing ── */
   --sp-1: 4px;
@@ -364,6 +376,7 @@ watch(isAuthenticated, async (authed) => {
   --text-secondary: #474e63;
   --text-muted:     #636c80;
   --text-inverse:   #ffffff;
+  --text-tertiary:  var(--text-muted);
 
   /* ── Accent ── */
   --accent:       #2563eb;

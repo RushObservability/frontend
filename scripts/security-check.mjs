@@ -136,7 +136,7 @@ try {
     fail('Helm frontend nginx config must include the image security policy without duplicating CSP')
   }
 } catch {
-  // Standalone web-ui checkout: Helm owns the mirror assertion in its CI.
+  // Standalone frontend checkout: Helm owns the mirror assertion in its CI.
 }
 
 // Scan tracked source/docs for credential formats that should never be

@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import type { RumVitalsSummary, RumPageStats, RumErrorGroup, RumSessionSummary, RumRecord, Filter } from '../types'
 import TimePicker from '../components/TimePicker.vue'
+import DataTable from '../components/DataTable.vue'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const props = defineProps<{ appName: string }>()
@@ -524,7 +525,7 @@ watch(selectedPreset, () => {
             </div>
             <span class="panel-count">{{ sessions.length }} shown</span>
           </div>
-          <table class="rum-table" v-if="sessions.length">
+          <DataTable v-if="sessions.length" class="rum-table" bare>
             <thead>
               <tr>
                 <th>Session</th>
@@ -550,7 +551,7 @@ watch(selectedPreset, () => {
                 <td class="num">{{ s.duration_s.toFixed(1) }}s</td>
               </tr>
             </tbody>
-          </table>
+          </DataTable>
           <div v-else class="empty-section muted">No sessions in this period.</div>
         </div>
       </div>
@@ -566,7 +567,7 @@ watch(selectedPreset, () => {
             </div>
             <span class="panel-count">{{ pages.length }} routes</span>
           </div>
-          <table class="rum-table" v-if="pages.length">
+          <DataTable v-if="pages.length" class="rum-table" bare>
             <thead>
               <tr>
                 <th>Page</th>
@@ -585,7 +586,7 @@ watch(selectedPreset, () => {
                 <td class="num" :class="{ 'has-errors': p.error_count > 0 }">{{ p.error_count }}</td>
               </tr>
             </tbody>
-          </table>
+          </DataTable>
           <div v-else class="empty-section muted">No page data.</div>
         </div>
 
@@ -598,7 +599,7 @@ watch(selectedPreset, () => {
             </div>
             <span class="panel-count panel-count-error">{{ totalErrors }} total</span>
           </div>
-          <table class="rum-table" v-if="errors.length">
+          <DataTable v-if="errors.length" class="rum-table" bare>
             <thead>
               <tr>
                 <th>Message</th>
@@ -615,7 +616,7 @@ watch(selectedPreset, () => {
                 <td class="mono">{{ e.ErrorType || '\u2014' }}</td>
               </tr>
             </tbody>
-          </table>
+          </DataTable>
           <div v-else class="empty-section muted">No errors in this period.</div>
         </div>
       </div>
@@ -694,7 +695,7 @@ watch(selectedPreset, () => {
                   <div class="sp-info-grid">
                     <div class="sp-info-col">
                       <div class="sp-info-section-title">Environment</div>
-                      <table class="sp-info-table">
+                      <DataTable class="sp-info-table" bare>
                         <tr><td class="sp-info-k">Browser</td><td class="sp-info-v">{{ sessionInfo.browser }}</td></tr>
                         <tr><td class="sp-info-k">OS</td><td class="sp-info-v">{{ sessionInfo.os }}</td></tr>
                         <tr><td class="sp-info-k">Device</td><td class="sp-info-v">{{ sessionInfo.device }}</td></tr>
@@ -702,7 +703,7 @@ watch(selectedPreset, () => {
                         <tr><td class="sp-info-k">Env</td><td class="sp-info-v">{{ sessionInfo.environment }}</td></tr>
                         <tr><td class="sp-info-k">App Version</td><td class="sp-info-v mono">{{ sessionInfo.appVersion }}</td></tr>
                         <tr v-if="sessionInfo.referrer !== '\u2014'"><td class="sp-info-k">Referrer</td><td class="sp-info-v mono">{{ truncate(sessionInfo.referrer, 50) }}</td></tr>
-                      </table>
+                      </DataTable>
                     </div>
                     <div class="sp-info-col">
                       <div class="sp-info-section-title">Visited Pages</div>
@@ -735,7 +736,7 @@ watch(selectedPreset, () => {
                   <span class="sp-events-count">{{ filteredSessionEvents.length }} shown<span v-if="sessionErrorCount"> · {{ sessionErrorCount }} errors</span></span>
                 </div>
 
-                <table v-if="filteredSessionEvents.length" class="sp-table">
+                <DataTable v-if="filteredSessionEvents.length" class="sp-table" bare>
                   <thead>
                     <tr>
                       <th class="sp-th-time">Time</th>
@@ -807,7 +808,7 @@ watch(selectedPreset, () => {
                       </tr>
                     </template>
                   </tbody>
-                </table>
+                </DataTable>
                 <!-- Pagination -->
                 <div v-if="sessionEventsTotalPages > 1" class="sp-pagination">
                   <button class="sp-page-btn" :disabled="sessionEventsPage <= 1" @click="sessionEventsPage--">&laquo; Prev</button>

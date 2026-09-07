@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { catalog, getAddon, entitledAddons, availableAddons, type AddonDef } from './catalog'
+import { catalog, getAddon, entitledAddons, availableAddons, integrationNavigationChildren, type AddonDef } from './catalog'
 
 describe('getAddon', () => {
   it('looks up an add-on by key', () => {
@@ -84,5 +84,23 @@ describe('availableAddons', () => {
     } finally {
       catalog.pop()
     }
+  })
+})
+
+describe('integrationNavigationChildren', () => {
+  const addons = Array.from({ length: 6 }, (_, index): AddonDef => ({
+    key: `integration-${index}`,
+    label: `Integration ${index}`,
+    icon: 'I',
+    free: true,
+    pages: [{ key: 'overview', label: 'Overview', component: {} }],
+  }))
+
+  it('lists up to five enabled integrations below the navigation parent', () => {
+    expect(integrationNavigationChildren(addons.slice(0, 5))).toHaveLength(5)
+  })
+
+  it('keeps only the parent destination when more than five are enabled', () => {
+    expect(integrationNavigationChildren(addons)).toEqual([])
   })
 })

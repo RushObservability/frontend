@@ -7,7 +7,7 @@ install:              ## Install dependencies
 
 ensure-deps:          ## Repair/install dependencies when the local install is incomplete
 	@if [ ! -f node_modules/vite/bin/vite.js ]; then \
-		echo "web-ui dependencies are missing or incomplete; running npm install..."; \
+		echo "frontend dependencies are missing or incomplete; running npm install..."; \
 		npm install; \
 	fi
 
@@ -42,9 +42,9 @@ release:               ## Open a version-bump PR: make release VERSION=0.1.13
 ## Docker
 
 docker:               ## Build Docker image
-	docker build -t wide-web-ui:latest .
+	docker build -t wide-frontend:latest .
 
-up:                   ## Run web-ui in Docker (nginx on :5180, proxies to host query-api)
+up:                   ## Run frontend in Docker (nginx on :5180, proxies to host query-api)
 	docker compose up -d --build
 
 down:                 ## Stop Docker services

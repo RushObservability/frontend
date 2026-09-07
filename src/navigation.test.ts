@@ -29,6 +29,11 @@ describe('visibleNavigationGroups', () => {
     expect(ids).toContain('sre-agent')
     expect(ids).toContain('integrations')
     expect(ids).not.toContain('rum')
+    expect(visibleNavigationGroups({
+      isAdmin: true,
+      features: { rum: false, sre_agent: true },
+      hasIntegrations: true,
+    }).map(group => group.id)).toEqual(['observe', 'respond', 'integrations', 'investigate', 'control'])
   })
 })
 
@@ -42,4 +47,3 @@ describe('navigationItemIsActive', () => {
     expect(navigationItemIsActive(services, 'alerts')).toBe(false)
   })
 })
-

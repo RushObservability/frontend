@@ -3,10 +3,12 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { navigationItemIsActive, type NavigationGroup, type NavigationItem } from '../navigation'
 import { useModalFocus } from '../composables/useModalFocus'
+import type { AddonDef } from '../integrations/types'
 import { SETTINGS_INTEGRATIONS, SETTINGS_TAB_GROUPS, type SettingsTabId } from '../views/settings/navigation'
 
 const props = defineProps<{
   groups: NavigationGroup[]
+  integrations: AddonDef[]
 }>()
 
 const route = useRoute()
@@ -14,6 +16,7 @@ const drawerOpen = ref(false)
 const drawerRef = ref<HTMLElement | null>(null)
 const appMenuOpen = ref(false)
 const settingsIntegrationsOpen = ref(false)
+const hasAppIntegrationChildren = computed(() => props.integrations.length > 0)
 const mobilePrimaryItems = computed(() => props.groups.flatMap(group => group.items).filter(item => item.mobilePrimary))
 const settingsMode = computed(() => route.name === 'settings')
 const nonSettingsGroups = computed(() => props.groups
@@ -38,6 +41,15 @@ function settingsPath(id: SettingsTabId): { name: string; hash: string } {
 
 function isActive(item: NavigationItem): boolean {
   return navigationItemIsActive(item, typeof route.name === 'string' ? route.name : null)
+}
+
+function integrationPath(integration: AddonDef): string {
+  const page = integration.pages[0]?.key || 'overview'
+  return `/integrations/${integration.key}/${page}`
+}
+
+function appIntegrationActive(key: string): boolean {
+  return route.name === 'integration-page' && route.params.addon === key
 }
 
 function closeDrawer() {
@@ -133,17 +145,32 @@ watch(() => route.fullPath, () => {
     <nav v-else class="app-navigation-list">
       <section v-for="group in groups" :key="group.id" class="app-navigation-group">
         <h2 class="app-navigation-label">{{ group.label }}</h2>
-        <router-link
-          v-for="item in group.items"
-          :key="item.id"
-          :to="item.path"
-          class="app-navigation-item"
-          :class="{ active: isActive(item) }"
-          :aria-current="isActive(item) ? 'page' : undefined"
-        >
-          <span class="app-navigation-dot" aria-hidden="true"></span>
-          <span>{{ item.label }}</span>
-        </router-link>
+        <template v-if="group.id === 'integrations' && hasAppIntegrationChildren">
+          <router-link
+            v-for="integration in integrations"
+            :key="integration.key"
+            :to="integrationPath(integration)"
+            class="app-navigation-item"
+            :class="{ active: appIntegrationActive(integration.key) }"
+            :aria-current="appIntegrationActive(integration.key) ? 'page' : undefined"
+          >
+            <span class="app-navigation-dot" aria-hidden="true"></span>
+            <span>{{ integration.label }}</span>
+          </router-link>
+        </template>
+        <template v-else>
+          <router-link
+            v-for="item in group.items"
+            :key="item.id"
+            :to="item.path"
+            class="app-navigation-item"
+            :class="{ active: isActive(item) }"
+            :aria-current="isActive(item) ? 'page' : undefined"
+          >
+            <span class="app-navigation-dot" aria-hidden="true"></span>
+            <span>{{ item.label }}</span>
+          </router-link>
+        </template>
       </section>
     </nav>
   </aside>
@@ -195,18 +222,34 @@ watch(() => route.fullPath, () => {
           <div class="mobile-menu-groups">
             <section v-for="group in groups" :key="group.id" class="mobile-menu-group">
               <h3>{{ group.label }}</h3>
-              <router-link
-                v-for="item in group.items"
-                :key="item.id"
-                :to="item.path"
-                class="mobile-menu-item"
-                :class="{ active: isActive(item) }"
-                :aria-current="isActive(item) ? 'page' : undefined"
-              >
-                <span class="mobile-menu-icon" aria-hidden="true">{{ item.icon }}</span>
-                <span>{{ item.label }}</span>
-                <span class="mobile-menu-arrow" aria-hidden="true">→</span>
-              </router-link>
+              <template v-if="group.id === 'integrations' && hasAppIntegrationChildren">
+                <router-link
+                  v-for="integration in integrations"
+                  :key="integration.key"
+                  :to="integrationPath(integration)"
+                  class="mobile-menu-item"
+                  :class="{ active: appIntegrationActive(integration.key) }"
+                  :aria-current="appIntegrationActive(integration.key) ? 'page' : undefined"
+                >
+                  <span class="mobile-menu-icon" aria-hidden="true">↔</span>
+                  <span>{{ integration.label }}</span>
+                  <span class="mobile-menu-arrow" aria-hidden="true">→</span>
+                </router-link>
+              </template>
+              <template v-else>
+              <div v-for="item in group.items" :key="item.id" class="mobile-menu-destination">
+                <router-link
+                  :to="item.path"
+                  class="mobile-menu-item"
+                  :class="{ active: isActive(item) }"
+                  :aria-current="isActive(item) ? 'page' : undefined"
+                >
+                  <span class="mobile-menu-icon" aria-hidden="true">{{ item.icon }}</span>
+                  <span>{{ item.label }}</span>
+                  <span class="mobile-menu-arrow" aria-hidden="true">→</span>
+                </router-link>
+              </div>
+              </template>
             </section>
           </div>
         </section>
@@ -426,6 +469,7 @@ watch(() => route.fullPath, () => {
 .mobile-menu-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; padding: 20px 20px max(28px, env(safe-area-inset-bottom)); }
 .mobile-menu-group { min-width: 0; }
 .mobile-menu-group h3 { margin: 0 0 7px; color: var(--text-muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.mobile-menu-destination { display: grid; }
 .mobile-menu-item { display: grid; grid-template-columns: 24px minmax(0, 1fr) 16px; align-items: center; gap: 8px; min-height: 44px; padding: 0 10px; color: var(--text-secondary); border-radius: 8px; font-size: 13px; font-weight: 600; }
 .mobile-menu-item:hover { color: var(--text-primary); background: var(--bg-raised); }
 .mobile-menu-item.active { color: var(--accent); background: var(--accent-soft); }

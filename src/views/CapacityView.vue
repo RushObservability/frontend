@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useApi } from '../composables/useApi'
 import { usePollingTask } from '../composables/usePollingTask'
+import DataTable from '../components/DataTable.vue'
 import {
   appendCapacitySnapshot,
   capacityGuideRows,
@@ -231,7 +232,7 @@ const guideRows = capacityGuideRows
 
     <section class="recommendations-section"><div class="section-heading"><div><div class="capacity-kicker">Decision support</div><h2>What to do next</h2><p>Read and runtime pressure must persist for three 15-second samples. Disk, ingest failure, and exhausted memory remain immediate signals.</p></div><span class="threshold-note">measured limits when available</span></div><div class="recommendation-list"><article v-for="item in recommendations" :key="item.title" class="recommendation" :class="`recommendation--${item.severity}`"><div class="recommendation-icon" aria-hidden="true"></div><div class="recommendation-body"><div class="recommendation-top"><h3>{{ item.title }}</h3><span>{{ item.severity === 'urgent' ? 'act now' : item.severity === 'watch' ? 'watch' : 'stable' }}</span></div><p>{{ item.body }}</p><div class="recommendation-evidence mono">{{ item.evidence }}</div><div class="recommendation-action"><b>Next move</b> {{ item.action }}</div></div></article></div></section>
 
-    <section class="guide-section"><div class="section-heading"><div><div class="capacity-kicker">Runbook thresholds</div><h2>Scale signals</h2></div><span class="threshold-note">configured limits replace fixed counts</span></div><div class="guide-table-wrap"><table class="guide-table"><thead><tr><th>Signal</th><th>Watch / urgent</th><th>Preferred response</th></tr></thead><tbody><tr v-for="row in guideRows" :key="row.signal"><td>{{ row.signal }}</td><td class="mono">{{ row.threshold }}</td><td>{{ row.move }}</td></tr></tbody></table></div></section>
+    <section class="guide-section"><div class="section-heading"><div><div class="capacity-kicker">Runbook thresholds</div><h2>Scale signals</h2></div><span class="threshold-note">configured limits replace fixed counts</span></div><div class="guide-table-wrap"><DataTable class="guide-table" bare><thead><tr><th>Signal</th><th>Watch / urgent</th><th>Preferred response</th></tr></thead><tbody><tr v-for="row in guideRows" :key="row.signal"><td>{{ row.signal }}</td><td class="mono">{{ row.threshold }}</td><td>{{ row.move }}</td></tr></tbody></DataTable></div></section>
   </div>
 </template>
 

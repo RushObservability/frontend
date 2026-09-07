@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { useTenant } from '../composables/useTenant'
+import DataTable from '../components/DataTable.vue'
 import type {
   UsageResponse, UsageEntry, UnusedMetric, CardinalityEntry,
   LabelBreakdownResponse, LabelCardinality, UsageMeteringSummary,
@@ -487,10 +488,10 @@ function treemapPct(label: LabelCardinality): number {
             <div class="tier-legend"><span><i class="tier-dot tier-dot-local"></i>local {{ formatBytes(totalLocal) }} · {{ localPct.toFixed(1) }}%</span><span v-if="objectStoreEnabled"><i class="tier-dot tier-dot-object"></i>object store {{ formatBytes(totalObjectStore) }} · {{ (100 - localPct).toFixed(1) }}%</span></div>
           </div>
           <div class="storage-table-wrap">
-            <table class="storage-table"><thead><tr><th>Table</th><th>Rows</th><th>Disk</th><th>Compressed</th><th>Uncompressed</th><th>Ratio</th></tr></thead><tbody>
+            <DataTable class="storage-table" bare><thead><tr><th>Table</th><th>Rows</th><th>Disk</th><th>Compressed</th><th>Uncompressed</th><th>Ratio</th></tr></thead><tbody>
               <tr v-for="table in stats.storage" :key="table.table_name"><td class="mono">{{ table.table_name }}</td><td class="mono">{{ formatCount(table.total_rows) }}</td><td class="mono">{{ formatBytes(table.bytes_on_disk) }}</td><td class="mono">{{ formatBytes(table.compressed_bytes) }}</td><td class="mono">{{ formatBytes(table.uncompressed_bytes) }}</td><td class="mono">{{ compressionRatio(table) }}</td></tr>
               <tr class="storage-total"><td>Total</td><td class="mono">{{ formatCount(totalRows) }}</td><td class="mono">{{ formatBytes(totalDisk) }}</td><td class="mono">{{ formatBytes(totalCompressed) }}</td><td class="mono">{{ formatBytes(totalUncompressed) }}</td><td class="mono">{{ overallCompression }}</td></tr>
-            </tbody></table>
+            </tbody></DataTable>
           </div>
           <button v-if="isAdmin" type="button" class="partition-toggle" :aria-expanded="showPartitions" @click="togglePartitions"><span :class="{ rotated: showPartitions }">⌄</span>Partitions · local vs object store and retention timing</button>
           <div v-if="isAdmin && showPartitions" class="partition-panel">
@@ -502,7 +503,7 @@ function treemapPct(label: LabelCardinality): number {
                 <div class="partition-group-head"><b>{{ group.signal }}</b><span class="mono">{{ group.partitionCount }} partitions · move {{ group.moveAfter }}d · keep {{ group.retention }}d</span></div>
                 <div class="tier-bar"><div class="tier-seg tier-seg-local" :style="{ width: `${group.localPct}%` }"></div><div class="tier-seg tier-seg-object" :style="{ width: `${100 - group.localPct}%` }"></div></div>
                 <div class="partition-tier-legend mono">local {{ formatBytes(group.bytesLocal) }} · S3 {{ formatBytes(group.bytesCold) }} · {{ group.cold.length }} cold</div>
-                <div v-if="group.hot.length" class="partition-table-wrap"><table class="storage-table partition-table"><thead><tr><th>Partition</th><th>Local</th><th>Object store</th><th>Tier</th><th>Moves</th><th>Deletes</th></tr></thead><tbody><tr v-for="partition in group.hot" :key="partition.table + partition.partition"><td class="mono">{{ partition.partition }}</td><td class="mono">{{ partition.bytes_local ? formatBytes(partition.bytes_local) : '—' }}</td><td class="mono">{{ partition.bytes_object_store ? formatBytes(partition.bytes_object_store) : '—' }}</td><td><span class="tier-pill" :class="`tier-pill-${partition.tier}`">{{ tierLabel(partition.tier) }}</span></td><td class="mono">{{ untilLabel(partition.move_at_estimate) }}</td><td class="mono">{{ untilLabel(partition.delete_at) }}</td></tr></tbody></table></div>
+                <div v-if="group.hot.length" class="partition-table-wrap"><DataTable class="storage-table partition-table" bare><thead><tr><th>Partition</th><th>Local</th><th>Object store</th><th>Tier</th><th>Moves</th><th>Deletes</th></tr></thead><tbody><tr v-for="partition in group.hot" :key="partition.table + partition.partition"><td class="mono">{{ partition.partition }}</td><td class="mono">{{ partition.bytes_local ? formatBytes(partition.bytes_local) : '—' }}</td><td class="mono">{{ partition.bytes_object_store ? formatBytes(partition.bytes_object_store) : '—' }}</td><td><span class="tier-pill" :class="`tier-pill-${partition.tier}`">{{ tierLabel(partition.tier) }}</span></td><td class="mono">{{ untilLabel(partition.move_at_estimate) }}</td><td class="mono">{{ untilLabel(partition.delete_at) }}</td></tr></tbody></DataTable></div>
                 <button v-if="group.cold.length" type="button" class="cold-summary" @click="toggleCold(group.signal)"><span :class="{ rotated: expandedCold[group.signal] }">⌄</span><span class="mono">{{ group.cold.length }} partitions on S3 ({{ formatBytes(group.bytesCold) }})</span><span class="mono">deleting {{ untilLabel(group.coldDeleteMin) }} … {{ untilLabel(group.coldDeleteMax) }}</span></button>
                 <div v-if="expandedCold[group.signal]" class="cold-list"><div v-for="partition in group.cold" :key="partition.table + partition.partition" class="cold-row mono"><span>{{ partition.partition }}</span><span>{{ formatBytes(partition.bytes_object_store) }}</span><span>{{ untilLabel(partition.delete_at) }}</span></div></div>
               </div>
@@ -582,7 +583,7 @@ function treemapPct(label: LabelCardinality): number {
         <span class="scope-chip scope-chip--global"><span class="scope-dot"></span> global read</span>
       </div>
       <div class="tenant-ranking-table-wrap">
-        <table class="tenant-ranking-table">
+        <DataTable class="tenant-ranking-table" bare>
           <thead><tr><th>Tenant</th><th class="num">Events</th><th class="num">Ingest</th><th>Signal mix</th></tr></thead>
           <tbody>
             <tr v-for="tenant in tenantRanking.tenants" :key="tenant.tenant_id">
@@ -592,7 +593,7 @@ function treemapPct(label: LabelCardinality): number {
               <td><div class="tenant-signal-mix"><span v-for="row in Object.entries(tenant.signals).sort((a, b) => b[1].bytes_count - a[1].bytes_count)" :key="row[0]" class="tenant-signal-pill" :style="{ '--pill-color': signalColor(row[0]) }">{{ signalLabel(row[0]) }} {{ formatBytes(row[1].bytes_count) }}</span></div></td>
             </tr>
           </tbody>
-        </table>
+        </DataTable>
       </div>
     </section>
 
@@ -639,7 +640,7 @@ function treemapPct(label: LabelCardinality): number {
           <span class="usage-section-marker" :class="`usage-section-marker--${activeUsageGroup.key}`"></span>
         </div>
         <div class="usage-table-wrap">
-          <table class="usage-table" v-if="activeUsageGroup.entries.length > 0">
+          <DataTable v-if="activeUsageGroup.entries.length > 0" class="usage-table" bare>
             <thead>
               <tr>
                 <th>Signal Name</th>
@@ -656,7 +657,7 @@ function treemapPct(label: LabelCardinality): number {
                 <td class="num">{{ row.query_count }}</td>
               </tr>
             </tbody>
-          </table>
+          </DataTable>
           <div v-else class="empty-state">No {{ activeUsageGroup.label.toLowerCase() }} usage in this window.</div>
         </div>
       </section>
@@ -666,7 +667,7 @@ function treemapPct(label: LabelCardinality): number {
         <h2>Cardinality Explorer <span class="badge-count">{{ totalSeries.toLocaleString() }} series</span></h2>
         <p class="section-desc">Click a metric to see which labels drive its cardinality.</p>
         <div v-if="cardinalityList.length > 0" class="usage-table-wrap">
-          <table class="usage-table cardinality-table">
+          <DataTable class="usage-table cardinality-table" bare>
             <thead>
               <tr>
                 <th>Metric Name</th>
@@ -717,7 +718,7 @@ function treemapPct(label: LabelCardinality): number {
                       </div>
 
                       <!-- Label table -->
-                      <table class="breakdown-table">
+                      <DataTable class="breakdown-table" bare>
                         <thead>
                           <tr>
                             <th>Label</th>
@@ -740,14 +741,14 @@ function treemapPct(label: LabelCardinality): number {
                             </td>
                           </tr>
                         </tbody>
-                      </table>
+                      </DataTable>
                     </div>
                     <div v-else class="breakdown-empty">No label data available.</div>
                   </td>
                 </tr>
               </template>
             </tbody>
-          </table>
+          </DataTable>
         </div>
         <div v-else class="empty-state">No cardinality data is available in this window.</div>
       </section>
@@ -757,7 +758,7 @@ function treemapPct(label: LabelCardinality): number {
         <h2>Unused Metrics <span class="badge-count">{{ unusedList.length }}</span></h2>
         <p class="section-desc">These metrics are being collected but haven't been queried in the last {{ daysBack }} days.</p>
         <div v-if="unusedList.length > 0" class="usage-table-wrap">
-          <table class="usage-table">
+          <DataTable class="usage-table" bare>
             <thead>
               <tr>
                 <th>Metric Name</th>
@@ -768,7 +769,7 @@ function treemapPct(label: LabelCardinality): number {
                 <td class="signal-name">{{ row.metric_name }}</td>
               </tr>
             </tbody>
-          </table>
+          </DataTable>
         </div>
         <div v-else class="empty-state">No unused metrics were found in this window.</div>
       </section>

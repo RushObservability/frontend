@@ -196,39 +196,13 @@
   white-space: nowrap;
 }
 
-/* ═══ Explore table rhythm ═══
-   Service spans/logs use the same compact evidence-table cadence as Explore:
-   short 28px headers, 30px rows, quiet dividers, and a raised header band.
-   The slots below keep their domain-specific method, duration, level, and
-   trace affordances without introducing a second row system. */
+/* Service spans and logs add domain-specific cells to the shared table. */
 .slt-data-table :deep(.data-table-wrap) {
   background: transparent;
   border-radius: 0;
 }
 .slt-data-table :deep(.data-table) {
   min-width: 720px;
-  font-size: 11px;
-}
-.slt-data-table :deep(.data-table thead) {
-  box-shadow: 0 1px 0 var(--border-default);
-}
-.slt-data-table :deep(.data-table th) {
-  height: 28px;
-  padding: 0 10px;
-  background: var(--bg-raised);
-  border-bottom-color: var(--border-default);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-.slt-data-table :deep(.data-table td) {
-  height: 30px;
-  padding: 0 10px;
-  color: var(--text-secondary);
-  border-bottom-color: var(--border-subtle);
-}
-.slt-data-table :deep(.data-table tbody tr:hover td) {
-  background: var(--bg-hover);
 }
 .slt-data-table :deep(.data-table tbody tr.slt-error td:first-child) { box-shadow: inset 2px 0 0 var(--error); }
 .slt-data-table :deep(.data-table tbody tr[aria-expanded='true'] td) { background: var(--bg-hover); }

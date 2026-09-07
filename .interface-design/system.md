@@ -128,9 +128,11 @@ HTTP method badges use distinct, muted colors:
 - No shadows. Border-only depth.
 
 ### Data Tables
-- Header: `var(--bg-raised)`, `border-bottom: var(--border-default)`
-- Rows: `var(--bg-surface)`, hover → `var(--bg-hover)`
-- Monospace for all data cells
+- Use the shared `DataTable` component for operational tables. Keep custom table markup only for virtualized result streams such as Explore.
+- Header: 28px, `var(--bg-raised)`, `border-bottom: var(--border-default)`, 10px uppercase labels
+- Rows: 30px, 11px text, quiet `var(--border-subtle)` dividers, hover → `var(--bg-hover)`
+- Expanded rows use `var(--bg-active)` with an amber selection rail.
+- Use monospace for IDs, timestamps, and numeric measurements, not every cell.
 
 ### Investigate Button (contextual AI action)
 - `background: var(--amber-dim)`, `color: var(--amber)`, `border: 1px solid var(--amber-glow)`
@@ -149,7 +151,7 @@ Exception: chart/visualization colors that need distinct series colors beyond th
 
 ## Settings & Admin Panels
 
-Layout and component patterns for settings/admin pages (multi-section config). Reference: `web-ui/src/views/SettingsView.vue` + `styles/views/SettingsView.css`.
+Layout and component patterns for settings/admin pages (multi-section config). Reference: `frontend/src/views/SettingsView.vue` + `styles/views/SettingsView.css`.
 
 ### Page shell — grouped left rail (not top tabs)
 For 5+ sections, use a left section rail, never a horizontal tab bar (cramps past ~6 items).

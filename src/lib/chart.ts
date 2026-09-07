@@ -2,7 +2,27 @@
 // metrics). The goal is one cohesive, refined look: smooth monotone curves,
 // gradient area fills, crisp non-scaling strokes, and consistent ticks.
 
+import type { TimeDomain } from '../types'
+
 export type Pt = [number, number] // [x, y] in viewBox coordinates
+
+/**
+ * Prefer the requested query window over sample bounds. This leaves gaps blank
+ * when retention or a new data source covers only part of the selected range.
+ */
+export function resolveTimeDomain(
+  dataMin: number,
+  dataMax: number,
+  requested?: TimeDomain,
+): TimeDomain {
+  if (requested && Number.isFinite(requested.from) && Number.isFinite(requested.to) && requested.to > requested.from) {
+    return requested
+  }
+  if (Number.isFinite(dataMin) && Number.isFinite(dataMax)) {
+    return { from: dataMin, to: dataMax > dataMin ? dataMax : dataMin + 1 }
+  }
+  return { from: 0, to: 1 }
+}
 
 /**
  * Smooth monotone-cubic path through points. Monotone interpolation avoids the

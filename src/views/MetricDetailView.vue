@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
+import DataTable from '../components/DataTable.vue'
 import type { LabelBreakdownResponse, LabelCardinality } from '../types'
 
 const route = useRoute()
@@ -88,7 +89,7 @@ function goBack() {
 
         <!-- Label table -->
         <div class="table-wrap">
-          <table class="data-table">
+          <DataTable bare>
             <thead>
               <tr>
                 <th></th>
@@ -114,7 +115,7 @@ function goBack() {
                 </td>
               </tr>
             </tbody>
-          </table>
+          </DataTable>
         </div>
       </section>
 

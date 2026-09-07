@@ -1139,10 +1139,10 @@
   align-items: center;
   gap: 0;
   padding: 0 var(--sp-3);
-  height: 28px;
+  height: var(--table-head-height);
   background: var(--bg-raised);
   border-bottom: 1px solid var(--border-default);
-  font-size: 10px;
+  font-size: var(--table-head-size);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1171,16 +1171,16 @@
   align-items: center;
   gap: 0;
   padding: 0 var(--sp-3);
-  height: 30px;
+  height: var(--table-row-height);
   border-bottom: 1px solid var(--border-subtle);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--table-row-size);
   transition: background 0.08s;
   /* Let the browser skip style/layout/paint work for rows outside the
      viewport. This is native viewport windowing without changing row order,
      keyboard indexes, or the variable-height inline detail panels. */
   content-visibility: auto;
-  contain-intrinsic-size: 30px;
+  contain-intrinsic-size: var(--table-row-height);
 }
 .et-row:hover { background: var(--bg-hover); }
 .et-row.et-selected {

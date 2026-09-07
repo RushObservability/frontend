@@ -2,6 +2,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useApi } from '../composables/useApi'
 import TimePicker from '../components/TimePicker.vue'
+import DataTable from '../components/DataTable.vue'
 import type { AuditEvent, AuditQueryParams, AuditVerifyResponse } from '../types'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 
@@ -320,7 +321,7 @@ onMounted(() => {
 
         <!-- Detail panel — SIEM-style flat field/value table (Splunk "Fields") -->
         <div v-if="isExpanded(ev.id)" class="audit-detail">
-          <table class="field-table">
+          <DataTable class="field-table" bare>
             <tbody>
               <tr class="field-row"><td class="field-key">seq</td><td class="field-val mono">{{ ev.seq }}</td></tr>
               <tr class="field-row"><td class="field-key">event_id</td><td class="field-val mono">{{ ev.id }}</td></tr>
@@ -340,7 +341,7 @@ onMounted(() => {
               <tr class="field-row"><td class="field-key">hash</td><td class="field-val mono field-hash">{{ ev.hash || '—' }}</td></tr>
               <tr class="field-row"><td class="field-key">prev_hash</td><td class="field-val mono field-hash">{{ ev.prev_hash || '—' }}</td></tr>
             </tbody>
-          </table>
+          </DataTable>
 
           <div class="raw-block">
             <div class="raw-head">changes</div>

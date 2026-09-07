@@ -5,9 +5,9 @@ let chartIdSeq = 0
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CountBucket, DeployMarker } from '../../types'
+import type { CountBucket, DeployMarker, TimeDomain } from '../../types'
 import type { TimeSeriesPanelSeries } from '../panels/types'
-import { straightLinePath, straightAreaPath, fmtAxis, type Pt } from '../../lib/chart'
+import { straightLinePath, straightAreaPath, fmtAxis, resolveTimeDomain, type Pt } from '../../lib/chart'
 import { useChartHover } from '../../composables/useChartHover'
 import EmptyState from '../EmptyState.vue'
 
@@ -16,6 +16,8 @@ const props = defineProps<{
   deploys?: DeployMarker[]
   /** Multi-series mode (PromQL/metrics source). When present, takes precedence over buckets. */
   series?: TimeSeriesPanelSeries[]
+  /** Requested query bounds. Data may occupy only part of this window. */
+  timeDomain?: TimeDomain
   /** Optional horizontal reference lines (e.g. monitor alert thresholds). */
   thresholds?: Array<{ value: number; color: string; label: string }>
   /** Optional unit suffix for axis labels, the legend last-value, and the tooltip. */
@@ -66,11 +68,26 @@ const maxCount = computed(() =>
   props.buckets.reduce((max, b) => Math.max(max, b.count), 1)
 )
 
+const bucketSamples = computed(() => props.buckets.flatMap((bucket) => {
+  const time = new Date(bucket.bucket).getTime() / 1000
+  return Number.isFinite(time) ? [[time, bucket.count] as [number, number]] : []
+}))
+
+const bucketBounds = computed(() => {
+  const points = bucketSamples.value
+  return resolveTimeDomain(
+    points.length ? points[0]![0] : Infinity,
+    points.length ? points[points.length - 1]![0] : -Infinity,
+    props.timeDomain,
+  )
+})
+
 const seriesPoints = computed<Pt[]>(() => {
-  const n = props.buckets.length
-  return props.buckets.map((b, i) => [
-    padLeft + (i / Math.max(n - 1, 1)) * plotWidth,
-    padTop + plotHeight - (b.count / maxCount.value) * plotHeight,
+  const { from, to } = bucketBounds.value
+  const span = to - from
+  return bucketSamples.value.map(([time, count]) => [
+    padLeft + ((time - from) / span) * plotWidth,
+    padTop + plotHeight - (count / maxCount.value) * plotHeight,
   ] as Pt)
 })
 
@@ -88,16 +105,8 @@ const yTicks = computed(() => {
 })
 
 const xLabels = computed(() => {
-  if (props.buckets.length < 2) return []
-  const indices = [0, Math.floor(props.buckets.length / 2), props.buckets.length - 1]
-  return indices.map(i => {
-    const b = props.buckets[i]!
-    const x = padLeft + (i / Math.max(props.buckets.length - 1, 1)) * plotWidth
-    // Bucket is "YYYY-MM-DDTHH:MM:SS" or "YYYY-MM-DD HH:MM:SS" — the time lives at
-    // offset 11 either way. (The old fallback sliced 0..5 → "2026-".)
-    const label = b.bucket.length >= 16 ? b.bucket.slice(11, 16) : b.bucket
-    return { x, label }
-  })
+  const { from, to } = bucketBounds.value
+  return timeAxisLabels(from, to)
 })
 
 // ── Multi-series (metrics) geometry ──
@@ -113,9 +122,10 @@ const seriesBounds = computed(() => {
   }
   // Extend the range so threshold lines stay on-chart even above the data peak.
   for (const th of props.thresholds || []) if (th.value > maxLeft) maxLeft = th.value
+  const domain = resolveTimeDomain(minT, maxT, props.timeDomain)
   return {
-    minT,
-    maxT: maxT > minT ? maxT : minT + 1,
+    minT: domain.from,
+    maxT: domain.to,
     maxLeft: maxLeft || 1,
     maxRight: maxRight || 1,
     hasRight: (props.series || []).some(series => series.axis === 'right'),
@@ -176,15 +186,34 @@ const seriesRightYTicks = computed(() => {
 
 const seriesXLabels = computed(() => {
   const { minT, maxT } = seriesBounds.value
-  if (!isFinite(minT)) return []
-  return [0, 0.5, 1].map(r => {
-    const d = new Date((minT + (maxT - minT) * r) * 1000)
-    return {
-      x: padLeft + r * plotWidth,
-      label: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
-    }
-  })
+  return timeAxisLabels(minT, maxT)
 })
+
+function timeAxisLabels(from: number, to: number) {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return []
+  const span = to - from
+  return [0, 0.5, 1].map(ratio => ({
+    x: padLeft + ratio * plotWidth,
+    label: formatTimeTick(from + span * ratio, span),
+  }))
+}
+
+function formatTimeTick(epochSeconds: number, spanSeconds: number): string {
+  const date = new Date(epochSeconds * 1000)
+  if (spanSeconds >= 2 * 86_400) {
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  }
+  if (spanSeconds >= 86_400) {
+    const day = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    return `${day} ${formatClock(date, false)}`
+  }
+  return formatClock(date, false)
+}
+
+function formatClock(date: Date, includeSeconds: boolean): string {
+  const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  return includeSeconds ? `${time}:${String(date.getSeconds()).padStart(2, '0')}` : time
+}
 
 const visibleYTicks = computed(() => seriesMode.value ? seriesYTicks.value : yTicks.value)
 const visibleXTicks = computed(() => seriesMode.value ? seriesXLabels.value : xLabels.value)
@@ -193,10 +222,10 @@ const deployLines = computed(() => {
   if (!props.deploys || props.deploys.length === 0) return []
   const firstTime = seriesMode.value
     ? seriesBounds.value.minT * 1000
-    : (props.buckets.length >= 2 ? new Date(props.buckets[0]!.bucket).getTime() : NaN)
+    : bucketBounds.value.from * 1000
   const lastTime = seriesMode.value
     ? seriesBounds.value.maxT * 1000
-    : (props.buckets.length >= 2 ? new Date(props.buckets[props.buckets.length - 1]!.bucket).getTime() : NaN)
+    : bucketBounds.value.to * 1000
   const range = lastTime - firstTime
   if (!Number.isFinite(range) || range <= 0) return []
   return props.deploys
@@ -238,11 +267,14 @@ const hoverModel = computed<{ minT: number; maxT: number; series: HSeries[] }>((
     const t = new Date(b.bucket).getTime() / 1000
     if (!isNaN(t)) pts.push([t, b.count])
   }
-  const minT = pts.length ? pts[0]![0] : 0
-  const maxT = pts.length ? pts[pts.length - 1]![0] : minT + 1
+  const domain = resolveTimeDomain(
+    pts.length ? pts[0]![0] : Infinity,
+    pts.length ? pts[pts.length - 1]![0] : -Infinity,
+    props.timeDomain,
+  )
   return {
-    minT,
-    maxT: maxT > minT ? maxT : minT + 1,
+    minT: domain.from,
+    maxT: domain.to,
     series: pts.length ? [{ name: props.seriesName || 'value', color: 'var(--amber)', pts }] : [],
   }
 })
@@ -284,23 +316,31 @@ const crosshairLeftPct = computed(() =>
 const tooltip = computed(() => {
   const t = hover.time.value
   const p = hoverP.value
+  const { minT, maxT } = hoverModel.value
   // Only the chart the cursor is actually over renders a tooltip.
   if (t == null || p == null || hover.activeId.value !== chartId) return null
   const rows = hoverModel.value.series
     .map((s) => {
       if (!s.pts.length) return null
       let best = s.pts[0]!, bestD = Math.abs(s.pts[0]![0] - t)
+      let firstSample = best[0], lastSample = best[0]
       for (const pt of s.pts) {
         const d = Math.abs(pt[0] - t)
         if (d < bestD) { bestD = d; best = pt }
+        if (pt[0] < firstSample) firstSample = pt[0]
+        if (pt[0] > lastSample) lastSample = pt[0]
       }
+      if (t < firstSample || t > lastSample) return null
       return { name: s.name, color: s.color, value: fmtAxisU(best[1]), t: best[0] }
     })
     .filter(Boolean) as Array<{ name: string; color: string; value: string; t: number }>
   if (!rows.length) return null
   const headT = rows[0]!.t
   const d = new Date(headT * 1000)
-  const label = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+  const clock = formatClock(d, true)
+  const label = maxT - minT >= 86_400
+    ? `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${clock}`
+    : clock
   // Flip to the left of the crosshair once past the midpoint, so the tooltip
   // always opens toward the side with more room and stays within view.
   return { rows: rows.slice(0, 8), label, leftPct: crosshairLeftPct.value!, flip: p > 0.5 }

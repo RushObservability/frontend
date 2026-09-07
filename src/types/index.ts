@@ -132,6 +132,12 @@ export interface CountBucket {
   error_count: number
 }
 
+/** Fixed horizontal chart bounds in Unix seconds. */
+export interface TimeDomain {
+  from: number
+  to: number
+}
+
 export type ExploreCountKind = 'exact' | 'capped' | 'estimated'
 
 export interface ExploreSummaryValue {
@@ -438,6 +444,8 @@ export interface WidgetData {
   count?: number
   /** Multi-series timeseries (PromQL/metrics source): each series is a label + [unixSec, value] points. */
   series?: Array<{ name: string; points: [number, number][]; color?: string; ref_id?: string; axis?: 'left' | 'right' }>
+  /** Requested query window. Charts keep this domain even when samples cover only part of it. */
+  time_domain?: TimeDomain
   /** Individual query failures when at least one sibling query still returned data. */
   query_errors?: Array<{ ref_id: string; message: string }>
 }
