@@ -18,4 +18,9 @@ describe('shared operational table style', () => {
     expect(tableStyles).toContain('border-bottom: 1px solid var(--border-default)')
     expect(tableStyles).toContain('background: var(--bg-hover)')
   })
+
+  it('keeps manual sortable headers padded', () => {
+    expect(tableStyles).toContain('.data-table th.sortable')
+    expect(tableStyles).not.toContain('.data-table :deep(th.sortable)')
+  })
 })

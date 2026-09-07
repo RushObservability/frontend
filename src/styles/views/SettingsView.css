@@ -1279,8 +1279,214 @@ select.form-input { padding-right: 32px; }
   flex-shrink: 0;
 }
 .auth-status-active {
-  background: var(--ok, #34d399);
-  box-shadow: 0 0 6px var(--ok, #34d399);
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent);
+}
+
+/* ── Sign-in posture banner ───────────────────────────────── */
+.auth-posture {
+  --tone: var(--text-muted);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-5) var(--sp-6);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--tone);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+}
+.auth-posture-sso { --tone: var(--ok); }
+.auth-posture-local { --tone: var(--warning); }
+.auth-posture-label {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.auth-posture-copy strong {
+  display: block;
+  margin: var(--sp-1) 0 var(--sp-2);
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.auth-posture-copy p {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.auth-posture-methods {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+.auth-method {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 5px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-pill);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.auth-method-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.auth-method-on { color: var(--text-primary); }
+.auth-method-on .auth-method-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent);
+}
+.auth-method-off { opacity: 0.62; }
+
+/* ── Local auth facts ─────────────────────────────────────── */
+.auth-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  margin: 0 var(--sp-4) var(--sp-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+.auth-fact {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-raised);
+}
+.auth-fact-label {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.auth-fact-value {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.auth-fact-ok { color: var(--ok); }
+
+/* ── SSO card ─────────────────────────────────────────────── */
+.auth-sso-card .card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.auth-pill {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.auth-pill-on {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+.auth-sso-pitch {
+  margin: 0 0 var(--sp-3);
+  max-width: 62ch;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.auth-benefits {
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sp-2);
+  max-width: 62ch;
+}
+.auth-benefits li {
+  position: relative;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.auth-benefits li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.auth-provider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.auth-provider-name {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Protocol badge. Deliberately not .cell-tag-amber: --amber aliases --accent,
+   so that class renders the same blue as a primary action. */
+.auth-protocol-tag {
+  background: var(--warning-dim);
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 38%, transparent);
+}
+.auth-sso-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-shrink: 0;
+}
+/* The toggle disables SSO org-wide, so it gets a visible label rather than
+   sitting unlabelled next to Reconfigure. */
+.auth-toggle-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+.auth-toggle-caption {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 720px) {
+  .auth-posture { flex-direction: column; }
+  .auth-sso-summary { flex-direction: column; align-items: flex-start; }
+  .auth-sso-actions { width: 100%; justify-content: space-between; }
 }
 
 /* SSO disabled / enabled wrappers */

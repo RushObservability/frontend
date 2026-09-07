@@ -350,7 +350,7 @@
 .ingest-board, .tenant-ranking-section { padding: 20px; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--r-md); }
 .ingest-summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
 .ingest-summary-card { display: flex; flex-direction: column; gap: 5px; padding: 13px 14px; background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--r-sm); }
-.ingest-summary-card--accent { border-color: color-mix(in srgb, var(--amber) 35%, var(--border-default)); background: linear-gradient(115deg, var(--amber-dim), var(--bg-raised) 58%); }
+.ingest-summary-card--accent { border-color: color-mix(in srgb, var(--amber) 35%, var(--border-default)); background: var(--amber-dim); }
 .summary-label { color: var(--text-muted); font: 9px var(--font-mono); letter-spacing: .07em; text-transform: uppercase; }
 .ingest-summary-card strong { color: var(--text-primary); font: 700 20px/1.1 var(--font-mono); }
 .ingest-summary-card small { color: var(--text-secondary); font-size: 11px; }

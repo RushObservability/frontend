@@ -3147,56 +3147,97 @@ function formatDate(ts: string): string {
       role="tabpanel"
       aria-labelledby="tab-auth"
     >
-      <!-- Section A: Local Authentication -->
+      <!-- Posture summary: how people actually get in, at a glance. -->
+      <div class="auth-posture" :class="ssoProvider.enabled ? 'auth-posture-sso' : 'auth-posture-local'">
+        <div class="auth-posture-copy">
+          <div class="auth-posture-label">Sign-in posture</div>
+          <strong>{{ ssoProvider.enabled ? 'Identity provider, with local fallback' : 'Local passwords only' }}</strong>
+          <p>
+            {{ ssoProvider.enabled
+              ? 'Users sign in through your identity provider. Local accounts still work so an outage cannot lock everyone out.'
+              : 'Everyone signs in with a Rush password. Connect an identity provider to use your existing directory instead.' }}
+          </p>
+        </div>
+        <div class="auth-posture-methods">
+          <div class="auth-method auth-method-on">
+            <span class="auth-method-dot" aria-hidden="true"></span>
+            <span>Local</span>
+          </div>
+          <div class="auth-method" :class="ssoProvider.enabled ? 'auth-method-on' : 'auth-method-off'">
+            <span class="auth-method-dot" aria-hidden="true"></span>
+            <span>SSO</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Local Authentication -->
       <div class="section-card card">
         <div class="card-header">
           <div class="card-header-text">
             <h2 class="card-title">Local Authentication</h2>
             <p class="card-desc text-secondary">
-              Local authentication is always available as a fallback, even when SSO is configured.
+              Rush-managed usernames and passwords. This cannot be switched off — it is the route back in if your identity provider is unreachable.
             </p>
           </div>
         </div>
-        <div class="auth-status-row">
-          <div class="auth-status-indicator auth-status-active"></div>
-          <div>
-            <div style="font-size: 12px; font-weight: 500; color: var(--text-primary);">Local auth is enabled</div>
-            <div style="font-size: 11px; color: var(--text-muted);">Default admin: <span class="mono">admin</span></div>
+        <div class="auth-facts">
+          <div class="auth-fact">
+            <span class="auth-fact-label">Status</span>
+            <span class="auth-fact-value auth-fact-ok">
+              <span class="auth-status-indicator auth-status-active" aria-hidden="true"></span>Enabled
+            </span>
+          </div>
+          <div class="auth-fact">
+            <span class="auth-fact-label">Local accounts</span>
+            <span class="auth-fact-value">{{ users.length || '—' }}</span>
+          </div>
+          <div class="auth-fact">
+            <span class="auth-fact-label">Default admin</span>
+            <span class="auth-fact-value mono">admin</span>
           </div>
         </div>
       </div>
 
-      <!-- Section B: Single Sign-On -->
-      <div class="section-card card">
+      <!-- Single Sign-On -->
+      <div class="section-card card auth-sso-card">
         <div class="card-header">
           <div class="card-header-text">
             <h2 class="card-title">Single Sign-On</h2>
             <p class="card-desc text-secondary">
-              Authenticate users via your identity provider using OIDC or SAML 2.0.
+              Authenticate users against your identity provider over OIDC or SAML 2.0.
             </p>
           </div>
+          <span v-if="ssoProvider.enabled" class="auth-pill auth-pill-on">Active</span>
         </div>
 
-        <!-- SSO not configured: show configure button -->
+        <!-- Not configured -->
         <div v-if="!ssoProvider.enabled" class="auth-sso-disabled">
-          <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; max-width: 52ch; margin-bottom: var(--sp-3);">
-            SSO lets your team sign in with their existing identity provider (Google Workspace, Okta, Azure AD, etc.) instead of managing separate Rush passwords.
+          <p class="auth-sso-pitch">
+            Let your team sign in with the directory you already run — Google Workspace, Okta, Entra ID, or any OIDC or SAML provider — instead of a second set of Rush passwords.
           </p>
+          <ul class="auth-benefits">
+            <li>Joiners and leavers follow your directory, not a Rush user list.</li>
+            <li>Identity-provider groups map to Rush permission groups on sign-in.</li>
+            <li>Local accounts keep working, so a provider outage is not a lockout.</li>
+          </ul>
           <button class="btn btn-primary" @click="openWizard">Configure SSO</button>
         </div>
 
-        <!-- SSO enabled: provider info + reconfigure -->
+        <!-- Configured -->
         <div v-if="ssoProvider.enabled" class="auth-sso-enabled fade-in">
           <div class="auth-sso-summary">
-            <div style="display: flex; align-items: center; gap: var(--sp-2);">
-              <span style="font-size: 13px; font-weight: 500; color: var(--text-primary);">{{ ssoProvider.name || 'Unnamed provider' }}</span>
-              <span class="cell-tag cell-tag-amber">{{ (ssoProvider.protocol || 'oidc').toUpperCase() }}</span>
+            <div class="auth-provider">
+              <span class="auth-provider-name">{{ ssoProvider.name || 'Unnamed provider' }}</span>
+              <span class="cell-tag auth-protocol-tag">{{ (ssoProvider.protocol || 'oidc').toUpperCase() }}</span>
             </div>
-            <div style="display: flex; gap: var(--sp-2);">
+            <div class="auth-sso-actions">
               <button class="btn btn-secondary" @click="openWizard">Reconfigure</button>
-              <label class="toggle">
-                <input type="checkbox" v-model="ssoProvider.enabled" @change="saveSsoConfig" />
-                <span class="toggle-slider"></span>
+              <label class="auth-toggle-field">
+                <span class="auth-toggle-caption">Enabled</span>
+                <span class="toggle">
+                  <input type="checkbox" v-model="ssoProvider.enabled" @change="saveSsoConfig" aria-label="Enable single sign-on" />
+                  <span class="toggle-slider"></span>
+                </span>
               </label>
             </div>
           </div>

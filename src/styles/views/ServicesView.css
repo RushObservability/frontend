@@ -75,9 +75,7 @@
   touch-action: none;
   border-radius: var(--r-md);
   background-color: var(--bg-base, transparent);
-  /* faint dotted grid → "canvas" feel */
-  background-image: radial-gradient(circle, var(--border-subtle) 1px, transparent 1px);
-  background-size: 22px 22px;
+  border: 1px solid var(--border-subtle);
 }
 .graph-svg.panning { cursor: grabbing; }
 

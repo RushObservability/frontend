@@ -23,8 +23,8 @@
   top: 0;
   bottom: 0;
   width: 2px;
-  background: linear-gradient(180deg, var(--amber) 0%, transparent 100%);
-  opacity: 0.6;
+  background: var(--amber);
+  opacity: 0.4;
 }
 
 .stat {
@@ -1132,6 +1132,10 @@
 
 .event-table {
   overflow: hidden;
+}
+
+.event-table :deep(.virtual-table-viewport) {
+  max-height: min(78vh, 960px);
 }
 
 .et-head {
@@ -3617,17 +3621,17 @@ kbd {
 
 /* Default amber bar */
 .bubbleup-val-row .bubbleup-val-bar {
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.3), rgba(59, 130, 246, 0.5));
+  background: rgba(59, 130, 246, 0.4);
 }
 
 /* High lift: strong amber */
 .bubbleup-val-row.lift-high .bubbleup-val-bar {
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.4), rgba(59, 130, 246, 0.7));
+  background: rgba(59, 130, 246, 0.65);
 }
 
 /* Very high lift: amber glow */
 .bubbleup-val-row.lift-very-high .bubbleup-val-bar {
-  background: linear-gradient(90deg, rgba(59, 130, 246, 0.5), var(--amber));
+  background: var(--amber);
 }
 
 /* Low lift: dimmed */

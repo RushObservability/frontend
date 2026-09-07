@@ -461,7 +461,8 @@ function errorHeight(bucket: CountBucket): number {
 
 .timeline-key--normal { background: var(--histogram-bar-hover, #3b82f6); }
 .timeline-key--error {
-  background: repeating-linear-gradient(135deg, var(--error) 0 2px, color-mix(in srgb, var(--error) 55%, white) 2px 4px);
+  background: transparent;
+  border: 1px solid var(--error);
 }
 
 .timeline-chart {
@@ -552,7 +553,9 @@ function errorHeight(bucket: CountBucket): number {
 .timeline-bar--error {
   z-index: 1;
   min-height: 2px;
-  background: repeating-linear-gradient(135deg, var(--error) 0 2px, color-mix(in srgb, var(--error) 58%, white) 2px 4px);
+  background: transparent;
+  border: 1px solid var(--error);
+  box-sizing: border-box;
 }
 
 .timeline-column--active .timeline-stack {

@@ -38,7 +38,7 @@
   user-select: none;
 }
 
-.data-table :deep(th.sortable) {
+.data-table th.sortable {
   padding: 0;
 }
 

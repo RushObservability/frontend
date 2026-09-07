@@ -1,6 +1,6 @@
 // Shared chart geometry helpers for all SVG charts (dashboard, SLOs, previews,
 // metrics). The goal is one cohesive, refined look: smooth monotone curves,
-// gradient area fills, crisp non-scaling strokes, and consistent ticks.
+// flat area fills, crisp non-scaling strokes, and consistent ticks.
 
 import type { TimeDomain } from '../types'
 

@@ -1264,7 +1264,7 @@
 
 .active-detector {
   padding: 15px 16px 16px;
-  background: linear-gradient(115deg, var(--error-dim), transparent 42%), var(--bg-surface);
+  background: color-mix(in srgb, var(--error) 6%, var(--bg-surface));
   border: 1px solid rgba(229, 88, 79, 0.28);
   border-radius: var(--r-lg);
 }
@@ -1416,7 +1416,7 @@ button.empty-link {
 }
 
 .detector-shell.is-anomalous {
-  background: linear-gradient(100deg, var(--error-dim), transparent 32%), var(--bg-surface);
+  background: color-mix(in srgb, var(--error) 6%, var(--bg-surface));
   border-color: rgba(229, 88, 79, 0.3);
 }
 

@@ -5,7 +5,8 @@ describe('SignalTimelinePanel', () => {
   it('separates normal traffic from errors without relying on color alone', () => {
     expect(source).toContain('timeline-bar--normal')
     expect(source).toContain('timeline-bar--error')
-    expect(source).toContain('repeating-linear-gradient')
+    expect(source).toContain('background: transparent')
+    expect(source).toContain('border: 1px solid var(--error)')
     expect(source).toContain('Error / 5xx')
   })
 

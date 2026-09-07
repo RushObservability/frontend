@@ -10,6 +10,10 @@
 
 **Borders-only.** No shadows. Separation via subtle border colors at three intensity levels. This matches the dense, technical feel — shadows would soften the precision.
 
+## Flat color rule
+
+**No gradients.** Do not use linear, radial, conic, or repeating gradients for backgrounds, accents, progress bars, charts, or loading states. Use one semantic color token, a border, or a change in opacity. Flat color keeps status and hierarchy unambiguous in both themes.
+
 ## Backgrounds (elevation scale)
 
 ```

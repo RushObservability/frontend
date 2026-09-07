@@ -10,8 +10,8 @@ function between(start: string, end: string): string {
 }
 
 describe('Explore query plan', () => {
-  it('shows the latency chart by default for trace results', () => {
-    expect(source).toContain('const scatterExpanded = ref(true)')
+  it('keeps the latency chart collapsed by default for trace results', () => {
+    expect(source).toContain('const scatterExpanded = ref(false)')
     expect(source).toContain('<div v-if="scatterExpanded" id="latency-over-time-chart"')
   })
 

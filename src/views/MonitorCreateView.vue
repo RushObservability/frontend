@@ -83,13 +83,7 @@ function onCancel() {
 
 .mcp-divider {
   height: 1px;
-  background: linear-gradient(
-    90deg,
-    var(--border-subtle) 0%,
-    var(--amber-muted) 30%,
-    var(--amber-muted) 70%,
-    var(--border-subtle) 100%
-  );
+  background: var(--border-default);
   margin-bottom: var(--sp-5);
 }
 </style>

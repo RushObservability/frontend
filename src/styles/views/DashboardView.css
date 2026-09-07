@@ -78,7 +78,7 @@
   gap: var(--sp-3);
   min-height: 48px;
   padding: 8px var(--sp-3);
-  background: linear-gradient(90deg, var(--amber-dim), transparent 65%);
+  background: var(--amber-dim);
   border: 1px dashed var(--amber-muted);
 }
 .edit-mode-copy,
@@ -123,9 +123,7 @@
   min-height: 70px;
   padding: var(--sp-3) var(--sp-4);
   color: var(--text-secondary);
-  background:
-    repeating-linear-gradient(135deg, transparent 0 10px, rgba(59,130,246,.025) 10px 11px),
-    var(--bg-surface);
+  background: var(--bg-surface);
   border: 1px dashed var(--border-strong);
   border-radius: var(--r-sm);
   text-align: left;

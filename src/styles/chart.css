@@ -6,7 +6,7 @@
    - thin, CRISP strokes that never bloat when the SVG scales
      (vector-effect: non-scaling-stroke is the key fix for the old "bulky" look)
    - smooth monotone curves (see lib/chart.ts) instead of jagged segments
-   - vertical gradient area fills (series color → transparent)
+   - flat, low-opacity area fills using the series color
    - quiet, horizontal-only grid; small mono axis labels
    - a single tasteful draw-in on mount
    ────────────────────────────────────────────────────────────────────────── */
@@ -33,7 +33,7 @@
   opacity: 0.7;
 }
 
-/* Flat (NO gradient) area fill — a single low-opacity wash of the series color.
+/* Flat area fill using a single low-opacity wash of the series color.
    Color comes from `color`/currentColor so one class serves every series. */
 .ch-area {
   stroke: none;

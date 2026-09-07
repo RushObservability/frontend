@@ -95,8 +95,8 @@
   top: 0;
   bottom: 0;
   width: 2px;
-  background: linear-gradient(180deg, var(--amber) 0%, transparent 100%);
-  opacity: 0.5;
+  background: var(--amber);
+  opacity: 0.35;
 }
 
 .journey-label {

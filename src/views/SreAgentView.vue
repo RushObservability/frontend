@@ -457,16 +457,7 @@ function onSessionLoaded(session: InvestigationSession) {
 .grid-col:last-child { border-right: none; }
 
 .sre-idle::before {
-  content: '';
-  position: absolute;
-  top: 28%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 700px;
-  height: 700px;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.055) 0%, transparent 65%);
-  pointer-events: none;
-  z-index: 0;
+  content: none;
 }
 
 /* Layout */

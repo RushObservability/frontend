@@ -369,16 +369,16 @@
 /* Loading */
 .loading-bar {
   position: absolute;
-  top: 0; left: 0; right: 0;
+  top: 0; left: 0;
+  width: 30%;
   height: 3px;
-  background: linear-gradient(90deg, transparent, var(--amber), transparent);
-  background-size: 200% 100%;
+  background: var(--amber);
   animation: loading-slide 1.2s ease-in-out infinite;
   z-index: 10;
 }
 @keyframes loading-slide {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(433%); }
 }
 .dimmed {
   opacity: 0.45;
