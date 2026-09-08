@@ -55,3 +55,29 @@ export function virtualWindow(
   while (end < count && offsets[end]! < target) end++
   return { start, end: Math.min(count, end + overscan) }
 }
+
+/**
+ * Scroll offset that brings row `index` into view, or the current offset when
+ * no scroll is warranted.
+ *
+ * `auto` deliberately keys off the row's *start* only. Aligning on the row's
+ * bottom moves the list whenever the row is taller than the space left below
+ * it — which is what an expanded detail row is — so clicking a visible row
+ * would scroll it out from under the pointer. Keyboard navigation still
+ * scrolls, because moving onto an off-screen row puts `top` outside the view.
+ */
+export function virtualScrollTarget(
+  offsets: readonly number[],
+  index: number,
+  scrollTop: number,
+  viewportHeight: number,
+  align: 'auto' | 'center' = 'auto',
+): number {
+  const count = Math.max(0, offsets.length - 1)
+  if (index < 0 || index >= count) return scrollTop
+  const top = offsets[index]!
+  const bottom = offsets[index + 1]!
+  if (align === 'center') return Math.max(0, top - (viewportHeight - (bottom - top)) / 2)
+  if (top < scrollTop || top >= scrollTop + viewportHeight) return Math.max(0, top)
+  return scrollTop
+}

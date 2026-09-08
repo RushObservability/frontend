@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import source from './ExploreView.vue?raw'
+import traceViewSource from './TraceView.vue?raw'
+import waterfallComponent from '../components/TraceWaterfall.vue?raw'
 
 function between(start: string, end: string): string {
   const from = source.indexOf(start)
@@ -22,6 +24,25 @@ describe('Explore query plan', () => {
     expect(source).toContain('<b>P99</b> tail')
     expect(source).toContain('LATENCY · LOG SCALE')
     expect(source).toContain('scatterHoverPosition')
+  })
+
+  // The waterfall moved into <TraceWaterfall> so the standalone trace page renders
+  // the identical timeline. Ordering, depth and collapse behaviour are covered
+  // properly in src/lib/traceWaterfall.test.ts; this only pins the wiring.
+  it('renders the trace waterfall through the shared component', () => {
+    expect(source).toContain("import TraceWaterfall from '../components/TraceWaterfall.vue'")
+    expect(source).toContain('<TraceWaterfall')
+    expect(source).toContain(':active-span-id="activeSpanId"')
+    expect(source).toContain('@select="selectTraceSpan"')
+  })
+
+  it('shares one waterfall between Explore and the trace page', () => {
+    expect(waterfallComponent).toContain('aria-label="Trace span waterfall"')
+    expect(waterfallComponent).toContain("{{ collapsed.size ? 'Expand all' : 'Collapse all' }}")
+    expect(waterfallComponent).toContain('class="tw-gridline"')
+    expect(waterfallComponent).toContain('buildWaterfallRows(props.trace?.spans ?? [], collapsed.value)')
+    expect(traceViewSource).toContain("import TraceWaterfall from '../components/TraceWaterfall.vue'")
+    expect(traceViewSource).toContain('<TraceWaterfall')
   })
 
   it('anchors the latency x-axis to the selected Explore time range', () => {

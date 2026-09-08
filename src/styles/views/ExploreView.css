@@ -1316,29 +1316,41 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-4);
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-raised);
+  /* Chrome, not content. Clicking the row to expand was dragging a selection
+     across these chips and leaving them highlighted. */
+  user-select: none;
 }
 .lid-toolbar-left {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  min-width: 0;
+  flex-wrap: wrap;
 }
 .lid-svc {
   font-size: 12px;
   font-weight: 600;
-  color: var(--amber);
+  color: var(--text-primary);
   cursor: pointer;
+  border-bottom: 1px dotted var(--border-strong);
 }
-.lid-svc:hover { text-decoration: underline; }
-.lid-ts { font-size: 11px; color: var(--text-muted); }
+.lid-svc:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.lid-ts {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
 .lid-source-tag {
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   background: var(--bg-overlay);
   padding: 1px 6px;
   border-radius: var(--r-sm);
@@ -1388,15 +1400,34 @@
 
 /* ── Message body ── */
 .lid-message {
-  padding: var(--sp-3) var(--sp-4);
+  --tone: var(--border-strong);
+  position: relative;
+  padding: var(--sp-4);
   border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
 }
+.lid-tone-error { --tone: var(--error); }
+.lid-tone-warn  { --tone: var(--warning); }
+/* The "MESSAGE" heading is dropped: position and size already say what this is,
+   and the label was competing with the line it introduced. The copy button
+   floats instead of reserving a row. */
 .lid-message-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--sp-2);
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-3);
+  z-index: 1;
 }
+.lid-message-header .lid-section-label { display: none; }
+.lid-message .lid-copy-btn {
+  opacity: 0;
+  padding: 3px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--bg-raised);
+  transition: opacity 0.1s, color 0.1s;
+}
+.lid-message:hover .lid-copy-btn,
+.lid-message:focus-within .lid-copy-btn { opacity: 1; }
 .lid-section-label {
   font-size: 10px;
   font-weight: 700;
@@ -1416,33 +1447,57 @@
 .lid-copy-btn:hover { color: var(--text-primary); }
 .lid-body {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.55;
+  /* The log line is why the row was opened — it outranks the metadata below.
+     Deliberately unboxed: it used to sit on --bg-overlay, the darkest of the
+     three greys in this panel, which made the focal content recede behind its
+     own container. It now sits on the panel background at full contrast, with
+     only a severity rule as chrome. */
+  font-size: 14px;
+  line-height: 1.6;
   color: var(--text-primary);
   white-space: pre-wrap;
-  word-break: break-word;
-  background: var(--bg-overlay);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-md);
-  padding: var(--sp-3);
+  overflow-wrap: anywhere;
+  background: none;
+  border: none;
+  border-left: 2px solid var(--tone);
+  border-radius: 0;
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-3);
   max-height: 280px;
   overflow-y: auto;
+  tab-size: 2;
 }
+/* JSON token colours, shared with the modal detail view. */
+.lid-body .jt-key   { color: var(--text-primary); font-weight: 600; }
+.lid-body .jt-str   { color: var(--ok); }
+.lid-body .jt-num   { color: var(--accent-hover); }
+.lid-body .jt-bool  { color: var(--warning); }
+.lid-body .jt-null  { color: var(--text-muted); font-style: italic; }
+.lid-body .jt-punc  { color: var(--text-muted); }
+.lid-body .jt-plain { color: var(--text-secondary); }
 
-/* ── Fields columns ── */
+/* ── Fields columns ──
+   Grid, not flex: with `flex: 1; min-width: 180px` and no wrapping, three
+   columns overflowed the panel and the last one was clipped off the right edge.
+   auto-fit + minmax reflows to two, then one, instead of overflowing. */
 .lid-columns {
-  display: flex;
-  gap: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+  padding: var(--sp-3) var(--sp-4);
   border-bottom: 1px solid var(--border-subtle);
 }
 .lid-col {
-  flex: 1;
-  min-width: 180px;
+  min-width: 0;
   padding: var(--sp-2) var(--sp-3);
-  border-right: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--bg-raised);
 }
-.lid-col:last-child { border-right: none; }
-.lid-col .lid-section-label { margin-bottom: var(--sp-1); }
+.lid-col .lid-section-label {
+  display: block;
+  margin-bottom: var(--sp-2);
+}
 
 .lid-field-table {
   display: flex;
@@ -1463,22 +1518,24 @@
 
 .lid-field-k {
   font-size: 11px;
-  color: var(--text-muted);
-  min-width: 90px;
+  color: var(--text-tertiary);
+  min-width: 92px;
+  max-width: 40%;
   flex-shrink: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .lid-field-v {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-primary);
-  word-break: break-all;
+  /* anywhere, not break-all: keeps short values whole, breaks only long ids */
+  overflow-wrap: anywhere;
   flex: 1;
   min-width: 0;
 }
 .lid-link {
-  color: var(--amber);
+  color: var(--accent);
   text-decoration: none;
 }
 .lid-link:hover { text-decoration: underline; }
@@ -1649,20 +1706,39 @@
   position: fixed;
   inset: 0;
   z-index: 9000;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(2px);
+  /* Barely dimmed on purpose: the point of a side panel is that the result list
+     stays readable beside it. A 60% black scrim with a blur hid the very rows
+     you are reading the panel against. */
+  background: rgba(0, 0, 0, 0.18);
   display: flex;
   justify-content: flex-end;
 }
 .detail-panel {
-  background: var(--bg-raised);
-  border-left: 2px solid var(--amber);
-  box-shadow: -8px 0 40px rgba(0, 0, 0, 0.5);
-  width: 75%;
+  --tone: var(--border-strong);
+  position: relative;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-default);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.22);
+  width: min(58%, 1080px);
   height: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+/* Severity reads on the panel's own edge rather than decorating one section. */
+.detail-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--tone);
+}
+.dp-tone-error { --tone: var(--error); }
+.dp-tone-warn  { --tone: var(--warning); }
+.dp-tone-info  { --tone: var(--accent); }
+
+@media (max-width: 1100px) {
+  .detail-panel { width: 88%; }
 }
 .detail-panel-inner {
   display: flex;
@@ -1748,12 +1824,57 @@
   display: inline-flex;
   gap: var(--sp-1);
 }
-/* ── Log detail: fields table ── */
-.dp-log-fields {
-  padding: var(--sp-2) var(--sp-4);
-  border-bottom: 1px solid var(--border-subtle);
+/* ── Log detail: header identity ── */
+.dp-log-when {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.dp-log-when em {
+  color: var(--text-tertiary);
+  font-style: normal;
 }
 
+/* ── Log detail: record identity ── */
+.dp-log-fields {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.dp-log-ident {
+  margin: var(--sp-2) 0 0;
+  display: grid;
+  gap: 1px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+.dp-log-ident-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: 6px var(--sp-3);
+  background: var(--bg-raised);
+}
+.dp-log-ident-row dt {
+  min-width: 96px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.dp-log-ident-row dd {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* ── Log detail: attribute rows ── */
 .dp-log-field-row {
   display: flex;
   align-items: baseline;
@@ -1764,45 +1885,86 @@
 }
 .dp-log-field-row:last-child { border-bottom: none; }
 
-.dp-log-field-clickable { cursor: pointer; transition: background 0.08s; }
-.dp-log-field-clickable:hover { background: var(--bg-hover); }
+.dp-log-attr-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: 5px var(--sp-2);
+  border-radius: var(--r-sm);
+  transition: background 0.08s;
+}
+.dp-log-attr-row:hover { background: var(--bg-hover); }
 
 .dp-log-field-k {
   font-size: 11px;
-  color: var(--text-muted);
-  min-width: 110px;
+  color: var(--text-tertiary);
+  min-width: 150px;
   flex-shrink: 0;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .dp-log-field-v {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-primary);
-  word-break: break-all;
+  /* anywhere, not break-all: keeps short tokens whole and only breaks long ones */
+  overflow-wrap: anywhere;
   flex: 1;
   min-width: 0;
 }
 
 .dp-log-link {
-  color: var(--amber);
+  color: var(--accent);
   text-decoration: none;
 }
 .dp-log-link:hover { text-decoration: underline; }
 
-.dp-log-field-action {
-  font-size: 11px;
-  color: var(--text-muted);
+/* Named buttons instead of a bare "»" glyph — the old affordance never said
+   what clicking a row would do. */
+.dp-log-row-actions {
+  display: flex;
+  gap: var(--sp-1);
+  flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.1s;
-  flex-shrink: 0;
 }
-.dp-log-field-clickable:hover .dp-log-field-action { opacity: 1; color: var(--amber); }
+.dp-log-attr-row:hover .dp-log-row-actions,
+.dp-log-attr-row:focus-within .dp-log-row-actions { opacity: 1; }
+.dp-log-row-btn {
+  padding: 2px 7px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+}
+.dp-log-row-btn:hover { color: var(--text-primary); border-color: var(--border-strong); }
+.dp-log-row-btn:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 1px; opacity: 1; }
+
+.dp-log-count {
+  margin-left: var(--sp-2);
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--bg-raised);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
 
 /* ── Log detail: message body ── */
 .dp-log-body {
+  --tone: var(--text-muted);
   padding: var(--sp-3) var(--sp-4);
   border-bottom: 1px solid var(--border-subtle);
 }
+.dp-log-tone-error { --tone: var(--error); }
+.dp-log-tone-warn  { --tone: var(--warning); }
+.dp-log-tone-info  { --tone: var(--border-strong); }
 .dp-log-body-header {
   display: flex;
   justify-content: space-between;
@@ -1814,32 +1976,92 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 .dp-log-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
   background: none;
-  border: none;
-  color: var(--text-muted);
+  border: 1px solid transparent;
+  color: var(--text-tertiary);
   cursor: pointer;
-  padding: 2px;
+  padding: 2px 7px;
   border-radius: var(--r-sm);
-  transition: color 0.1s;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  transition: color 0.1s, border-color 0.1s;
 }
-.dp-log-copy-btn:hover { color: var(--text-primary); }
+.dp-log-copy-btn:hover { color: var(--text-primary); border-color: var(--border-default); }
+.dp-log-copy-btn:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 1px; }
+.dp-log-body-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+/* Parsed / Raw segmented control */
+.dp-log-seg {
+  display: inline-flex;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.dp-log-seg button {
+  padding: 2px 9px;
+  border: none;
+  background: var(--bg-surface);
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.dp-log-seg button + button { border-left: 1px solid var(--border-default); }
+.dp-log-seg button:hover { color: var(--text-primary); }
+.dp-log-seg button.on { background: var(--bg-active); color: var(--text-primary); }
+.dp-log-seg button:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: -2px; }
+.dp-log-copy-btn.on { color: var(--text-primary); border-color: var(--border-default); }
+
 .dp-log-message {
-  font-size: 12px;
+  /* The reason the panel is open — sized above the metadata around it.
+     Boxed, but only just: the container sits one step off the panel background
+     rather than on --bg-overlay, which was the darkest grey in the panel and
+     made the focal content read as disabled. */
+  font-size: 13.5px;
   color: var(--text-primary);
-  line-height: 1.55;
+  line-height: 1.6;
   white-space: pre-wrap;
-  word-break: break-all;
-  background: var(--bg-overlay);
+  overflow-wrap: anywhere;
+  background: var(--bg-raised);
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-md);
-  padding: var(--sp-3);
-  max-height: 300px;
+  padding: var(--sp-3) var(--sp-4);
+  max-height: 340px;
   overflow-y: auto;
   margin: 0;
+  tab-size: 2;
 }
+/* Wrap off: keep original line structure and scroll sideways instead. */
+.dp-log-message.nowrap {
+  white-space: pre;
+  overflow-x: auto;
+  overflow-wrap: normal;
+}
+
+/* JSON token colours. Keys carry the weight; values are typed by hue. */
+.dp-log-json .jt-key   { color: var(--text-primary); font-weight: 600; }
+.dp-log-json .jt-str   { color: var(--ok); }
+.dp-log-json .jt-num   { color: var(--accent-hover); }
+.dp-log-json .jt-bool  { color: var(--warning); }
+.dp-log-json .jt-null  { color: var(--text-muted); font-style: italic; }
+.dp-log-json .jt-punc  { color: var(--text-muted); }
+.dp-log-json .jt-plain { color: var(--text-secondary); }
 
 /* ── Log detail: attribute sections ── */
 .dp-log-attr-section {
@@ -2005,21 +2227,125 @@
 }
 
 /* Investigation context: a compact, action-oriented rail within the detail panel. */
-.investigation-rail { max-width: 420px; margin: var(--sp-3) auto; padding: var(--sp-4); background: var(--bg-surface); border: 1px solid var(--border-default); border-left: 3px solid var(--amber); border-radius: var(--r-md); }
-.investigation-rail h3 { margin: 3px 0 var(--sp-3); font-size: 16px; color: var(--text-primary); }
-.ir-eyebrow, .ir-section-title { font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing: .09em; text-transform: uppercase; }
-.ir-summary { display: flex; gap: var(--sp-3); padding-bottom: var(--sp-3); font-size: 11px; color: var(--text-secondary); }
+/* Context tab. Full-bleed stacked sections, matching the Details and Attributes
+   tabs — this was a 420px centred card with its own border and accent rule,
+   which read as a floating widget rather than another view of the same panel. */
+.investigation-rail { display: block; }
+.investigation-rail > .ir-eyebrow,
+.investigation-rail > h3,
+.investigation-rail > .ir-summary,
+.investigation-rail > .ir-actions { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+.investigation-rail > .ir-eyebrow { padding-top: var(--sp-3); }
+.investigation-rail h3 {
+  margin: var(--sp-1) 0 var(--sp-2);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -.015em;
+  color: var(--text-primary);
+}
+.ir-eyebrow, .ir-section-title { font-size: 10px; font-weight: 700; color: var(--text-tertiary); letter-spacing: .09em; text-transform: uppercase; }
+.ir-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  padding-bottom: var(--sp-3);
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
 .ir-summary b { color: var(--text-primary); }
-.ir-actions { display: grid; gap: 6px; }
-.ir-primary, .ir-action, .ir-link { text-align: left; border-radius: var(--r-sm); padding: 8px 10px; font-size: 11px; cursor: pointer; }
-.ir-primary { background: var(--amber); color: var(--bg-void); font-weight: 700; text-decoration: none; }
-.ir-action { border: 1px solid var(--border-default); background: var(--bg-raised); color: var(--text-primary); }
-.ir-link { padding: 0; border: 0; background: none; color: var(--amber); }
-.ir-section { margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--border-subtle); }
-.ir-section-title { margin-bottom: var(--sp-2); }
-.ir-empty { margin: 0; color: var(--text-muted); font-size: 11px; }
+.ir-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ir-primary, .ir-action {
+  text-align: left;
+  border-radius: var(--r-sm);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.ir-primary {
+  background: var(--accent);
+  /* Was --bg-void, which is a light grey in the light theme and failed contrast
+     on the blue fill. --text-inverse is the token meant for filled controls. */
+  color: var(--text-inverse);
+  border: 1px solid var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.ir-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.ir-action { border: 1px solid var(--border-default); background: var(--bg-raised); color: var(--text-secondary); }
+.ir-action:hover { color: var(--text-primary); border-color: var(--border-strong); background: var(--bg-hover); }
+.ir-primary:focus-visible, .ir-action:focus-visible, .ir-link:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: 2px;
+}
+.ir-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.ir-link:hover { text-decoration: underline; }
+/* Same rhythm as .dp-log-attr-section: full width, hairline separated. */
+.ir-section {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ir-section-title { display: block; margin-bottom: var(--sp-2); }
+.ir-hint { margin: 0 0 var(--sp-2); color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
+.ir-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--sp-3); }
+.ir-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-pill);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.ir-chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
+.ir-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+.ir-chip:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 2px; }
+.ir-chip-k { color: var(--text-tertiary); }
+.ir-chip.on .ir-chip-k { color: var(--accent); }
+.ir-chip-v {
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ir-stream-btn:disabled {
+  opacity: .5;
+  cursor: default;
+  background: var(--bg-raised);
+  border-color: var(--border-default);
+  color: var(--text-tertiary);
+}
+.ir-empty { margin: 0; color: var(--text-tertiary); font-size: 12px; }
 .ir-service-list { display: flex; flex-wrap: wrap; gap: 5px; }
-.ir-service-list span { padding: 3px 6px; background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-secondary); font: 10px var(--font-mono, monospace); }
+.ir-service-list span { padding: 3px 8px; background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--r-pill); color: var(--text-secondary); font: 11px var(--font-mono, monospace); }
 .trace-summary {
   display: flex;
   flex-wrap: wrap;
@@ -2467,121 +2793,303 @@
 .trace-link:hover { opacity: 0.8; }
 
 /* ── Waterfall Timeline ── */
+.wf-section-header {
+  align-items: flex-end;
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.wf-section-header > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.wf-section-summary {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.wf-section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+.wf-error-count {
+  padding: 3px 7px;
+  color: var(--error);
+  background: var(--error-dim);
+  border: 1px solid color-mix(in srgb, var(--error) 32%, transparent);
+  border-radius: var(--r-sm);
+  font-size: 10px;
+  font-weight: 700;
+}
+.wf-collapse-all {
+  min-height: 26px;
+  padding: 3px 8px;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  font: 600 10px var(--font-ui);
+  cursor: pointer;
+}
+.wf-collapse-all:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+.wf-collapse-all:disabled { opacity: .45; cursor: default; }
+.wf-service-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  min-height: 30px;
+  padding: 5px 10px;
+  color: var(--text-secondary);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-bottom: 0;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  font-size: 10px;
+}
+.wf-service-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.wf-service-legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.wf-service-legend .wf-trace-total {
+  margin-left: auto;
+  color: var(--text-muted);
+}
 .wf-container {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--r-sm);
-  overflow: hidden;
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.wf-header,
+.wf-row {
+  display: grid;
+  grid-template-columns: minmax(300px, 34%) minmax(320px, 1fr) 110px;
+  align-items: center;
+  min-width: 760px;
 }
 .wf-header {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 6px 12px;
+  min-height: 38px;
+  padding: 0 10px;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-overlay);
+  letter-spacing: 0.07em;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-raised);
 }
 .wf-col-service {
-  min-width: 220px;
-  max-width: 280px;
-  flex-shrink: 0;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   overflow: hidden;
   position: relative;
 }
 .wf-col-bar {
-  flex: 1;
-  min-width: 120px;
+  min-width: 0;
   position: relative;
   display: flex;
   align-items: center;
 }
 .wf-col-dur {
-  min-width: 90px;
-  flex-shrink: 0;
+  min-width: 0;
   text-align: right;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
-  padding-left: 8px;
+  gap: 7px;
+  padding-left: 10px;
 }
-.wf-time-label {
-  font-size: 10px;
-  font-weight: 400;
+.wf-time-tick {
+  position: absolute;
+  top: 50%;
   color: var(--text-muted);
-  opacity: 0.6;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
 }
+.wf-time-tick.is-first { transform: translate(0, -50%); }
+.wf-time-tick.is-last { transform: translate(-100%, -50%); }
 .wf-row {
-  display: flex;
-  align-items: center;
-  padding: 5px 12px;
+  min-height: 42px;
+  padding: 0 10px;
   font-size: 11px;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--border-subtle);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background .1s, box-shadow .1s;
 }
 .wf-row:last-child { border-bottom: none; }
 .wf-row:hover { background: var(--bg-hover); }
+.wf-row:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
 .wf-row-active {
-  background: var(--amber-dim) !important;
+  background: var(--bg-active);
+}
+.wf-row-current {
+  background: color-mix(in srgb, var(--amber) 8%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 var(--amber);
+}
+.wf-row-error:not(.wf-row-current) {
+  box-shadow: inset 2px 0 0 var(--error);
 }
 .wf-row-error .wf-op { color: var(--error); }
-.wf-row-current {
-  border-left: 2px solid var(--amber);
-}
-.wf-indent-guide {
+.wf-tree-connector {
+  height: 8px;
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
+  left: 8px;
+  top: 50%;
+  border-bottom: 1px solid var(--border-default);
+  transform: translateY(-50%);
   pointer-events: none;
 }
-.wf-indent-line {
-  display: block;
-  width: 100%;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+.wf-branch-toggle,
+.wf-leaf-marker {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+.wf-branch-toggle {
+  padding: 0;
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.wf-branch-toggle:hover { color: var(--text-primary); border-color: var(--border-strong); }
+.wf-branch-toggle svg {
+  width: 9px;
+  height: 9px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  transition: transform .14s ease-out;
+}
+.wf-branch-toggle svg.collapsed { transform: rotate(-90deg); }
+.wf-leaf-marker::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  background: var(--border-strong);
+  border-radius: 50%;
+}
+.wf-service-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+}
+.wf-span-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
 }
 .wf-svc {
   font-weight: 600;
   white-space: nowrap;
-  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 9px;
+  line-height: 1;
 }
 .wf-op {
-  color: var(--text-muted);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
+  line-height: 1.2;
+}
+.wf-event-count {
+  min-width: 17px;
+  padding: 1px 4px;
+  margin-left: auto;
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-pill);
+  font-size: 8px;
+  text-align: center;
 }
 .wf-bar-track {
   width: 100%;
-  height: 10px;
-  background: rgba(255,255,255,0.03);
-  border-radius: 2px;
+  height: 18px;
+  background: var(--bg-root);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
   position: relative;
+  overflow: hidden;
 }
-.wf-bar {
-  height: 100%;
-  border-radius: 2px;
-  min-width: 2px;
+.wf-grid-line {
   position: absolute;
   top: 0;
-  opacity: 0.8;
-  transition: opacity 0.15s;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-subtle);
+  pointer-events: none;
+}
+.wf-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 12px;
+  min-width: 3px;
+  position: absolute;
+  top: 2px;
+  padding-right: 4px;
+  border-radius: 2px;
+  opacity: .82;
+  overflow: hidden;
+  transition: opacity .12s, box-shadow .12s;
 }
 .wf-row:hover .wf-bar { opacity: 1; }
+.wf-row-current .wf-bar {
+  opacity: 1;
+  box-shadow: 0 0 0 1px var(--text-primary);
+}
+.wf-bar-label {
+  color: var(--text-inverse);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+.wf-duration { font-size: 10px; }
 .wf-status {
-  font-size: 10px;
+  min-width: 28px;
+  padding: 1px 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
 }
 
 /* Waterfall inline detail */

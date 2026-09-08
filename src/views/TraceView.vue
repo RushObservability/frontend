@@ -5,6 +5,7 @@ import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
 import type { TraceResponse, SpanNode } from '../types'
 import VirtualTable from '../components/VirtualTable.vue'
+import TraceWaterfall from '../components/TraceWaterfall.vue'
 
 const props = defineProps<{ traceId: string }>()
 const router = useRouter()
@@ -34,8 +35,6 @@ function statusClass(status: string, code: number): string {
   return 'status-ok'
 }
 
-// Compute the total trace duration for waterfall bar scaling
-const traceDuration = computed(() => trace.value?.duration_ns ?? 1)
 
 // Flatten spans into a list with depth for the waterfall
 interface FlatSpan {
@@ -56,38 +55,20 @@ const flatSpans = computed<FlatSpan[]>(() => {
   return result
 })
 
-function barWidth(ns: number): string {
-  const pct = Math.max((ns / traceDuration.value) * 100, 0.5)
-  return `${pct}%`
-}
 
-// Parse "YYYY-MM-DD HH:MM:SS.nnnnnnnnn" from nanos_to_string into ms
-function parseTraceTimestamp(ts: string): number {
-  const iso = ts.replace(' ', 'T').replace(/(\.\d{3})\d*$/, '$1') + 'Z'
-  return new Date(iso).getTime()
-}
 
-function barOffset(span: SpanNode): string {
-  if (!trace.value || flatSpans.value.length === 0) return '0%'
-  const first = flatSpans.value[0]!.span.timestamp
-  const firstMs = parseTraceTimestamp(first)
-  const spanMs = parseTraceTimestamp(span.timestamp)
-  const diffNs = (spanMs - firstMs) * 1_000_000
-  const pct = Math.max((diffNs / traceDuration.value) * 100, 0)
-  return `${Math.min(pct, 95)}%`
-}
 
 function selectSpan(span: SpanNode) {
   selectedSpan.value = selectedSpan.value?.span_id === span.span_id ? null : span
 }
 
-function flatSpanAt(index: number): FlatSpan {
-  return flatSpans.value[index]!
+/** The waterfall emits a span id; resolve it against the flattened span list. */
+function onWaterfallSelect(spanId: string) {
+  const match = flatSpans.value.find(item => item.span.span_id === spanId)
+  if (match) selectSpan(match.span)
 }
 
-function flatSpanKeyAt(index: number): string {
-  return flatSpans.value[index]?.span.span_id || `span:${index}`
-}
+
 
 // Color assignment per service
 const serviceColors = [
@@ -398,80 +379,13 @@ function investigateTrace() {
 
       <!-- ═══ Waterfall ═══ -->
       <div class="waterfall-panel card fade-in" style="animation-delay: 100ms">
-        <div class="waterfall-label">TIMELINE</div>
-
-        <!-- Time axis -->
-        <div class="time-axis">
-          <span class="mono text-muted">0ms</span>
-          <span class="mono text-muted">{{ formatDuration(traceDuration / 4) }}</span>
-          <span class="mono text-muted">{{ formatDuration(traceDuration / 2) }}</span>
-          <span class="mono text-muted">{{ formatDuration((traceDuration * 3) / 4) }}</span>
-          <span class="mono text-muted">{{ formatDuration(traceDuration) }}</span>
-        </div>
-
-        <!-- Span rows -->
-        <VirtualTable
-          :count="flatSpans.length"
-          :item-key="flatSpanKeyAt"
-          :selected-index="selectedSpan ? flatSpans.findIndex(item => item.span.span_id === selectedSpan?.span_id) : -1"
-          variable
-          aria-label="Trace spans"
-          @activate="selectSpan(flatSpanAt($event).span)"
-        >
-        <template #default="{ index: i }">
-        <template v-for="item in [flatSpanAt(i)]" :key="item.span.span_id">
-        <div
-          class="waterfall-row"
-          :class="{
-            selected: selectedSpan?.span_id === item.span.span_id,
-            'is-error': item.span.status === 'ERROR' || item.span.http_status_code >= 500,
-          }"
-          :style="{ animationDelay: `${i * 30 + 150}ms` }"
-          @click="selectSpan(item.span)"
-        >
-          <!-- Label section -->
-          <div class="span-label" :style="{ paddingLeft: `${item.depth * 20 + 12}px` }">
-            <span class="span-connector" v-if="item.depth > 0">&#9492;&#9472;</span>
-            <span
-              class="span-service"
-              :style="{ color: serviceColor(item.span.service_name) }"
-            >{{ item.span.service_name }}</span>
-            <span class="span-op mono">
-              {{ item.span.http_method }} {{ item.span.http_path }}
-            </span>
-          </div>
-
-          <!-- Bar section -->
-          <div class="span-bar-track">
-            <div class="span-bar-grid">
-              <div class="grid-line" />
-              <div class="grid-line" />
-              <div class="grid-line" />
-              <div class="grid-line" />
-            </div>
-            <div
-              class="span-bar"
-              :style="{
-                width: barWidth(item.span.duration_ns),
-                left: barOffset(item.span),
-                backgroundColor: serviceColor(item.span.service_name),
-              }"
-            >
-              <span class="bar-duration mono">{{ formatDuration(item.span.duration_ns) }}</span>
-            </div>
-          </div>
-
-          <!-- Status -->
-          <div class="span-status">
-            <span
-              class="mono"
-              :class="statusClass(item.span.status, item.span.http_status_code)"
-            >{{ item.span.http_status_code }}</span>
-          </div>
-        </div>
-        </template>
-        </template>
-        </VirtualTable>
+        <TraceWaterfall
+          v-if="trace"
+          :trace="trace"
+          :active-span-id="selectedSpan?.span_id ?? null"
+          title=""
+          @select="onWaterfallSelect"
+        />
       </div>
 
       <!-- ═══ Log Stream ═══ -->

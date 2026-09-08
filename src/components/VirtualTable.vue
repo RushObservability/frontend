@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { buildVirtualOffsets, nextVirtualIndex, virtualWindow } from '../lib/virtualWindow'
+import { buildVirtualOffsets, nextVirtualIndex, virtualScrollTarget, virtualWindow } from '../lib/virtualWindow'
 
 const props = withDefaults(defineProps<{
   count: number
@@ -130,15 +130,10 @@ function observeRow(element: unknown, index: number) {
 function scrollToIndex(index: number, align: 'auto' | 'center' = 'auto') {
   const node = viewport.value
   if (!node || index < 0 || index >= props.count) return
-  const top = offsets.value[index]!
-  const bottom = offsets.value[index + 1]!
-  let target = node.scrollTop
-  if (align === 'center') target = top - (node.clientHeight - (bottom - top)) / 2
-  else if (top < node.scrollTop) target = top
-  else if (bottom > node.scrollTop + node.clientHeight) target = bottom - node.clientHeight
+  const target = virtualScrollTarget(offsets.value, index, node.scrollTop, node.clientHeight, align)
   if (target !== node.scrollTop) {
     programmaticScroll = true
-    node.scrollTop = Math.max(0, target)
+    node.scrollTop = target
   }
 }
 

@@ -12,6 +12,7 @@ import TimePicker from '../components/TimePicker.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import PanelCard from '../components/PanelCard.vue'
 import VirtualTable from '../components/VirtualTable.vue'
+import TraceWaterfall from '../components/TraceWaterfall.vue'
 import ExploreSearchToolbar from '../components/ExploreSearchToolbar.vue'
 import ExploreResultsState from '../components/ExploreResultsState.vue'
 import SignalTimelinePanel from '../components/panels/SignalTimelinePanel.vue'
@@ -583,16 +584,10 @@ async function hydrateOtelLog(entry: LogEntry): Promise<void> {
 function toggleLogRow(index: number) {
   // A user interaction dismisses the deep-link highlight.
   if (highlightLogIdx.value !== null) highlightLogIdx.value = null
-  if (inlineExpandedLog.value === index) {
-    inlineExpandedLog.value = null
-  } else {
-    inlineExpandedLog.value = index
-    const entry = logEntries.value[index]
-    if (entry) void hydrateOtelLog(entry)
-  }
-  // Keep the address bar shareable: an expanded log encodes `&log=<ts>` so the
-  // link reopens and scrolls to this exact line for context.
-  syncUrlState()
+  // Open the side panel rather than expanding in place. An inline panel inside a
+  // virtualised list has to grow the row it lives in, which reflows the rows
+  // below it and fights the scroll position; a side panel never moves the list.
+  void openLogDetailModal(index)
 }
 
 // Deep-link target resolution: scroll to (and briefly highlight) the log line
@@ -670,6 +665,27 @@ function formatLogTimestamp(ns: number): string {
     const time = d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 } as Intl.DateTimeFormatOptions)
     return `${fmtDate(d)} ${time}`
   } catch { return String(ns) }
+}
+
+/** Coarse "how long ago" for a nanosecond timestamp, for the log detail header. */
+function relativeLogTime(ns: number): string {
+  try {
+    const seconds = (Date.now() - ns / 1_000_000) / 1000
+    if (!isFinite(seconds)) return ''
+    if (seconds < 0) return 'just now'
+    if (seconds < 60) return `${Math.floor(seconds)}s ago`
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+    return `${Math.floor(seconds / 86400)}d ago`
+  } catch { return '' }
+}
+
+/** Severity bucket driving the detail panel's accent colour. */
+function logSeverityTone(level: string | undefined): 'error' | 'warn' | 'info' {
+  const l = (level || '').toLowerCase()
+  if (l.startsWith('err') || l.startsWith('crit') || l.startsWith('fatal') || l.startsWith('alert') || l.startsWith('emerg')) return 'error'
+  if (l.startsWith('warn')) return 'warn'
+  return 'info'
 }
 
 function timestampTooltip(ns: number): string {
@@ -2247,6 +2263,12 @@ async function openLogDetailModal(logIdx: number) {
   expandedTrace.value = null
   selectedSpanId.value = null
   expandedLogRow.value = logIdx
+  // Seed the context-stream scope with the log's service so "Show surrounding
+  // logs" is usable on open; the picker in the Context tab refines it.
+  if (contextStreamSelectedAttrs.value.size === 0) {
+    const first = getContextStreamAttrs(entry)[0]
+    if (first) contextStreamSelectedAttrs.value = new Set([first.id])
+  }
   // Load trace/APM only if linked to a span
   if (entry._sourceRowIndex >= 0) {
     const row = results.value[entry._sourceRowIndex]
@@ -2329,6 +2351,38 @@ function isJsonStr(s: string): boolean {
 function prettyJson(s: string): string {
   try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
 }
+
+/**
+ * Split pretty-printed JSON into coloured tokens for the log detail body.
+ *
+ * Returns tokens rather than markup on purpose: log bodies are attacker-controlled,
+ * so this is rendered through `v-for` + text interpolation and never `v-html`.
+ */
+type JsonToken = { t: string; c: string }
+function jsonTokens(source: string): JsonToken[] {
+  const out: JsonToken[] = []
+  // key | string | number | literal | punctuation — anything else falls through as plain.
+  const re = /("(?:\\.|[^"\\])*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)|\b(true|false|null)\b|([{}[\],])/g
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(source)) !== null) {
+    if (m.index > last) out.push({ t: source.slice(last, m.index), c: 'jt-plain' })
+    if (m[1] !== undefined) {
+      // A string followed by a colon is a key, otherwise a value.
+      out.push({ t: m[1], c: m[2] ? 'jt-key' : 'jt-str' })
+      if (m[2]) out.push({ t: m[2], c: 'jt-punc' })
+    } else if (m[3] !== undefined) out.push({ t: m[3], c: 'jt-num' })
+    else if (m[4] !== undefined) out.push({ t: m[4], c: m[4] === 'null' ? 'jt-null' : 'jt-bool' })
+    else if (m[5] !== undefined) out.push({ t: m[5], c: 'jt-punc' })
+    last = re.lastIndex
+  }
+  if (last < source.length) out.push({ t: source.slice(last), c: 'jt-plain' })
+  return out
+}
+
+// Message body view state: structured JSON vs the exact bytes that arrived.
+const logBodyRaw = ref(false)
+const logBodyWrap = ref(true)
 
 // Transient "copied" feedback: a global toast (for any copy action) plus an
 // optional per-button key so the clicked button can show its own ✓ Copied state.
@@ -2850,9 +2904,14 @@ function openInvestigationContext() {
   router.push({ path: '/investigate', query: traceId ? { trace_id: traceId } : {} })
 }
 
+
+
 function selectTraceSpan(spanId: string) {
+  selectedSpanId.value = spanId
   timelineExpandedSpan.value = timelineExpandedSpan.value === spanId ? null : spanId
 }
+
+
 
 // @ts-ignore reserved for template use
 function getSpanLogs(span: import('../types').SpanNode): TraceLo[] {
@@ -2878,14 +2937,6 @@ function getSpanLogs(span: import('../types').SpanNode): TraceLo[] {
   return logs
 }
 
-function getSpanAttrs(span: import('../types').SpanNode): Record<string, unknown> {
-  const attrs = (span.attributes && typeof span.attributes === 'object') ? span.attributes as Record<string, unknown> : {}
-  const out: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(attrs)) {
-    if (!NOISE_KEYS.has(k) && v !== '' && v !== undefined) out[k] = v
-  }
-  return out
-}
 
 // ── Mocked metrics data ──
 interface MockMetric {
@@ -2983,27 +3034,6 @@ function flattenSpans(spans: SpanNode[]): SpanNode[] {
   return flat.sort((a, b) => parseTraceTimestamp(a.timestamp) - parseTraceTimestamp(b.timestamp))
 }
 
-function spanDepth(span: SpanNode, allSpans: SpanNode[]): number {
-  let depth = 0
-  let current = span
-  for (let i = 0; i < 20; i++) {
-    if (!current.parent_span_id) break
-    const parent = allSpans.find(s => s.span_id === current.parent_span_id)
-    if (!parent) break
-    depth++
-    current = parent
-  }
-  return depth
-}
-
-function traceBarOffset(span: SpanNode, allSpans: SpanNode[], traceDurNs: number): string {
-  if (allSpans.length === 0 || traceDurNs <= 0) return '0%'
-  const firstUs = parseTraceTimestamp(allSpans[0]!.timestamp)
-  const spanUs = parseTraceTimestamp(span.timestamp)
-  const diffNs = (spanUs - firstUs) * 1000 // μs → ns
-  const pct = Math.max((diffNs / traceDurNs) * 100, 0)
-  return `${Math.min(pct, 95)}%`
-}
 
 // ═══ APM chart helpers (mirrors ApmView patterns) ═══
 /** Parse a ClickHouse timestamp string (no tz suffix) as UTC */
@@ -4048,14 +4078,23 @@ onMounted(async () => {
     <Teleport to="body">
     <Transition name="slide-down">
       <div v-if="modalOpen" class="detail-overlay" @click.self="closeDetailPanel()">
-      <div class="detail-panel" @click.stop>
+      <div
+        class="detail-panel"
+        :class="modalSource === 'log' && modalLogEntry ? `dp-tone-${logSeverityTone(modalLogEntry.level)}` : 'dp-tone-info'"
+        @click.stop
+      >
         <div class="detail-panel-inner">
           <!-- Header: Log-only vs Span -->
           <div class="dp-header">
+            <!-- The message is the panel's hero below; repeating a truncated copy
+                 here only competed with it, so the header carries identity only. -->
             <div class="dp-header-left" v-if="modalSource === 'log' && !expandedRowData && modalLogEntry">
-              <span class="dp-svc">{{ modalLogEntry.service_name }}</span>
               <span class="log-level-badge" :class="logLevelClass(modalLogEntry.level)">{{ modalLogEntry.level || 'log' }}</span>
-              <span class="dp-path mono">{{ modalLogEntry.message.slice(0, 80) }}{{ modalLogEntry.message.length > 80 ? '...' : '' }}</span>
+              <span class="dp-svc">{{ modalLogEntry.service_name }}</span>
+              <span class="dp-log-when mono" :title="timestampTooltip(modalLogEntry.timestamp)">
+                {{ formatLogTimestamp(modalLogEntry.timestamp) }}
+                <em>{{ relativeLogTime(modalLogEntry.timestamp) }}</em>
+              </span>
             </div>
             <div class="dp-header-left" v-else-if="expandedRowData || activeSpanNode">
               <span class="dp-svc">{{ activeSpanNode?.service_name || expandedRowData?.service_name }}</span>
@@ -4085,69 +4124,106 @@ onMounted(async () => {
 
               <!-- Log-only detail view (no linked span) -->
               <template v-if="modalSource === 'log' && !expandedRowData && modalLogEntry">
-                <!-- Fields table -->
-                <div class="dp-log-fields">
-                  <div class="dp-log-field-row">
-                    <span class="dp-log-field-k">service</span>
-                    <span class="dp-log-field-v mono">{{ modalLogEntry.service_name }}</span>
-                  </div>
-                  <div class="dp-log-field-row">
-                    <span class="dp-log-field-k">level</span>
-                    <span class="dp-log-field-v"><span class="log-level-badge" :class="logLevelClass(modalLogEntry.level)">{{ modalLogEntry.level || 'log' }}</span></span>
-                  </div>
-                  <div class="dp-log-field-row">
-                    <span class="dp-log-field-k">timestamp</span>
-                    <span class="dp-log-field-v mono">{{ formatLogTimestamp(modalLogEntry.timestamp) }}</span>
-                  </div>
-                  <div v-if="modalLogEntry.trace_id" class="dp-log-field-row">
-                    <span class="dp-log-field-k">trace_id</span>
-                    <router-link :to="`/trace/${modalLogEntry.trace_id}`" class="dp-log-field-v mono dp-log-link" @click.stop>{{ modalLogEntry.trace_id }}</router-link>
-                  </div>
-                  <div v-if="modalLogEntry.span_id" class="dp-log-field-row">
-                    <span class="dp-log-field-k">span_id</span>
-                    <span class="dp-log-field-v mono">{{ modalLogEntry.span_id }}</span>
-                  </div>
-                  <div v-if="modalLogEntry.event_name" class="dp-log-field-row">
-                    <span class="dp-log-field-k">event</span>
-                    <span class="dp-log-field-v mono">{{ modalLogEntry.event_name }}</span>
-                  </div>
-                  <div class="dp-log-field-row">
-                    <span class="dp-log-field-k">source</span>
-                    <span class="dp-log-field-v mono">{{ modalLogEntry._source === 'otel' ? 'collected log' : 'span event' }}</span>
-                  </div>
-                </div>
-
-                <!-- Log message body -->
-                <div class="dp-log-body">
+                <!-- Message first: it is what the reader opened the panel for. -->
+                <div class="dp-log-body" :class="`dp-log-tone-${logSeverityTone(modalLogEntry.level)}`">
                   <div class="dp-log-body-header">
                     <span class="dp-log-section-label">Message</span>
-                    <button class="dp-log-copy-btn" @click.stop="copyText(modalLogEntry.message)" title="Copy message">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    </button>
+                    <div class="dp-log-body-tools">
+                      <div v-if="isJsonStr(modalLogEntry.message)" class="dp-log-seg" role="group" aria-label="Message format">
+                        <button :class="{ on: !logBodyRaw }" @click.stop="logBodyRaw = false">Parsed</button>
+                        <button :class="{ on: logBodyRaw }" @click.stop="logBodyRaw = true">Raw</button>
+                      </div>
+                      <button
+                        class="dp-log-copy-btn"
+                        :class="{ on: logBodyWrap }"
+                        :aria-pressed="logBodyWrap"
+                        title="Toggle soft wrap"
+                        @click.stop="logBodyWrap = !logBodyWrap"
+                      >Wrap</button>
+                      <button class="dp-log-copy-btn" @click.stop="copyText(modalLogEntry.message, 'msg')" title="Copy the original message">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <span>{{ copiedKey === 'msg' ? 'Copied' : 'Copy' }}</span>
+                      </button>
+                    </div>
                   </div>
-                  <pre class="dp-log-message mono">{{ isJsonStr(modalLogEntry.message) ? prettyJson(modalLogEntry.message) : modalLogEntry.message }}</pre>
+                  <!-- Tokenised, never v-html: log bodies are untrusted input. -->
+                  <pre
+                    v-if="isJsonStr(modalLogEntry.message) && !logBodyRaw"
+                    class="dp-log-message dp-log-json mono"
+                    :class="{ nowrap: !logBodyWrap }"
+                  ><span
+                    v-for="(tok, ti) in jsonTokens(prettyJson(modalLogEntry.message))"
+                    :key="ti"
+                    :class="tok.c"
+                  >{{ tok.t }}</span></pre>
+                  <pre
+                    v-else
+                    class="dp-log-message mono"
+                    :class="{ nowrap: !logBodyWrap }"
+                  >{{ modalLogEntry.message }}</pre>
+                </div>
+
+                <!-- Identity: fixed fields, visually distinct from arbitrary attributes -->
+                <div class="dp-log-fields">
+                  <div class="dp-log-section-label">Record</div>
+                  <dl class="dp-log-ident">
+                    <div class="dp-log-ident-row">
+                      <dt>service</dt>
+                      <dd class="mono">{{ modalLogEntry.service_name }}</dd>
+                    </div>
+                    <div class="dp-log-ident-row">
+                      <dt>level</dt>
+                      <dd><span class="log-level-badge" :class="logLevelClass(modalLogEntry.level)">{{ modalLogEntry.level || 'log' }}</span></dd>
+                    </div>
+                    <div class="dp-log-ident-row">
+                      <dt>timestamp</dt>
+                      <dd class="mono" :title="timestampTooltip(modalLogEntry.timestamp)">{{ formatLogTimestamp(modalLogEntry.timestamp) }}</dd>
+                    </div>
+                    <div v-if="modalLogEntry.trace_id" class="dp-log-ident-row">
+                      <dt>trace_id</dt>
+                      <dd><router-link :to="`/trace/${modalLogEntry.trace_id}`" class="mono dp-log-link" @click.stop>{{ modalLogEntry.trace_id }}</router-link></dd>
+                    </div>
+                    <div v-if="modalLogEntry.span_id" class="dp-log-ident-row">
+                      <dt>span_id</dt>
+                      <dd class="mono">{{ modalLogEntry.span_id }}</dd>
+                    </div>
+                    <div v-if="modalLogEntry.event_name" class="dp-log-ident-row">
+                      <dt>event</dt>
+                      <dd class="mono">{{ modalLogEntry.event_name }}</dd>
+                    </div>
+                    <div class="dp-log-ident-row">
+                      <dt>source</dt>
+                      <dd class="mono">{{ modalLogEntry._source === 'otel' ? 'collected log' : 'span event' }}</dd>
+                    </div>
+                  </dl>
                 </div>
 
                 <!-- Resource attributes -->
                 <div v-if="Object.keys(modalLogEntry.resource_attrs).length" class="dp-log-attr-section">
-                  <div class="dp-log-section-label">Resource Attributes</div>
+                  <div class="dp-log-section-label">Resource attributes <span class="dp-log-count">{{ Object.keys(modalLogEntry.resource_attrs).length }}</span></div>
                   <div class="dp-log-attr-table">
-                    <div v-for="(val, key) in modalLogEntry.resource_attrs" :key="String(key)" class="dp-log-field-row dp-log-field-clickable" @click.stop="addFilter(`resource.${String(key)}`, String(val))">
+                    <div v-for="(val, key) in modalLogEntry.resource_attrs" :key="String(key)" class="dp-log-attr-row">
                       <span class="dp-log-field-k">{{ key }}</span>
                       <span class="dp-log-field-v mono">{{ val }}</span>
-                      <span class="dp-log-field-action">&#xBB;</span>
+                      <span class="dp-log-row-actions">
+                        <button class="dp-log-row-btn" :title="`Filter where ${String(key)} is ${String(val)}`" @click.stop="addFilter(`resource.${String(key)}`, String(val))">Filter</button>
+                        <button class="dp-log-row-btn" :title="`Copy ${String(key)} value`" @click.stop="copyText(String(val), `r:${String(key)}`)">{{ copiedKey === `r:${String(key)}` ? 'Copied' : 'Copy' }}</button>
+                      </span>
                     </div>
                   </div>
                 </div>
 
                 <!-- Log attributes -->
                 <div v-if="Object.keys(modalLogEntry.event_attrs).length" class="dp-log-attr-section">
-                  <div class="dp-log-section-label">Log Attributes</div>
+                  <div class="dp-log-section-label">Log attributes <span class="dp-log-count">{{ Object.keys(modalLogEntry.event_attrs).length }}</span></div>
                   <div class="dp-log-attr-table">
-                    <div v-for="(val, key) in modalLogEntry.event_attrs" :key="String(key)" class="dp-log-field-row dp-log-field-clickable" @click.stop="addFilter(`log.${String(key)}`, String(val))">
+                    <div v-for="(val, key) in modalLogEntry.event_attrs" :key="String(key)" class="dp-log-attr-row">
                       <span class="dp-log-field-k">{{ key }}</span>
                       <span class="dp-log-field-v mono">{{ val }}</span>
-                      <span class="dp-log-field-action">&#xBB;</span>
+                      <span class="dp-log-row-actions">
+                        <button class="dp-log-row-btn" :title="`Filter where ${String(key)} is ${String(val)}`" @click.stop="addFilter(`log.${String(key)}`, String(val))">Filter</button>
+                        <button class="dp-log-row-btn" :title="`Copy ${String(key)} value`" @click.stop="copyText(String(val), `l:${String(key)}`)">{{ copiedKey === `l:${String(key)}` ? 'Copied' : 'Copy' }}</button>
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -4201,81 +4277,13 @@ onMounted(async () => {
                 </span>
               </div>
 
-              <!-- Trace Timeline (waterfall) -->
+              <!-- Trace Timeline (waterfall) — shared with the standalone trace page -->
               <div v-if="expandedTrace && expandedTraceSpans.length" class="dp-section">
-                <div class="dp-section-header">
-                  <span class="dp-section-title">Trace Timeline</span>
-                  <span class="dp-section-meta mono">{{ expandedTrace.span_count }} spans &middot; {{ formatDuration(expandedTrace.duration_ns) }}</span>
-                </div>
-                <div class="wf-container">
-                  <!-- Header row -->
-                  <div class="wf-header">
-                    <div class="wf-col-service">Service / Operation</div>
-                    <div class="wf-col-bar">
-                      <span class="wf-time-label mono">0ms</span>
-                      <span class="wf-time-label mono" style="position:absolute;left:50%;transform:translateX(-50%)">{{ formatDuration(Math.round(expandedTrace.duration_ns / 2)) }}</span>
-                      <span class="wf-time-label mono" style="position:absolute;right:0">{{ formatDuration(expandedTrace.duration_ns) }}</span>
-                    </div>
-                    <div class="wf-col-dur">Duration</div>
-                  </div>
-                  <!-- Span rows -->
-                  <template v-for="span in expandedTraceSpans" :key="'wf-'+span.span_id">
-                    <div
-                      class="wf-row"
-                      :class="{
-                        'wf-row-active': span.span_id === timelineExpandedSpan,
-                        'wf-row-error': span.status === 'error' || span.http_status_code >= 400,
-                        'wf-row-current': span.span_id === (activeSpanId)
-                      }"
-                      @click.stop="selectTraceSpan(span.span_id)"
-                    >
-                      <div class="wf-col-service" :style="{ paddingLeft: (12 + spanDepth(span, expandedTraceSpans) * 16) + 'px' }">
-                        <span v-if="spanDepth(span, expandedTraceSpans) > 0" class="wf-indent-guide" :style="{ width: (spanDepth(span, expandedTraceSpans) * 16) + 'px' }">
-                          <span class="wf-indent-line"></span>
-                        </span>
-                        <span class="wf-svc" :style="{ color: dpServiceColor(span.service_name) }">{{ span.service_name }}</span>
-                        <span class="wf-op mono">{{ span.http_method ? `${span.http_method} ${span.http_path || ''}`.trim() : (span.attributes?.['name'] || span.span_id.slice(0, 8)) }}</span>
-                      </div>
-                      <div class="wf-col-bar">
-                        <div class="wf-bar-track">
-                          <div
-                            class="wf-bar"
-                            :style="{
-                              width: expandedTrace.duration_ns > 0 ? Math.max(0.5, (span.duration_ns / expandedTrace.duration_ns) * 100) + '%' : '1%',
-                              left: traceBarOffset(span, expandedTraceSpans, expandedTrace.duration_ns),
-                              backgroundColor: (span.status === 'error' || span.http_status_code >= 400) ? 'var(--error)' : dpServiceColor(span.service_name),
-                            }"
-                          ></div>
-                        </div>
-                      </div>
-                      <div class="wf-col-dur">
-                        <span class="mono" :class="durationClass(span.duration_ns)">{{ formatDuration(span.duration_ns) }}</span>
-                        <span v-if="span.http_status_code" class="wf-status mono" :class="statusClass(span.status, span.http_status_code)">{{ span.http_status_code }}</span>
-                      </div>
-                    </div>
-                    <!-- Inline detail when clicked -->
-                    <div v-if="timelineExpandedSpan === span.span_id" class="wf-detail" @click.stop>
-                      <div class="wf-detail-meta">
-                        <span class="wf-detail-item"><span class="text-muted">span</span> <span class="mono">{{ span.span_id }}</span></span>
-                        <span class="wf-detail-item"><span class="text-muted">parent</span> <span class="mono">{{ span.parent_span_id || '\u2014' }}</span></span>
-                        <span class="wf-detail-item"><span class="text-muted">started</span> <span class="mono">{{ span.timestamp }}</span></span>
-                        <span class="wf-detail-item"><span class="text-muted">duration</span> <span class="mono" :class="durationClass(span.duration_ns)">{{ formatDuration(span.duration_ns) }}</span></span>
-                        <span v-if="span.http_status_code" class="wf-detail-item"><span class="text-muted">status</span> <span class="mono" :class="statusClass(span.status, span.http_status_code)">{{ span.http_status_code }}</span></span>
-                      </div>
-                      <div v-if="Object.keys(getSpanAttrs(span)).length" class="wf-detail-section">
-                        <div class="wf-detail-title">Attributes</div>
-                        <div class="wf-detail-attrs">
-                          <template v-for="(value, key) in getSpanAttrs(span)" :key="key">
-                            <div class="wf-attr-row">
-                              <span class="wf-attr-key mono">{{ key }}</span>
-                              <span class="wf-attr-val mono">{{ typeof value === 'object' ? JSON.stringify(value) : value }}</span>
-                            </div>
-                          </template>
-                        </div>
-                      </div>
-                    </div>
-                  </template>
-                </div>
+                <TraceWaterfall
+                  :trace="expandedTrace"
+                  :active-span-id="activeSpanId"
+                  @select="selectTraceSpan"
+                />
               </div>
               <div v-else-if="expandedTraceLoading" class="dp-section">
                 <div class="dp-section-header">
@@ -4614,7 +4622,31 @@ onMounted(async () => {
                 </div>
                 <section class="ir-section">
                   <div class="ir-section-title">Correlated signals</div>
-                  <button v-if="modalLogEntry" class="ir-link" @click="openContextStream(modalLogEntry)">Show surrounding logs {{ contextStreamRadiusLabel }}</button>
+                  <template v-if="modalLogEntry">
+                    <!-- The surrounding-logs query is scoped by whichever identity
+                         attributes are picked here. Without a picker the action
+                         had nothing to filter on and silently did nothing. -->
+                    <p class="ir-hint">Pick the attributes that identify this source, then load the logs around it.</p>
+                    <div class="ir-chips">
+                      <button
+                        v-for="attr in getContextStreamAttrs(modalLogEntry)"
+                        :key="attr.id"
+                        class="ir-chip"
+                        :class="{ on: contextStreamSelectedAttrs.has(attr.id) }"
+                        :aria-pressed="contextStreamSelectedAttrs.has(attr.id)"
+                        @click.stop="toggleContextAttr(attr.id)"
+                      >
+                        <span class="ir-chip-k">{{ attr.label }}</span>
+                        <span class="ir-chip-v">{{ attr.value }}</span>
+                      </button>
+                    </div>
+                    <button
+                      class="ir-primary ir-stream-btn"
+                      :disabled="contextStreamSelectedAttrs.size === 0"
+                      :title="contextStreamSelectedAttrs.size === 0 ? 'Select at least one attribute above' : ''"
+                      @click="openContextStream(modalLogEntry)"
+                    >Show surrounding logs {{ contextStreamRadiusLabel }}</button>
+                  </template>
                   <button v-else-if="traceLogs.length" class="ir-link" @click="expandedTab = null">Review {{ traceLogs.length }} trace log events</button>
                   <p v-else class="ir-empty">No correlated log events were collected for this selection.</p>
                 </section>
@@ -5710,14 +5742,21 @@ onMounted(async () => {
                 </div>
 
                 <!-- Message body -->
-                <div v-if="entry.message" class="lid-message">
+                <div v-if="entry.message" class="lid-message" :class="`lid-tone-${logSeverityTone(entry.level)}`">
                   <div class="lid-message-header">
                     <span class="lid-section-label">Message</span>
-                    <button class="lid-copy-btn" @click.stop="copyText(entry.message)" title="Copy message">
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    <button class="lid-copy-btn" @click.stop="copyText(entry.message, `msg-${i}`)" :title="copiedKey === `msg-${i}` ? 'Copied' : 'Copy message'">
+                      <svg v-if="copiedKey === `msg-${i}`" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                      <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                     </button>
                   </div>
-                  <pre class="lid-body mono">{{ isJsonStr(entry.message) ? prettyJson(entry.message) : entry.message }}</pre>
+                  <!-- Tokenised, never v-html: log bodies are untrusted input. -->
+                  <pre v-if="isJsonStr(entry.message)" class="lid-body mono"><span
+                    v-for="(tok, ti) in jsonTokens(prettyJson(entry.message))"
+                    :key="ti"
+                    :class="tok.c"
+                  >{{ tok.t }}</span></pre>
+                  <pre v-else class="lid-body mono">{{ entry.message }}</pre>
                 </div>
 
                 <!-- Fields + Attributes side by side -->
