@@ -34,7 +34,7 @@
     "web-vitals": "^6.2.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
+    "@playwright/test": "^1.63.0",
     "@types/dompurify": "^3.2.0",
     "@types/node": "^26.4.1",
     "@vitejs/plugin-vue": "^6.0.8",
