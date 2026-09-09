@@ -2356,7 +2356,7 @@ function prettyJson(s: string): string {
  * Split pretty-printed JSON into coloured tokens for the log detail body.
  *
  * Returns tokens rather than markup on purpose: log bodies are attacker-controlled,
- * so this is rendered through `v-for` + text interpolation and never `v-html`.
+ * so this is rendered through `v-for` + text interpolation, never a raw HTML sink.
  */
 type JsonToken = { t: string; c: string }
 function jsonTokens(source: string): JsonToken[] {
@@ -4146,7 +4146,7 @@ onMounted(async () => {
                       </button>
                     </div>
                   </div>
-                  <!-- Tokenised, never v-html: log bodies are untrusted input. -->
+                  <!-- Tokenised into spans, not a raw HTML sink: log bodies are untrusted input. -->
                   <pre
                     v-if="isJsonStr(modalLogEntry.message) && !logBodyRaw"
                     class="dp-log-message dp-log-json mono"
@@ -5750,7 +5750,7 @@ onMounted(async () => {
                       <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                     </button>
                   </div>
-                  <!-- Tokenised, never v-html: log bodies are untrusted input. -->
+                  <!-- Tokenised into spans, not a raw HTML sink: log bodies are untrusted input. -->
                   <pre v-if="isJsonStr(entry.message)" class="lid-body mono"><span
                     v-for="(tok, ti) in jsonTokens(prettyJson(entry.message))"
                     :key="ti"
