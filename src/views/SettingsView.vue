@@ -12,6 +12,7 @@ import ChannelForm from '../components/ChannelForm.vue'
 import AlertRoutingRules from '../components/AlertRoutingRules.vue'
 import RegexHelp from '../components/RegexHelp.vue'
 import SettingsNavigation from '../components/SettingsNavigation.vue'
+import LogViewsSettings from './settings/LogViewsSettings.vue'
 import EmptyState from '../components/EmptyState.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 import { getAddon } from '../integrations/catalog'
@@ -3007,6 +3008,7 @@ function formatDate(ts: string): string {
         </header>
 
     <!-- ── Panels ── -->
+    <LogViewsSettings v-if="activeTab === 'log-views'" />
     <!-- API Keys Section -->
     <div
       v-show="activeTab === 'keys'"
@@ -6673,4 +6675,5 @@ function formatDate(ts: string): string {
   </div>
 </template>
 
+<style scoped src="../styles/settingsRowActions.css"></style>
 <style scoped src="../styles/views/SettingsView.css"></style>

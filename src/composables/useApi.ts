@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import type { LogView } from '../lib/logViews'
 import { useTenant } from './useTenant'
 import { encodePathSegment } from '../lib/url'
 import { authenticatedFetch } from './authSession'
@@ -361,6 +362,10 @@ export function useApi() {
   ): Promise<string[]> {
     const params = prefix ? `?prefix=${encodeURIComponent(prefix)}` : ''
     return await request(`/suggest/${encodePathSegment(field)}${params}`)
+  }
+
+  async function suggestLogValues(data: { field: string; prefix: string; filters: Filter[]; time_range: { from: string; to: string } }): Promise<string[]> {
+    return await request('/logs/suggest', { method: 'POST', body: JSON.stringify(data) })
   }
 
   async function queryGroup(req: QueryRequest, workload?: 'dashboard', signal?: AbortSignal): Promise<GroupResponse> {
@@ -753,6 +758,14 @@ export function useApi() {
 
   // ── Log API ──
 
+  async function getLogViews(): Promise<{ views: LogView[] }> {
+    return await request('/settings/log-views')
+  }
+
+  async function saveLogViews(views: LogView[]): Promise<{ views: LogView[] }> {
+    return await request('/settings/log-views', { method: 'PUT', body: JSON.stringify({ views }) })
+  }
+
   async function queryLogs(req: {
     time_range: { from: string; to: string }
     filters: Filter[]
@@ -761,6 +774,7 @@ export function useApi() {
     cursor?: string
     search?: string
     slim?: boolean
+    display_fields?: string[]
   }, workload?: 'dashboard', signal?: AbortSignal): Promise<{ rows: LogRecord[]; total: number; has_more: boolean; next_cursor?: string }> {
     loading.value = true
     error.value = null
@@ -2036,7 +2050,7 @@ export function useApi() {
     login, logout, getMe, listAuthSessions, revokeAuthSession,
     getAuditEvents, verifyAuditChain, getKubernetesAccessEvents, getKubernetesAccessEvent, getKubernetesSessionChunks, approveKubernetesLogin, getKubernetesLoginDetails,
     getTrace, queryEvents, queryExplore, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceTimeBreakdown, serviceTimeBreakdownTimeseries, serviceLatencyHistogram, serviceEndpoints, serviceErrors, getLicense, submitExplain, getExplainJob, submitMySqlExplain, getMySqlExplainJob, suggestValues, queryGroup,
-    queryLogs, getLogDetail, getLogContext, countLogs, groupLogs, getLogHistogram,
+    queryLogs, getLogDetail, getLogContext, countLogs, groupLogs, getLogHistogram, getLogViews, saveLogViews, suggestLogValues,
     listDashboards, getDashboard, createDashboard, updateDashboard, deleteDashboard,
     exportDashboard, importDashboard, listDashboardTemplates, createFromTemplate,
     createWidget, updateWidget, deleteWidget,

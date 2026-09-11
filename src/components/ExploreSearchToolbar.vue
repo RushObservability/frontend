@@ -22,6 +22,7 @@ const emit = defineEmits<{
         <button type="button" :class="{ active: viewMode === 'spans' }" :aria-pressed="viewMode === 'spans'" @click="emit('setMode', 'spans')">APM</button>
         <button type="button" :class="{ active: viewMode === 'logs' }" :aria-pressed="viewMode === 'logs'" @click="emit('setMode', 'logs')">Logs</button>
       </div>
+      <slot name="view" />
     </div>
     <div class="explore-toolbar-actions">
       <slot name="time" />
@@ -71,4 +72,3 @@ const emit = defineEmits<{
   .explore-live-button.active > span { box-shadow: none; }
 }
 </style>
-
