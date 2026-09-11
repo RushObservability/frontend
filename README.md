@@ -50,6 +50,36 @@ request identity labels.
 
 Explore (unified trace + log search with a query builder), Services and per-service detail with a dependency graph, a PromQL Metrics explorer, Dashboards, Alerts and notification channels, SLOs with burn-rate, Anomaly rules, RUM (per-app vitals, pages, errors, sessions), and Settings (tenants, users, SSO, API keys, retention, the metric firewall, and the AI Agent). AI Agent settings include tenant access, model/reasoning policy, investigation limits, and custom Markdown skills. Routes live in `src/router.ts`; views in `src/views`.
 
+## Saved log views
+
+In **Settings → Log views**, an admin can create a view for the current tenant.
+Choose **Use flight example** to start with `type=event_data` as the base filter
+and **Time | Airline | Flight number | Status** as the columns.
+
+In **Explore → Logs**, select the view. Its base filters apply automatically;
+the search bar stays empty until you add a search, such as `status=delayed`.
+The search and base filters must both match. Selecting **All logs** removes the
+view's base filters and restores the standard log columns.
+
+Column fields can be builtins (`timestamp`, `service_name`, `severity_text`,
+`body`), log attributes (`log.airline`), resource attributes
+(`resource.k8s.namespace.name`), or scalar JSON fields (`body.flight.number`).
+An unprefixed attribute checks log attributes first, then resource attributes.
+Use `body.type` for the base filter if `type` lives inside a JSON message.
+Missing values appear as a dash; clicking a row still opens the full log.
+
+The search bar suggests fields from the view and loaded logs. Type `airline=`
+or `body.airline=` to see matching values, then click a suggestion or press Tab.
+Values with spaces are quoted automatically, for example `airline="Example Air"`.
+Value suggestions use the current tenant, time range, and view's base filters.
+
+**Columns** in Explore lets you change headings, order, and visible fields for
+the current page. Those overrides are included in shared URLs and do not change
+the saved view. Edit the view in Settings to update it for everyone in the
+tenant. Views are conveniences for browsing, not access-control rules; users
+can still choose All logs. They are available in both frontend editions and
+require a query-api build with `/api/v1/settings/log-views` support.
+
 ## Stack
 
 Vue 3 with `<script setup>`, TypeScript, Vite, `vue-tsc` for type-checking, nginx for production. The app instruments itself with the `@wide/rum` SDK, so the UI shows up in its own RUM data.

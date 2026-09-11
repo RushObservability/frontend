@@ -1,4 +1,4 @@
-export type SettingsTabId = 'keys' | 'auth' | 'links' | 'integrations' | 'agent' | 'tenants' | 'retention' | 'groups' | 'users' | 'alerting' | 'general' | 'performance' | 'firewall' | 'license' | 'config'
+export type SettingsTabId = 'keys' | 'auth' | 'links' | 'integrations' | 'agent' | 'tenants' | 'retention' | 'groups' | 'users' | 'alerting' | 'general' | 'performance' | 'firewall' | 'license' | 'config' | 'log-views'
 export type AgentSubtabId = 'access' | 'providers' | 'models' | 'limits' | 'skills'
 
 export interface SettingsTabDef {
@@ -33,6 +33,7 @@ export const SETTINGS_TABS: SettingsTabDef[] = [
   { id: 'tenants', label: 'Tenants', group: 'Data & Routing', hint: 'Manage data isolation for teams and customers.' },
   { id: 'retention', label: 'Retention', group: 'Data & Routing', hint: 'Set data retention limits for each signal.' },
   { id: 'links', label: 'Service Links', group: 'Data & Routing', hint: 'Connect services to source repositories.' },
+  { id: 'log-views', label: 'Log views', group: 'Data & Routing', hint: 'Saved log datasets with their own filters and columns.' },
   { id: 'alerting', label: 'Alerting', group: 'Data & Routing', hint: 'Configure alert delivery channels.' },
   { id: 'firewall', label: 'Metric Firewall', group: 'Data & Routing', hint: 'Block metric series or remove labels during ingest.' },
 ]

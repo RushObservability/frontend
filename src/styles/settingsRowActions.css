@@ -1,0 +1,18 @@
+.action-btn {
+  font-size: 11px;
+  padding: 1px var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  transition: color 0.15s, background 0.15s;
+}
+.action-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.action-btn-danger:hover:not(:disabled) {
+  color: var(--error);
+}
+.action-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}

@@ -146,6 +146,7 @@ export interface ExploreSummaryValue {
 }
 
 export interface ExploreSearchRequest {
+  display_fields?: string[]
   signal: 'spans' | 'logs'
   time_range: { from: string; to: string }
   filters: Filter[]
@@ -229,6 +230,7 @@ export interface SavedQuery {
 // ── Log types ──
 
 export interface LogRecord {
+  DisplayValues?: Record<string, string>
   Timestamp: number
   TraceId: string
   SpanId: string

@@ -12,6 +12,10 @@ import TimePicker from '../components/TimePicker.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import PanelCard from '../components/PanelCard.vue'
 import VirtualTable from '../components/VirtualTable.vue'
+import LogColumnsEditor from '../components/LogColumnsEditor.vue'
+import { searchTokens, searchTokenAt, completionPrefix, filterValue, logSearchFields, localLogSuggestions } from '../lib/logAutocomplete'
+import { DEFAULT_LOG_COLUMNS, logColumnValue, logViewFilters, validateLogColumns, type LogView, type LogViewColumn } from '../lib/logViews'
+import { useAuth } from '../composables/useAuth'
 import TraceWaterfall from '../components/TraceWaterfall.vue'
 import ExploreSearchToolbar from '../components/ExploreSearchToolbar.vue'
 import ExploreResultsState from '../components/ExploreResultsState.vue'
@@ -25,6 +29,7 @@ import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import type { ContextMenuEntry } from '../types/contextMenu'
 
 interface ExploreHistoryQuery {
+  logViewId?: string
   filters: Filter[]
   groupBy?: string
   search?: string
@@ -37,6 +42,7 @@ const { entries: exploreHistory, push: pushHistory, remove: removeHistory, clear
 const router = useRouter()
 const route = useRoute()
 const api = useApi()
+const { isAdmin } = useAuth()
 const { features } = useFeatures()
 
 const selectedPreset = useTimeRangePreference()
@@ -159,11 +165,73 @@ const viewMode = ref<'spans' | 'logs'>('spans')
 const tracesOnly = ref(true)
 const apmResultMode = ref<'individual' | 'groups'>('individual')
 const otelLogs = ref<LogRecord[]>([])
+const logViews = ref<LogView[]>([])
+const logViewsLoading = ref(true)
+const logViewsError = ref('')
+const selectedLogViewId = ref(typeof route.query.log_view === 'string' ? route.query.log_view : '')
+const selectedLogView = computed(() => logViews.value.find(view => view.id === selectedLogViewId.value))
+const logViewUnavailable = computed(() => !!selectedLogViewId.value && !selectedLogView.value)
+const customLogColumns = ref<LogViewColumn[] | null>(null)
+const logColumns = computed(() => customLogColumns.value ?? selectedLogView.value?.columns ?? DEFAULT_LOG_COLUMNS)
+const logDisplayFields = computed(() => customLogLayout.value ? logColumns.value.map(column => column.field) : [])
+const showLogColumns = ref(false)
+const columnDraft = ref<LogViewColumn[]>([])
+const columnError = ref('')
+const customLogLayout = computed(() => JSON.stringify(logColumns.value) !== JSON.stringify(DEFAULT_LOG_COLUMNS))
+const logGridStyle = computed(() => ({
+  gridTemplateColumns: logColumns.value.map(column =>
+    ['timestamp', 'time', 'Timestamp'].includes(column.field) ? '150px' : ['body', 'Body'].includes(column.field) ? 'minmax(240px, 2fr)' : 'minmax(140px, 1fr)',
+  ).join(' '),
+  minWidth: `${24 + logColumns.value.reduce((width, column) => width + (['timestamp', 'time', 'Timestamp'].includes(column.field) ? 150 : ['body', 'Body'].includes(column.field) ? 240 : 140), 0)}px`,
+}))
+let logViewLoadGeneration = 0
+
+async function loadLogViews() {
+  const generation = ++logViewLoadGeneration
+  logViewsLoading.value = true; logViewsError.value = ''; logViews.value = []
+  try {
+    const response = await api.getLogViews()
+    if (generation === logViewLoadGeneration) logViews.value = response.views
+  } catch { if (generation === logViewLoadGeneration) logViewsError.value = 'Could not load log views.' }
+  finally { if (generation === logViewLoadGeneration) logViewsLoading.value = false }
+}
+
+function getLogFilters(active: Filter[]): Filter[] {
+  return logViewFilters(active, selectedLogView.value)
+}
+
+function selectLogView(event: Event) {
+  stopLive(); activeSearchController?.abort()
+  logViewsError.value = ''
+  selectedLogViewId.value = (event.target as HTMLSelectElement).value
+  customLogColumns.value = null; showLogColumns.value = false
+  otelLogs.value = []; nextCursor.value = null; inlineExpandedLog.value = null
+  search({ skipHistory: true })
+}
+
+function editLogColumns() {
+  columnDraft.value = logColumns.value.map(column => ({ ...column }))
+  columnError.value = ''; showLogColumns.value = !showLogColumns.value
+}
+
+function applyLogColumns() {
+  columnError.value = validateLogColumns(columnDraft.value) ?? ''
+  if (columnError.value) return
+  customLogColumns.value = columnDraft.value.map(column => ({ field: column.field.trim(), label: column.label.trim() }))
+  showLogColumns.value = false
+  search({ skipHistory: true })
+}
+
+function customLogCell(entry: LogEntry, field: string): string {
+  if (['timestamp', 'time', 'Timestamp'].includes(field)) return formatLogTimestamp(entry.timestamp)
+  const row = otelLogs.value[entry._sourceLogIndex]
+  return row ? logColumnValue(row, field) : ''
+}
 
 // Per-tenant signal config: when APM is disabled for the active tenant we hide
 // the APM/Logs toggle and force the Logs view. The tenant list (with signals)
 // loads asynchronously, so react to it changing too.
-const { apmEnabled, loadTenants: loadTenantSignals, loaded: tenantsLoaded } = useTenant()
+const { activeTenant, apmEnabled, loadTenants: loadTenantSignals, loaded: tenantsLoaded } = useTenant()
 if (!tenantsLoaded.value) loadTenantSignals()
 
 // ═══ Live mode ═══
@@ -206,26 +274,26 @@ watch([selectedPreset, customRange], () => {
   search({ skipHistory: true })
 })
 
-// Fields that only exist on spans (spans), not on logs
-const SPAN_ONLY_FIELDS = ['duration_ns', 'http_status_code', 'http_method', 'http_path', 'status']
-
 async function fetchOtelLogs() {
+  if (logViewsLoading.value || logViewUnavailable.value) return
+  const scope = JSON.stringify([activeTenant.value, selectedLogViewId.value, logColumns.value, searchInput.value, timeRange.value])
   try {
-    const activeFilters = getActiveFilters()
-      .filter(f => !SPAN_ONLY_FIELDS.includes(f.field))
+    const activeFilters = getLogFilters(getActiveFilters())
     const searchParam = searchText.value || undefined
     const res = await api.queryLogs({
       slim: true,
+      display_fields: logDisplayFields.value,
       time_range: timeRange.value,
       filters: activeFilters,
       limit: 500,
       search: searchParam,
     })
-    otelLogs.value = res.rows
+    if (scope === JSON.stringify([activeTenant.value, selectedLogViewId.value, logColumns.value, searchInput.value, timeRange.value])) otelLogs.value = res.rows
   } catch { /* error in api.error */ }
 }
 
 async function livePoll({ signal }: PollingRunContext) {
+  if (logViewsLoading.value || (viewMode.value === 'logs' && logViewUnavailable.value)) return
   if (livePolling || !liveMode.value) return
   livePolling = true
   try {
@@ -238,10 +306,11 @@ async function livePoll({ signal }: PollingRunContext) {
 
     const intervalBucket = selectedPreset.value <= 60 ? '1m' : selectedPreset.value <= 360 ? '5m' : '1h'
     const isLogs = viewMode.value === 'logs'
-    const logFilters = activeFilters.filter(f => !SPAN_ONLY_FIELDS.includes(f.field))
+    const logFilters = getLogFilters(activeFilters)
 
     const request: ExploreSearchRequest = {
       signal: isLogs ? 'logs' : 'spans',
+      display_fields: isLogs ? logDisplayFields.value : undefined,
       time_range: tr,
       filters: isLogs ? logFilters : activeFilters,
       limit: isLogs ? 500 : 100,
@@ -723,6 +792,9 @@ async function loadServices() {
 function getQuickFilters(): Filter[] {
   const qf: Filter[] = []
   if (quickService.value) qf.push({ field: 'service_name', op: '=', value: quickService.value })
+  // Span-only sidebar controls must not shadow custom log attributes such as
+  // "status". Explicit search and view filters still accept those field names.
+  if (viewMode.value === 'logs') return qf
   if (quickMethod.value) qf.push({ field: 'http_method', op: '=', value: quickMethod.value })
   if (quickErrorOnly.value) qf.push({ field: 'status', op: '=', value: 'ERROR' })
   if (quickStatusRange.value === '2xx') {
@@ -1050,32 +1122,10 @@ function parseSearch() {
   const newFilters: Filter[] = []
   const textParts: string[] = []
 
-  // Tokenize respecting quotes: quoted phrases go straight to search text
-  let i = 0
-  while (i < input.length) {
-    if (input[i] === ' ' || input[i] === '\t') { i++; continue }
-    if (input[i] === '"') {
-      // Quoted phrase → always search text (including the quotes for backend parsing)
-      const start = i
-      i++ // skip opening quote
-      while (i < input.length && input[i] !== '"') i++
-      if (i < input.length) i++ // skip closing quote
-      textParts.push(input.substring(start, i))
+  for (const { token: word } of searchTokens(input)) {
+    if (word.startsWith('"')) {
+      textParts.push(word)
     } else {
-      // Unquoted word — but if we hit a quote after an operator (e.g. key="val"),
-      // consume through the closing quote so the value stays with the key.
-      let word = ''
-      while (i < input.length && input[i] !== ' ' && input[i] !== '\t') {
-        if (input[i] === '"' || input[i] === "'") {
-          const q = input[i]
-          word += input[i]; i++ // opening quote
-          while (i < input.length && input[i] !== q) { word += input[i]; i++ }
-          if (i < input.length) { word += input[i]; i++ } // closing quote
-        } else {
-          word += input[i]; i++
-        }
-      }
-      if (!word) continue
       // Check if it's a filter expression (key=value, key!=value, etc.)
       // But only if it's NOT an OR/AND keyword
       if (word.toUpperCase() === 'OR' || word.toUpperCase() === 'AND') {
@@ -1085,13 +1135,7 @@ function parseSearch() {
         if (match) {
           const field = match[1] ?? ''
           const op = match[2] ?? '='
-          // Strip surrounding quotes from the value: "atlas" → atlas
-          let value = match[3] ?? ''
-          if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-            value = value.slice(1, -1)
-          }
-          const numVal = Number(value)
-          newFilters.push({ field, op, value: isNaN(numVal) ? value : numVal })
+          newFilters.push({ field, op, value: filterValue(match[3] ?? '') })
         } else {
           textParts.push(word)
         }
@@ -1123,6 +1167,14 @@ function getActiveFilters(): Filter[] {
 }
 
 async function search(opts?: { skipHistory?: boolean }) {
+  if (logViewsLoading.value) return
+  if (viewMode.value === 'logs' && logViewUnavailable.value) {
+    stopLive(); activeSearchController?.abort()
+    otelLogs.value = []; histogram.value = []; total.value = 0; nextCursor.value = null
+    paginationHasMore.value = false; searching.value = false
+    logViewsError.value ||= 'This log view is unavailable in the current tenant. Choose another view.'
+    return
+  }
   stopLive()
   closeBubbleUp()
   activeSearchController?.abort()
@@ -1137,6 +1189,7 @@ async function search(opts?: { skipHistory?: boolean }) {
   filters.value = activeFilters
   const searchParam = searchText.value || undefined
 
+  syncUrlState()
   if (!opts?.skipHistory && (activeFilters.length > 0 || searchParam)) {
     pushHistory({
       filters: activeFilters,
@@ -1144,13 +1197,14 @@ async function search(opts?: { skipHistory?: boolean }) {
       search: searchParam,
       timePreset: selectedPreset.value,
       viewMode: viewMode.value,
+      logViewId: viewMode.value === 'logs' ? selectedLogViewId.value : undefined,
     })
   }
 
   try {
     const isLogs = viewMode.value === 'logs'
     const intervalBucket = selectedPreset.value <= 60 ? '1m' : selectedPreset.value <= 360 ? '5m' : '1h'
-    const logFilters = activeFilters.filter(f => !SPAN_ONLY_FIELDS.includes(f.field))
+    const logFilters = getLogFilters(activeFilters)
 
     // Rows and summaries are independent requests so the table can paint as
     // soon as its query finishes. A superseding search aborts both requests.
@@ -1165,6 +1219,7 @@ async function search(opts?: { skipHistory?: boolean }) {
     groupLoading.value = Boolean(groupByField.value)
     const request: ExploreSearchRequest = {
       signal: isLogs ? 'logs' : 'spans',
+      display_fields: isLogs ? logDisplayFields.value : undefined,
       time_range: timeRange.value,
       filters: isLogs ? logFilters : activeFilters,
       limit: isLogs ? 500 : 100,
@@ -1231,21 +1286,25 @@ async function search(opts?: { skipHistory?: boolean }) {
 }
 
 async function loadMore() {
+  if (viewMode.value === 'logs' && (logViewsLoading.value || logViewUnavailable.value)) return
   if (scatterCohortRows.value !== null || loadingMore.value || !hasMore.value) return
   loadingMore.value = true
+  const requestScope = JSON.stringify([activeTenant.value, selectedLogViewId.value, logColumns.value, searchInput.value, timeRange.value])
   try {
     const activeFilters = getActiveFilters()
     const searchParam = searchText.value || undefined
     if (viewMode.value === 'logs') {
-      const logFilters = activeFilters.filter(filter => !SPAN_ONLY_FIELDS.includes(filter.field))
+      const logFilters = getLogFilters(activeFilters)
       const page = await api.queryLogs({
         slim: true,
+        display_fields: logDisplayFields.value,
         time_range: timeRange.value,
         filters: logFilters,
         limit: 500,
         cursor: nextCursor.value || undefined,
         search: searchParam,
       })
+      if (requestScope !== JSON.stringify([activeTenant.value, selectedLogViewId.value, logColumns.value, searchInput.value, timeRange.value])) return
       otelLogs.value.push(...page.rows)
       nextCursor.value = page.next_cursor || null
       paginationHasMore.value = page.has_more && Boolean(page.next_cursor)
@@ -1298,6 +1357,9 @@ watch([() => viewMode.value, () => results.value.length], () => {
 })
 
 onUnmounted(() => {
+  acGeneration++
+  if (acDebounce) clearTimeout(acDebounce)
+  if (acBlurTimer) clearTimeout(acBlurTimer)
   const searchController = activeSearchController
   activeSearchController = null
   searchController?.abort()
@@ -1318,6 +1380,8 @@ function loadSavedQuery(query: SavedQuery) {
 
 function loadHistoryEntry(entry: HistoryEntry<ExploreHistoryQuery>) {
   const q = entry.query
+  selectedLogViewId.value = q.logViewId || ''
+  customLogColumns.value = null
   // Restore filters into the search bar
   filters.value = q.filters
   searchInput.value = q.filters
@@ -2112,7 +2176,7 @@ async function runBubbleUp() {
       selection: { from: sel.startTime, to: sel.endTime },
       baseline: { from: baseline.from, to: baseline.to },
       signal: viewMode.value === 'logs' ? 'logs' : 'spans',
-      filters: getActiveFilters(),
+      filters: viewMode.value === 'logs' ? getLogFilters(getActiveFilters()) : getActiveFilters(),
       top_k: 10,
       selection_min_duration_ns: sel.minDurationNs,
       selection_max_duration_ns: sel.maxDurationNs,
@@ -3482,30 +3546,38 @@ const KNOWN_FIELDS = [
 ]
 
 const OPERATORS = ['=', '!=', '>=', '<=', '>', '<']
+const autocompleteFields = computed(() => viewMode.value === 'logs'
+  ? logSearchFields(logColumns.value, selectedLogView.value?.filters ?? [], otelLogs.value)
+  : KNOWN_FIELDS)
 
 const acItems = ref<{ label: string; insert: string; kind: 'field' | 'op' | 'value' }[]>([])
 const acIndex = ref(0)
 const acVisible = ref(false)
 const searchInputEl = ref<HTMLInputElement | null>(null)
 let acDebounce: ReturnType<typeof setTimeout> | null = null
+let acBlurTimer: ReturnType<typeof setTimeout> | null = null
+let acGeneration = 0
 
 function getCurrentToken(): { token: string; start: number; end: number } {
   const el = searchInputEl.value
   if (!el) return { token: '', start: 0, end: 0 }
-  const pos = el.selectionStart ?? searchInput.value.length
-  const text = searchInput.value
-  // Walk backward to find token start (stop at space)
-  let start = pos
-  while (start > 0 && text[start - 1] !== ' ') start--
-  return { token: text.slice(start, pos), start, end: pos }
+  return searchTokenAt(searchInput.value, el.selectionStart ?? searchInput.value.length)
 }
 
 function onSearchInput() {
+  acGeneration++
+  if (acBlurTimer) clearTimeout(acBlurTimer)
+  acVisible.value = false
   if (acDebounce) clearTimeout(acDebounce)
   acDebounce = setTimeout(() => updateAutocomplete(), 120)
 }
 
 async function updateAutocomplete() {
+  const generation = acGeneration
+  const scope = `${activeTenant.value}:${viewMode.value}:${selectedLogViewId.value}`
+  const text = searchInput.value
+  const cursor = searchInputEl.value?.selectionStart
+  const current = () => generation === acGeneration && text === searchInput.value && cursor === searchInputEl.value?.selectionStart && scope === `${activeTenant.value}:${viewMode.value}:${selectedLogViewId.value}`
   const { token } = getCurrentToken()
   if (!token) {
     acVisible.value = false
@@ -3515,28 +3587,35 @@ async function updateAutocomplete() {
   // Check if token has an operator — means we're completing a value
   const opMatch = token.match(/^([^=!<>]+)(=|!=|>=|<=|>|<)(.*)$/)
   if (opMatch) {
-    const field = opMatch[1]
-    const prefix = opMatch[3] || ''
-    // Fetch value suggestions from API
-    try {
-      const vals = await api.suggestValues(field!, prefix)
-      if (!vals.length) { acVisible.value = false; return }
-      acItems.value = vals.slice(0, 12).map(v => ({
+    const field = opMatch[1]!
+    const prefix = completionPrefix(opMatch[3] || '')
+    const isLogs = viewMode.value === 'logs'
+    if (isLogs && (logViewsLoading.value || logViewUnavailable.value)) return
+    const local = isLogs ? localLogSuggestions(otelLogs.value, field, prefix) : []
+    const showValues = (values: string[]) => {
+      if (!current()) return
+      acItems.value = [...new Set(values)].slice(0, 12).map(v => ({
         label: v,
-        insert: `${field}${opMatch[2]}${v}`,
+        insert: `${field}${opMatch[2]}${JSON.stringify(v)}`,
         kind: 'value' as const,
       }))
       acIndex.value = 0
-      acVisible.value = true
+      acVisible.value = acItems.value.length > 0
+    }
+    showValues(local)
+    try {
+      const vals = isLogs
+        ? await api.suggestLogValues({ field, prefix, time_range: timeRange.value, filters: selectedLogView.value?.filters ?? [] })
+        : await api.suggestValues(field, prefix)
+      showValues([...local, ...vals])
     } catch {
-      // Field not suggestable (e.g. duration_ns) — hide
-      acVisible.value = false
+      showValues(local)
     }
     return
   }
 
   // Check if token ends with a field name followed by nothing (suggest operators)
-  const exactField = KNOWN_FIELDS.find(f => f === token)
+  const exactField = autocompleteFields.value.find(f => f === token)
   if (exactField) {
     acItems.value = OPERATORS.map(op => ({
       label: `${exactField}${op}`,
@@ -3550,7 +3629,7 @@ async function updateAutocomplete() {
 
   // Suggest matching field names
   const lower = token.toLowerCase()
-  const matches = KNOWN_FIELDS.filter(f => f.toLowerCase().includes(lower))
+  const matches = autocompleteFields.value.filter(f => f.toLowerCase().includes(lower))
   if (matches.length) {
     acItems.value = matches.slice(0, 12).map(f => ({
       label: f,
@@ -3565,11 +3644,13 @@ async function updateAutocomplete() {
 }
 
 function acSelect(item: typeof acItems.value[0]) {
-  const { start } = getCurrentToken()
+  acGeneration++
+  if (acBlurTimer) clearTimeout(acBlurTimer)
+  if (acDebounce) clearTimeout(acDebounce)
+  const { start, end } = getCurrentToken()
   const before = searchInput.value.slice(0, start)
-  const afterPos = searchInputEl.value?.selectionStart ?? searchInput.value.length
-  const after = searchInput.value.slice(afterPos)
-  const needsSpace = item.kind === 'value'
+  const after = searchInput.value.slice(end)
+  const needsSpace = item.kind === 'value' && !/^\s/.test(after)
   searchInput.value = before + item.insert + (needsSpace ? ' ' : '') + after
   acVisible.value = false
   nextTick(() => {
@@ -3594,13 +3675,17 @@ function onSearchKeydown(e: KeyboardEvent) {
     e.preventDefault()
     if (acItems.value[acIndex.value]) acSelect(acItems.value[acIndex.value]!)
   } else if (e.key === 'Escape') {
+    acGeneration++
+    if (acDebounce) clearTimeout(acDebounce)
     acVisible.value = false
   }
 }
 
 function onSearchBlur() {
+  acGeneration++
+  if (acDebounce) clearTimeout(acDebounce)
   // Delay so click on suggestion can fire first
-  setTimeout(() => { acVisible.value = false }, 150)
+  acBlurTimer = setTimeout(() => { acVisible.value = false }, 150)
 }
 
 // ═══ Natural language query mode ═══
@@ -3764,8 +3849,10 @@ const highlightLogIdx = ref<number | null>(null)
 function buildQueryParams(): Record<string, string> {
   const p: Record<string, string> = {}
   if (searchInput.value) p.q = searchInput.value
-  if (tracesOnly.value) p.mode = 'traces'
-  else if (viewMode.value !== 'spans') p.mode = viewMode.value
+  if (viewMode.value === 'logs') p.mode = 'logs'
+  else if (tracesOnly.value) p.mode = 'traces'
+  if (viewMode.value === 'logs' && selectedLogViewId.value) p.log_view = selectedLogViewId.value
+  if (viewMode.value === 'logs' && customLogColumns.value) p.log_columns = JSON.stringify(customLogColumns.value)
   if (customRange.value) {
     p.from = customRange.value.from
     p.to = customRange.value.to
@@ -3848,6 +3935,13 @@ function restoreFromUrl() {
   const q = route.query
   if (!q || Object.keys(q).length === 0) return
   if (q.q) searchInput.value = String(q.q)
+  selectedLogViewId.value = typeof q.log_view === 'string' ? q.log_view : ''
+  if (typeof q.log_columns === 'string') {
+    try {
+      const columns = JSON.parse(q.log_columns)
+      if (Array.isArray(columns) && columns.every(column => typeof column?.field === 'string' && typeof column?.label === 'string') && !validateLogColumns(columns)) customLogColumns.value = columns
+    } catch { /* Ignore malformed display preferences. */ }
+  }
   if (q.mode === 'logs') viewMode.value = 'logs'
   else if (q.mode === 'traces') { viewMode.value = 'spans'; tracesOnly.value = true }
   if (q.from && q.to) {
@@ -3937,7 +4031,8 @@ async function doExport() {
   try {
     const isLogs = viewMode.value === 'logs'
     const all = getActiveFilters()
-    const filters = isLogs ? all.filter(f => !SPAN_ONLY_FIELDS.includes(f.field)) : all
+    if (isLogs && (logViewsLoading.value || logViewUnavailable.value)) throw new Error('Choose an available log view before exporting.')
+    const filters = isLogs ? getLogFilters(all) : all
     const cap = exportMaxRows.value || 1000
     const limit = Math.max(1, Math.min(exportRowCount.value || cap, cap))
     const { blob, filename } = await api.exportExplore({
@@ -3967,10 +4062,10 @@ async function doExport() {
 
 onMounted(async () => {
   restoreFromUrl()
+  await loadLogViews()
   loadServices()
   api.getFeatures().then(f => { exportMaxRows.value = f.export_max_rows || 1000 }).catch(() => { /* keep default */ })
   await search()
-  if (viewMode.value === 'logs') await fetchOtelLogs()
 
   if (pendingLatencyDeepLink.value && viewMode.value === 'spans') {
     const pending = pendingLatencyDeepLink.value
@@ -4051,6 +4146,21 @@ onMounted(async () => {
       }
     }
   }
+})
+watch(activeTenant, async () => {
+  stopLive(); activeSearchController?.abort()
+  selectedLogViewId.value = ''; customLogColumns.value = null
+  otelLogs.value = []; results.value = []; nextCursor.value = null; total.value = 0
+  await loadLogViews()
+  await search({ skipHistory: true })
+})
+
+watch(() => route.query.log_view, (id) => {
+  const next = typeof id === 'string' ? id : ''
+  if (next === selectedLogViewId.value) return
+  selectedLogViewId.value = next; customLogColumns.value = null
+  if (route.query.mode === 'logs') viewMode.value = 'logs'
+  search({ skipHistory: true })
 })
 </script>
 
@@ -4828,6 +4938,18 @@ onMounted(async () => {
         @share="shareLink"
         @show-shortcuts="showShortcuts = true"
       >
+        <template #view>
+          <div v-if="viewMode === 'logs'" class="log-view-controls">
+            <label for="explore-log-view">View</label>
+            <select id="explore-log-view" aria-label="Log view" :value="selectedLogViewId" :disabled="logViewsLoading" @change="selectLogView">
+              <option value="">All logs</option>
+              <option v-if="logViewUnavailable" :value="selectedLogViewId" disabled>Unavailable view</option>
+              <option v-for="view in logViews" :key="view.id" :value="view.id">{{ view.name }}</option>
+            </select>
+            <button type="button" class="btn btn-sm" :aria-expanded="showLogColumns" aria-controls="explore-log-columns" @click="editLogColumns">Columns</button>
+            <router-link v-if="isAdmin" to="/settings#log-views">Manage views</router-link>
+          </div>
+        </template>
         <template #time>
           <TimePicker v-model="selectedPreset" v-model:custom-range="customRange" />
         </template>
@@ -4858,6 +4980,20 @@ onMounted(async () => {
         </template>
       </ExploreSearchToolbar>
 
+      <div v-if="viewMode === 'logs' && logViewsError" class="log-view-warning" role="alert">{{ logViewsError }} <button type="button" class="btn btn-sm" @click="loadLogViews().then(() => search({ skipHistory: true }))">Retry</button></div>
+      <div v-if="viewMode === 'logs' && selectedLogView" class="log-view-context">
+        <span>{{ selectedLogView.name }}</span>
+        <span v-if="selectedLogView.filters.length" class="text-muted">Base filter</span>
+        <code v-for="(filter, index) in selectedLogView.filters" :key="index">{{ filter.field }}{{ filter.op }}{{ filter.value }}</code>
+        <span v-if="!selectedLogView.filters.length" class="text-muted">All logs</span>
+      </div>
+      <form v-if="viewMode === 'logs' && showLogColumns" id="explore-log-columns" class="explore-columns-panel" @submit.prevent="applyLogColumns">
+        <h3>Log columns</h3><p>Changes apply to this Explore view and its shared URL. Use Settings to save columns for everyone.</p>
+        <LogColumnsEditor v-model="columnDraft" />
+        <p v-if="columnError" role="alert" class="text-error">{{ columnError }}</p>
+        <div class="log-view-controls"><button class="btn btn-primary" type="submit">Apply columns</button><button class="btn" type="button" @click="showLogColumns = false">Cancel</button></div>
+      </form>
+
       <!-- Search bar -->
       <div class="search-bar" :class="{ 'nl-mode': nlMode }">
         <span class="search-prompt mono">{{ nlMode ? '✦' : '$' }}</span>
@@ -4866,7 +5002,7 @@ onMounted(async () => {
           ref="searchInputEl"
           v-model="searchInput"
           class="search-input"
-          placeholder="service_name=notifications event — filters + free text search"
+          :placeholder="viewMode === 'logs' && selectedLogView ? `Search within ${selectedLogView.name}…` : 'service_name=notifications event · filters + free text search'"
           @input="onSearchInput"
           @keydown="onSearchKeydown"
           @blur="onSearchBlur"
@@ -5615,11 +5751,11 @@ onMounted(async () => {
         </div><!-- /event-table (spans) -->
 
         <!-- ═══ Log Table (Logs mode) ═══ -->
-        <div v-else-if="viewMode === 'logs'" class="event-table card" :class="{ 'log-wrap-mode': logWordWrap }">
+        <div v-else-if="viewMode === 'logs'" class="event-table card" :class="{ 'log-wrap-mode': logWordWrap, 'custom-log-layout': customLogLayout }">
           <ExploreResultsState v-if="!logEntries.length" mode="logs" :loading="false" :has-results="false" />
           <template v-else>
             <!-- Log table header -->
-            <div class="et-head">
+            <div v-if="!customLogLayout" class="et-head">
               <div class="et-col log-col-time">Time</div>
               <div class="et-col log-col-level">Level</div>
               <div class="et-col log-col-svc">Service</div>
@@ -5653,6 +5789,11 @@ onMounted(async () => {
               @activate="toggleLogRow($event)"
               @follow-change="liveFollowing = $event"
             >
+            <template v-if="customLogLayout" #header>
+              <div class="et-head custom-log-grid" :style="logGridStyle">
+                <div v-for="column in logColumns" :key="column.field" class="et-col custom-log-cell" :title="column.field">{{ column.label }}</div>
+              </div>
+            </template>
             <template #overlay>
               <button v-if="liveMode && !liveFollowing" class="resume-live-follow" @click="resumeLiveFollow">
                 Resume live follow
@@ -5663,7 +5804,9 @@ onMounted(async () => {
               <div
                 class="et-row"
                 :data-log-i="i"
+                :style="customLogLayout ? logGridStyle : undefined"
                 :class="{
+                  'custom-log-grid': customLogLayout,
                   'et-selected': inlineExpandedLog === i,
                   'et-kbd-selected': selectedRowIndex === i && inlineExpandedLog !== i,
                   'et-error': entry.level === 'error' || entry.level === 'fatal',
@@ -5671,6 +5814,10 @@ onMounted(async () => {
                 }"
                 @click="toggleLogRow(i); selectedRowIndex = i"
               >
+                <template v-if="customLogLayout">
+                  <div v-for="column in logColumns" :key="column.field" class="et-col custom-log-cell" :title="customLogCell(entry, column.field)" @contextmenu="openContextMenu($event, column.field, customLogCell(entry, column.field), { traceId: entry.trace_id, source: 'log' })">{{ customLogCell(entry, column.field) || '—' }}</div>
+                </template>
+                <template v-else>
                 <div class="et-col log-col-time mono" :title="timestampTooltip(entry.timestamp)">{{ formatLogTimestamp(entry.timestamp) }}</div>
                 <div class="et-col log-col-level">
                   <span
@@ -5698,6 +5845,7 @@ onMounted(async () => {
                   >{{ entry.trace_id.slice(0, 8) }}</span>
                   <span v-else class="text-muted">&mdash;</span>
                 </div>
+                </template>
               </div>
               <!-- Inline preview expansion -->
               <div v-if="inlineExpandedLog === i" class="log-inline-detail" @click.stop>
