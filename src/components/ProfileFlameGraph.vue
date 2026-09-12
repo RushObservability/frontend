@@ -71,12 +71,12 @@ function band(node: FlameNode) {
       <div class="inspected-name" :title="inspected.name">{{ inspected.name }}</div>
       <dl><div><dt>Total CPU</dt><dd>{{ cpuTime(inspected.total) }}</dd></div><div><dt>Self CPU</dt><dd>{{ cpuTime(inspected.self) }}</dd></div><div><dt>Of all CPU</dt><dd>{{ share(inspected).toFixed(1) }}%</dd></div></dl>
     </div>
-    <div class="flame-legend"><span>CPU share</span><span><i class="cpu-low"></i>&lt;1%</span><span><i class="cpu-medium"></i>1–10%</span><span><i class="cpu-high"></i>≥10%</span><span class="legend-hint">Click a frame to focus</span></div>
+    <div class="flame-legend"><span>CPU share</span><span><i class="cpu-low"></i>&lt;1%</span><span><i class="cpu-medium"></i>1–&lt;10%</span><span><i class="cpu-high"></i>≥10%</span><span class="legend-hint">Click a frame to focus</span></div>
   </section>
 </template>
 
 <style scoped>
-.profile-flame { --cpu-low: color-mix(in oklch, var(--warning) 12%, var(--bg-surface)); --cpu-medium: color-mix(in oklch, var(--warning) 25%, var(--bg-surface)); --cpu-high: color-mix(in oklch, var(--warning) 42%, var(--bg-surface)); }
+.profile-flame { --cpu-low: color-mix(in oklch, var(--accent) 14%, var(--bg-surface)); --cpu-medium: color-mix(in oklch, var(--accent) 30%, var(--bg-surface)); --cpu-high: color-mix(in oklch, var(--accent) 50%, var(--bg-surface)); }
 .flame-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; min-height: 44px; border-bottom: 1px solid var(--border-default); }
 .stack-breadcrumbs { display: flex; align-items: center; gap: 8px; overflow: auto; color: var(--text-muted); font-size: 11px; min-width: 0; }
 .stack-breadcrumbs button, .reset-button { color: var(--accent); border: 0; background: none; padding: 6px 0; font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
@@ -93,8 +93,9 @@ function band(node: FlameNode) {
 .cpu-medium { background: var(--cpu-medium); }
 .cpu-high { background: var(--cpu-high); }
 .root-frame { background: var(--bg-raised); }
-.flame-frame:hover, .flame-frame.matched { border-color: var(--accent); }
-.flame-frame:focus-visible, .flame-toolbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; }
+.flame-frame:hover, .flame-frame.matched { border-color: var(--text-primary); }
+.flame-frame:focus-visible { outline: 2px solid var(--text-primary); outline-offset: -2px; z-index: 1; }
+.flame-toolbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .dimmed { opacity: .3; }
 .frame-inspector { display: flex; align-items: center; flex-wrap: wrap; gap: 16px 32px; border-top: 1px solid var(--border-default); padding: 12px 16px; background: var(--bg-raised); }
 .inspected-name { flex: 1 1 280px; min-width: 0; color: var(--text-primary); font: 11px var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -103,7 +104,7 @@ dt { color: var(--text-secondary); margin-bottom: 4px; }
 dd { margin: 0; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .flame-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; color: var(--text-secondary); font-size: 10px; border-top: 1px solid var(--border-default); }
 .flame-legend span { display: flex; align-items: center; gap: 5px; }
-.flame-legend i { display: inline-block; width: 9px; height: 9px; border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border-default)); }
+.flame-legend i { display: inline-block; width: 9px; height: 9px; border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border-default)); }
 .legend-hint { margin-left: auto; }
 @media (pointer: coarse) { .flame-toolbar button { min-height: 44px; } }
 </style>

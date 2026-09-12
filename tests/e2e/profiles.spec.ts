@@ -83,6 +83,44 @@ test('profiles appears under Observe without a license or integrations', async (
   await page.screenshot({ path: info.outputPath('profiles-mobile.png'), fullPage: true })
 })
 
+test('flame graph uses readable Rush-blue CPU bands in both themes', async ({ page }) => {
+  await stub(page)
+  await page.goto('/profiles?service=checkout')
+  await expect(page.locator('.flame-frame.cpu-low').first()).toBeAttached()
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme)
+    const bands = await page.locator('.profile-flame').evaluate(graph => {
+      const canvas = document.createElement('canvas')
+      canvas.width = canvas.height = 1
+      const context = canvas.getContext('2d')!
+      const rgb = (color: string) => {
+        context.fillStyle = color
+        context.fillRect(0, 0, 1, 1)
+        return Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3)
+      }
+      const luminance = (color: number[]) => color.map(value => {
+        const channel = value / 255
+        return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4
+      }).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0)
+      return ['cpu-low', 'cpu-medium', 'cpu-high'].map(band => {
+        const frame = getComputedStyle(graph.querySelector(`.flame-frame.${band}`)!)
+        const swatch = getComputedStyle(graph.querySelector(`.flame-legend .${band}`)!)
+        const background = rgb(frame.backgroundColor)
+        const a = luminance(background)
+        const b = luminance(rgb(frame.color))
+        return { background, swatch: rgb(swatch.backgroundColor), contrast: (Math.max(a, b) + .05) / (Math.min(a, b) + .05) }
+      })
+    })
+    expect(new Set(bands.map(band => band.background.join(','))).size).toBe(3)
+    for (const band of bands) {
+      expect(band.background[2]).toBeGreaterThan(band.background[0])
+      expect(band.background[2]).toBeGreaterThan(band.background[1])
+      expect(band.swatch).toEqual(band.background)
+      expect(band.contrast).toBeGreaterThanOrEqual(4.5)
+    }
+  }
+})
+
 test('empty profiles explain collection without fabricated data', async ({ page }, info) => {
   await stub(page, 'empty')
   await page.goto('/profiles?service=checkout')
