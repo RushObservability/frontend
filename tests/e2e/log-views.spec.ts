@@ -1,18 +1,31 @@
 import { test, expect, type Page } from '@playwright/test'
 import type { LogView } from '../../src/lib/logViews'
 
-async function stubLogApi(page: Page, initialViews: LogView[] = []) {
-  const state = { views: initialViews, searches: [] as Record<string, any>[] }
+async function stubLogApi(page: Page, initialViews: LogView[] = [], role = 'admin') {
+  const state = { views: initialViews, searches: [] as Record<string, any>[], saves: [] as Record<string, any>[], userId: 'test-user' }
+  const personal = new Map<string, LogView[]>()
+  const shared = new Map<string, LogView[]>([['default', initialViews]])
   await page.route('**/api/v1/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
     let body: unknown = { keys: [], groups: [], users: [], links: [], channels: [], skills: [], values: [], providers: [], mappings: [] }
-    if (path === '/api/v1/auth/me') body = { user: { id: 'test-user', username: 'tester', role: 'admin', display_name: 'Tester' } }
+    if (path === '/api/v1/auth/me') body = { user: { id: state.userId, username: 'tester', role, display_name: 'Tester' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }, { id: 'other', name: 'other', enabled: true }] }
     if (path === '/api/v1/services') body = { services: [] }
     if (path === '/api/v1/settings/log-views') {
-      if (request.method() === 'PUT') state.views = request.postDataJSON().views
-      body = { views: request.headers()['x-rush-tenant'] === 'other' ? [] : state.views }
+      const tenant = request.headers()['x-rush-tenant'] ?? 'default'
+      const scope = new URL(request.url()).searchParams.get('scope') ?? 'tenant'
+      const personalKey = `${tenant}:${state.userId}`
+      if (request.method() === 'PUT') {
+        const saved = request.postDataJSON().views.map((view: LogView) => ({ ...view, scope }))
+        state.saves.push({ tenant, scope, views: request.postDataJSON().views })
+        if (scope === 'personal') personal.set(personalKey, saved)
+        else shared.set(tenant, saved)
+        state.views = shared.get('default') ?? []
+        body = { views: saved, tenant_id: tenant }
+      } else {
+        body = { views: [...(shared.get(tenant) ?? []), ...(personal.get(personalKey) ?? [])], tenant_id: tenant }
+      }
     }
     if (path === '/api/v1/explore/search') {
       const query = request.postDataJSON()
@@ -140,7 +153,7 @@ test('log-view drawer closes with Escape, restores focus, and keeps failed saves
   await dialog.getByRole('button', { name: 'Save view', exact: true }).focus()
   await page.keyboard.press('Tab')
   await expect(dialog.getByRole('button', { name: 'Close log view editor' })).toBeFocused()
-  await page.route('**/api/v1/settings/log-views', route => route.fulfill({ status: 503, body: 'Unavailable' }))
+  await page.route('**/api/v1/settings/log-views*', route => route.fulfill({ status: 503, body: 'Unavailable' }))
   await dialog.getByRole('button', { name: 'Save view', exact: true }).click()
   await expect(dialog.getByRole('alert')).toContainText('Could not save log views.')
   await expect(dialog.getByLabel('View name')).toHaveValue('Flights')
@@ -157,7 +170,7 @@ test('missing or unreadable saved views never fall back to an unfiltered search'
   await expect(page.getByRole('alert')).toContainText('This log view is unavailable')
   expect(searches).toHaveLength(0)
 
-  await page.route('**/api/v1/settings/log-views', route => route.fulfill({ status: 503, body: 'Unavailable' }))
+  await page.route('**/api/v1/settings/log-views*', route => route.fulfill({ status: 503, body: 'Unavailable' }))
   await page.getByRole('button', { name: 'Retry', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Could not load log views.')
   expect(searches).toHaveLength(0)
@@ -221,4 +234,80 @@ test('flight autocomplete suggests JSON fields and quoted airline values without
   await expect(page.locator('.ac-dropdown')).toContainText('Example Air')
   await search.press('Tab')
   await expect(search).toHaveValue('body.airline="Example Air" ')
+})
+
+test('a viewer can manage personal views without changing shared views or exposing them to another user', async ({ page }, testInfo) => {
+  const shared: LogView = {
+    id: '33333333-3333-4333-8333-333333333333', name: 'Flights',
+    filters: [{ field: 'type', op: '=', value: 'event_data' }],
+    columns: [{ field: 'timestamp', label: 'Time' }, { field: 'log.airline', label: 'Airline' }],
+  }
+  const state = await stubLogApi(page, [shared], 'viewer')
+  await page.goto('/?mode=logs')
+  await page.getByRole('link', { name: 'Manage views' }).click()
+  await expect(page).toHaveURL(/\/settings\/log-views$/)
+  const sharedRow = page.getByRole('row').filter({ hasText: 'Shared with tenant' })
+  await expect(sharedRow.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+  await expect(sharedRow.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0)
+  await sharedRow.getByRole('button', { name: 'Copy to my views' }).click()
+  const drawer = page.getByRole('dialog', { name: 'New log view' })
+  await expect(drawer.getByLabel('View visibility')).toHaveValue('personal')
+  await expect(drawer.getByLabel('View visibility').locator('option')).toHaveCount(1)
+  await drawer.getByLabel('View name').fill('Flights')
+  await drawer.getByRole('button', { name: 'Save view', exact: true }).click()
+  await expect(page.getByRole('status')).toHaveText('Log view saved.')
+  expect(state.saves.at(-1)?.scope).toBe('personal')
+  expect(state.saves.at(-1)?.views).toHaveLength(1)
+  expect(state.saves.at(-1)?.views[0]).not.toHaveProperty('scope')
+  expect(state.views).toEqual([shared])
+  const personalRow = page.getByRole('row').filter({ hasText: 'Only me' })
+  await personalRow.getByRole('button', { name: 'Edit', exact: true }).click()
+  await page.getByLabel('View name').fill('My flights')
+  await page.getByRole('button', { name: 'Save view', exact: true }).click()
+  await expect(page.getByRole('dialog')).toBeHidden()
+  await expect(personalRow).toContainText('My flights')
+  await page.screenshot({ path: testInfo.outputPath('personal-log-views.png'), fullPage: true })
+  await personalRow.getByRole('link', { name: 'My flights' }).click()
+  const privateUrl = page.url()
+  await expect(page.getByLabel('Log view', { exact: true })).toHaveValue(/^personal:/)
+  await expect(page.locator('#explore-log-view optgroup[label="Shared with tenant"] option')).toHaveText('Flights')
+  await expect(page.locator('#explore-log-view optgroup[label="My views"] option')).toHaveText('My flights')
+
+  state.userId = 'another-user'
+  const before = state.searches.length
+  await page.goto(privateUrl)
+  await expect(page.getByRole('alert')).toContainText('This log view is unavailable')
+  await expect(page.locator('#explore-log-view optgroup[label="My views"]')).toHaveCount(0)
+  expect(state.searches).toHaveLength(before)
+})
+
+test('tenant selection isolates shared and personal collections and personal deletion preserves shared views', async ({ page }) => {
+  const state = await stubLogApi(page)
+  await page.goto('/settings#log-views')
+  const tenant = page.getByLabel('Log views tenant', { exact: true })
+  await tenant.selectOption('other')
+  await expect(tenant).toHaveValue('other')
+  await page.getByRole('button', { name: 'New log view', exact: true }).click()
+  await page.getByRole('button', { name: 'Use flight example' }).click()
+  await page.getByLabel('View name').fill('Other tenant flights')
+  await page.getByLabel('View visibility').selectOption('tenant')
+  await page.getByRole('button', { name: 'Save view', exact: true }).click()
+  await expect(page.getByRole('status')).toHaveText('Log view saved.')
+  expect(state.saves.at(-1)?.tenant).toBe('other')
+  expect(state.saves.at(-1)?.scope).toBe('tenant')
+
+  await page.getByRole('button', { name: 'Copy to my views' }).click()
+  await page.getByRole('button', { name: 'Save view', exact: true }).click()
+  const personalRow = page.getByRole('row').filter({ hasText: 'Only me' })
+  await expect(personalRow).toContainText('Other tenant flights copy')
+  await tenant.selectOption('default')
+  await expect(tenant).toHaveValue('default')
+  await expect(page.getByRole('link', { name: /Other tenant flights/ })).toHaveCount(0)
+  await tenant.selectOption('other')
+  await expect(personalRow).toBeVisible()
+  await personalRow.getByRole('button', { name: 'Delete', exact: true }).click()
+  await personalRow.getByRole('button', { name: 'Confirm delete', exact: true }).click()
+  await expect(personalRow).toHaveCount(0)
+  expect(state.saves.at(-1)).toEqual({ tenant: 'other', scope: 'personal', views: [] })
+  await expect(page.getByRole('link', { name: 'Other tenant flights', exact: true })).toBeVisible()
 })

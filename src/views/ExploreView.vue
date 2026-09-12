@@ -14,7 +14,7 @@ import PanelCard from '../components/PanelCard.vue'
 import VirtualTable from '../components/VirtualTable.vue'
 import LogColumnsEditor from '../components/LogColumnsEditor.vue'
 import { searchTokens, searchTokenAt, completionPrefix, filterValue, logSearchFields, localLogSuggestions } from '../lib/logAutocomplete'
-import { DEFAULT_LOG_COLUMNS, logColumnValue, logViewFilters, validateLogColumns, type LogView, type LogViewColumn } from '../lib/logViews'
+import { DEFAULT_LOG_COLUMNS, logColumnValue, logViewFilters, logViewKey, logViewScope, validateLogColumns, type LogView, type LogViewColumn } from '../lib/logViews'
 import { useAuth } from '../composables/useAuth'
 import TraceWaterfall from '../components/TraceWaterfall.vue'
 import ExploreSearchToolbar from '../components/ExploreSearchToolbar.vue'
@@ -42,7 +42,7 @@ const { entries: exploreHistory, push: pushHistory, remove: removeHistory, clear
 const router = useRouter()
 const route = useRoute()
 const api = useApi()
-const { isAdmin } = useAuth()
+const { isAdmin, isAuthenticated } = useAuth()
 const { features } = useFeatures()
 
 const selectedPreset = useTimeRangePreference()
@@ -169,7 +169,7 @@ const logViews = ref<LogView[]>([])
 const logViewsLoading = ref(true)
 const logViewsError = ref('')
 const selectedLogViewId = ref(typeof route.query.log_view === 'string' ? route.query.log_view : '')
-const selectedLogView = computed(() => logViews.value.find(view => view.id === selectedLogViewId.value))
+const selectedLogView = computed(() => logViews.value.find(view => logViewKey(view) === selectedLogViewId.value))
 const logViewUnavailable = computed(() => !!selectedLogViewId.value && !selectedLogView.value)
 const customLogColumns = ref<LogViewColumn[] | null>(null)
 const logColumns = computed(() => customLogColumns.value ?? selectedLogView.value?.columns ?? DEFAULT_LOG_COLUMNS)
@@ -4147,11 +4147,16 @@ onMounted(async () => {
     }
   }
 })
-watch(activeTenant, async () => {
+watch([activeTenant, storageUserId], async () => {
   stopLive(); activeSearchController?.abort()
-  selectedLogViewId.value = ''; customLogColumns.value = null
+  // Keep the selected ID until it is checked in the new tenant/user scope.
+  // Clearing it here would briefly issue an unfiltered All logs request.
+  customLogColumns.value = null
   otelLogs.value = []; results.value = []; nextCursor.value = null; total.value = 0
+  const tenant = activeTenant.value
+  const userId = storageUserId.value
   await loadLogViews()
+  if (tenant !== activeTenant.value || userId !== storageUserId.value) return
   await search({ skipHistory: true })
 })
 
@@ -4944,10 +4949,15 @@ watch(() => route.query.log_view, (id) => {
             <select id="explore-log-view" aria-label="Log view" :value="selectedLogViewId" :disabled="logViewsLoading" @change="selectLogView">
               <option value="">All logs</option>
               <option v-if="logViewUnavailable" :value="selectedLogViewId" disabled>Unavailable view</option>
-              <option v-for="view in logViews" :key="view.id" :value="view.id">{{ view.name }}</option>
+              <optgroup label="Shared with tenant" v-if="logViews.some(view => logViewScope(view) === 'tenant')">
+                <option v-for="view in logViews.filter(view => logViewScope(view) === 'tenant')" :key="logViewKey(view)" :value="logViewKey(view)">{{ view.name }}</option>
+              </optgroup>
+              <optgroup label="My views" v-if="logViews.some(view => logViewScope(view) === 'personal')">
+                <option v-for="view in logViews.filter(view => logViewScope(view) === 'personal')" :key="logViewKey(view)" :value="logViewKey(view)">{{ view.name }}</option>
+              </optgroup>
             </select>
             <button type="button" class="btn btn-sm" :aria-expanded="showLogColumns" aria-controls="explore-log-columns" @click="editLogColumns">Columns</button>
-            <router-link v-if="isAdmin" to="/settings#log-views">Manage views</router-link>
+            <router-link v-if="isAuthenticated" :to="isAdmin ? '/settings#log-views' : '/settings/log-views'">Manage views</router-link>
           </div>
         </template>
         <template #time>

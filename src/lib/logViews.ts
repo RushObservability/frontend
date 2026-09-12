@@ -1,7 +1,11 @@
 import type { Filter, LogRecord } from '../types'
 
 export interface LogViewColumn { field: string; label: string }
-export interface LogView { id: string; name: string; filters: Filter[]; columns: LogViewColumn[] }
+export type LogViewScope = 'tenant' | 'personal'
+export interface LogView { id: string; name: string; filters: Filter[]; columns: LogViewColumn[]; scope?: LogViewScope }
+
+export function logViewScope(view: LogView): LogViewScope { return view.scope ?? 'tenant' }
+export function logViewKey(view: LogView): string { return logViewScope(view) === 'personal' ? `personal:${view.id}` : view.id }
 
 export const DEFAULT_LOG_COLUMNS: LogViewColumn[] = [
   { field: 'timestamp', label: 'Time' },

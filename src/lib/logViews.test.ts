@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Filter, LogRecord } from '../types'
-import { DEFAULT_LOG_COLUMNS, logColumnValue, logViewFilters, validateLogColumns, type LogView } from './logViews'
+import { DEFAULT_LOG_COLUMNS, logColumnValue, logViewFilters, logViewKey, logViewScope, validateLogColumns, type LogView } from './logViews'
 
 const view: LogView = {
   id: '33333333-3333-4333-8333-333333333333', name: 'Flights',
@@ -15,6 +15,12 @@ const row = {
 } as LogRecord
 
 describe('log views', () => {
+  it('keeps legacy shared links working and separates personal IDs', () => {
+    expect(logViewScope(view)).toBe('tenant')
+    expect(logViewKey(view)).toBe(view.id)
+    expect(logViewKey({ ...view, scope: 'tenant' })).toBe(view.id)
+    expect(logViewKey({ ...view, scope: 'personal' })).toBe(`personal:${view.id}`)
+  })
   it('adds the base without replacing same-field filters or mutating the search', () => {
     const user: Filter[] = [{ field: 'type', op: '!=', value: 'event_data' }, { field: 'status', op: '=', value: 'delayed' }]
     expect(logViewFilters(user, view)).toEqual([...user, ...view.filters])
