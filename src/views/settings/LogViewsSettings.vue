@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useApi } from '../../composables/useApi'
 import { useTenant } from '../../composables/useTenant'
-import { DEFAULT_LOG_COLUMNS, validateLogColumns, type LogView } from '../../lib/logViews'
+import { useAuth } from '../../composables/useAuth'
+import { DEFAULT_LOG_COLUMNS, logViewKey, logViewScope, validateLogColumns, type LogView, type LogViewScope } from '../../lib/logViews'
 import LogColumnsEditor from '../../components/LogColumnsEditor.vue'
 import DataTable from '../../components/DataTable.vue'
 import DetailDrawer from '../../components/DetailDrawer.vue'
 
 const api = useApi()
-const { activeTenant, activeTenantName } = useTenant()
+const { activeTenant, activeTenantName, tenants, setTenant } = useTenant()
+const { isAdmin, isAuthenticated, user } = useAuth()
 const views = ref<LogView[]>([])
 const draft = ref<LogView | null>(null)
 const loading = ref(false)
@@ -18,6 +20,9 @@ const notice = ref('')
 const deleting = ref('')
 const loadFailed = ref(false)
 let generation = 0
+const draftIsExisting = computed(() => !!draft.value && views.value.some(view => logViewKey(view) === logViewKey(draft.value!)))
+function canEdit(view: LogView) { return isAuthenticated.value && (logViewScope(view) === 'personal' || isAdmin.value) }
+function scopeViews(scope: LogViewScope) { return views.value.filter(view => logViewScope(view) === scope) }
 
 async function load() {
   const run = ++generation
@@ -29,12 +34,19 @@ async function load() {
   } catch { if (run === generation) { error.value = 'Could not load log views.'; loadFailed.value = true } }
   finally { if (run === generation) loading.value = false }
 }
-watch(activeTenant, load, { immediate: true })
+watch([activeTenant, () => user.value?.id], load, { immediate: true })
 
-function edit(view?: LogView) {
+function edit(view?: LogView, copy = false) {
+  if (!isAuthenticated.value || (view && !copy && !canEdit(view))) return
   error.value = ''; notice.value = ''; deleting.value = ''
   draft.value = view ? JSON.parse(JSON.stringify(view)) : {
-    id: crypto.randomUUID(), name: '', filters: [], columns: DEFAULT_LOG_COLUMNS.map(column => ({ ...column })),
+    id: crypto.randomUUID(), name: '', scope: isAdmin.value ? 'tenant' : 'personal', filters: [], columns: DEFAULT_LOG_COLUMNS.map(column => ({ ...column })),
+  }
+  draft.value!.scope = view ? logViewScope(view) : draft.value!.scope
+  if (copy) {
+    draft.value!.id = crypto.randomUUID()
+    draft.value!.scope = 'personal'
+    draft.value!.name = `${view!.name} copy`
   }
 }
 
@@ -54,13 +66,14 @@ function closeEditor() {
   error.value = ''
 }
 
-async function persist(next: LogView[], message: string) {
+async function persist(next: LogView[], scope: LogViewScope, message: string) {
   const run = generation
   saving.value = true; error.value = ''; notice.value = ''
   try {
-    const response = await api.saveLogViews(next)
+    const response = await api.saveLogViews(next, scope)
     if (run !== generation) return
-    views.value = response.views; draft.value = null; deleting.value = ''; notice.value = message
+    views.value = [...views.value.filter(view => logViewScope(view) !== scope), ...response.views.map(view => ({ ...view, scope }))]
+    draft.value = null; deleting.value = ''; notice.value = message
   } catch { if (run === generation) error.value = 'Could not save log views. Your changes are still here. Try again.' }
   finally { saving.value = false }
 }
@@ -73,30 +86,41 @@ function save() {
   view.filters = view.filters.map(filter => ({ ...filter, field: filter.field.trim() }))
   error.value = validateLogColumns(view.columns) ?? ''
   if (!view.name) error.value = 'Give this view a name.'
-  if (views.value.some(item => item.id !== view.id && item.name.toLowerCase() === view.name.toLowerCase())) error.value = 'A view with this name already exists.'
+  const scope = logViewScope(view)
+  const collection = scopeViews(scope)
+  if (collection.some(item => item.id !== view.id && item.name.toLowerCase() === view.name.toLowerCase())) error.value = 'A view with this name already exists in this scope.'
   if (view.filters.some(filter => !filter.field)) error.value = 'Each base filter needs a field.'
   if (error.value) return
-  const next = views.value.filter(item => item.id !== view.id)
-  const index = views.value.findIndex(item => item.id === view.id)
+  const next = collection.filter(item => item.id !== view.id)
+  if (next.length >= 50) { error.value = 'This scope already has 50 views in this tenant. Delete a view before adding another.'; return }
+  const index = collection.findIndex(item => item.id === view.id)
   next.splice(index < 0 ? next.length : index, 0, view)
-  void persist(next, 'Log view saved.')
+  void persist(next, scope, 'Log view saved.')
 }
 </script>
 
 <template>
   <section id="panel-log-views" aria-label="Log view settings" class="log-view-settings">
     <div class="view-section-heading">
-      <p>Save a base filter and columns for {{ activeTenantName }}. Everyone with access to this tenant can use these views in Explore.</p>
-      <button type="button" class="btn btn-primary" :disabled="loading || saving || loadFailed || views.length >= 50" @click="edit()">New log view</button>
+      <div class="view-tenant-controls">
+        <label class="view-tenant">Tenant
+          <select aria-label="Log views tenant" :value="activeTenant" :disabled="loading || saving || !!draft" @change="setTenant(($event.target as HTMLSelectElement).value)">
+            <option v-if="!tenants.some(tenant => tenant.name === activeTenant)" :value="activeTenant">{{ activeTenantName }}</option>
+            <option v-for="tenant in tenants" :key="tenant.id" :value="tenant.name">{{ tenant.name }}</option>
+          </select>
+        </label>
+        <p>Shared views are available to everyone in this tenant. Personal views are visible only to you.</p>
+      </div>
+      <button type="button" class="btn btn-primary" :disabled="loading || saving || loadFailed || !isAuthenticated" @click="edit()">New log view</button>
     </div>
     <p v-if="error && !draft" class="view-error" role="alert">{{ error }}</p>
     <button v-if="loadFailed" type="button" class="btn btn-sm" @click="load">Retry</button>
     <p v-if="notice" class="view-notice" role="status">{{ notice }}</p>
 
-    <DetailDrawer :open="!!draft" :label="views.some(view => view.id === draft?.id) ? 'Edit log view' : 'New log view'" size="medium" @close="closeEditor">
+    <DetailDrawer :open="!!draft" :label="draftIsExisting ? 'Edit log view' : 'New log view'" size="medium" @close="closeEditor">
     <form v-if="draft" class="view-editor" :aria-busy="saving" @submit.prevent="save">
       <header class="view-editor-heading">
-        <h2>{{ views.some(view => view.id === draft?.id) ? 'Edit log view' : 'New log view' }}</h2>
+        <h2>{{ draftIsExisting ? 'Edit log view' : 'New log view' }}</h2>
         <button type="button" class="view-editor-close" aria-label="Close log view editor" :disabled="saving" @click="closeEditor">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
         </button>
@@ -106,6 +130,13 @@ function save() {
       <fieldset class="view-editor-fields" :disabled="saving">
       <div class="view-example"><span class="view-hint">Tenant: {{ activeTenantName }}</span><button type="button" class="btn btn-sm" @click="flightsExample">Use flight example</button></div>
       <label class="view-name">View name<input v-model="draft.name" maxlength="80" required placeholder="Flights"></label>
+      <label class="view-name">Visibility
+        <select v-model="draft.scope" aria-label="View visibility" :disabled="draftIsExisting">
+          <option value="personal">Only me</option>
+          <option v-if="isAdmin" value="tenant">Shared with tenant</option>
+        </select>
+        <span class="view-hint">{{ draft.scope === 'personal' ? `Only you can see this view in ${activeTenantName}.` : `Everyone with access to ${activeTenantName} can use this view. Only admins can edit it.` }}</span>
+      </label>
       <fieldset>
         <legend>Base filters</legend>
         <p>All filters below must match. The Explore search bar adds further conditions without changing this base.</p>
@@ -126,28 +157,30 @@ function save() {
     </DetailDrawer>
 
     <DataTable :loading="loading" empty-label="No saved log views. Create one to browse a dataset with its own columns.">
-      <thead><tr><th>View</th><th>Base filters</th><th>Columns</th><th class="view-actions-cell">Actions</th></tr></thead>
+      <thead><tr><th>View</th><th>Visibility</th><th>Base filters</th><th>Columns</th><th class="view-actions-cell">Actions</th></tr></thead>
       <tbody>
-        <tr v-if="loading"><td colspan="4" class="view-empty">Loading log views…</td></tr>
-        <tr v-for="view in views" :key="view.id">
-          <td><router-link :to="{ path: '/', query: { mode: 'logs', log_view: view.id } }">{{ view.name }}</router-link></td>
+        <tr v-if="loading"><td colspan="5" class="view-empty">Loading log views…</td></tr>
+        <tr v-for="view in views" :key="logViewKey(view)">
+          <td><router-link :to="{ path: '/', query: { mode: 'logs', log_view: logViewKey(view) } }">{{ view.name }}</router-link></td>
+          <td><span class="view-scope" :class="{ 'view-scope-personal': logViewScope(view) === 'personal' }">{{ logViewScope(view) === 'personal' ? 'Only me' : 'Shared with tenant' }}</span></td>
           <td><span v-if="!view.filters.length" class="view-hint">All logs</span><div v-for="(filter, index) in view.filters" :key="index"><code>{{ filter.field }} {{ filter.op }} {{ filter.value }}</code></div></td>
           <td>{{ view.columns.map(column => column.label).join(' · ') }}</td>
           <td class="view-actions-cell">
-            <div v-if="deleting === view.id" class="view-delete" role="alert">
+            <div v-if="deleting === logViewKey(view)" class="view-delete" role="alert">
               Delete {{ view.name }}?
               <div class="view-row-actions">
                 <button type="button" class="action-btn" :disabled="saving" @click="deleting = ''">Cancel</button>
-                <button type="button" class="action-btn action-btn-danger" :disabled="saving" @click="persist(views.filter(item => item.id !== view.id), 'Log view deleted.')">Confirm delete</button>
+                <button type="button" class="action-btn action-btn-danger" :disabled="saving" @click="persist(scopeViews(logViewScope(view)).filter(item => item.id !== view.id), logViewScope(view), 'Log view deleted.')">Confirm delete</button>
               </div>
             </div>
             <div v-else class="view-row-actions">
-              <button type="button" class="action-btn" :disabled="saving" @click="edit(view)">Edit</button>
-              <button type="button" class="action-btn action-btn-danger" :disabled="saving" @click="deleting = view.id">Delete</button>
+              <button v-if="logViewScope(view) === 'tenant' && isAuthenticated" type="button" class="action-btn" :disabled="saving" @click="edit(view, true)">Copy to my views</button>
+              <button v-if="canEdit(view)" type="button" class="action-btn" :disabled="saving" @click="edit(view)">Edit</button>
+              <button v-if="canEdit(view)" type="button" class="action-btn action-btn-danger" :disabled="saving" @click="deleting = logViewKey(view)">Delete</button>
             </div>
           </td>
         </tr>
-        <tr v-if="!loading && !views.length"><td colspan="4" class="view-empty">Create a view for events, flights, or any other structured log data.</td></tr>
+        <tr v-if="!loading && !views.length"><td colspan="5" class="view-empty">No views in {{ activeTenantName }} yet. Create a personal view{{ isAdmin ? ' or share one with this tenant' : '' }}.</td></tr>
       </tbody>
     </DataTable>
   </section>
@@ -158,6 +191,11 @@ function save() {
 .log-view-settings { min-width: 0; }
 .view-section-heading > p { margin: 0; max-width: 640px; }
 .view-section-heading { margin-bottom: var(--sp-4, 16px); }
+.view-tenant-controls { display: flex; flex-direction: column; gap: var(--sp-2); }
+.view-tenant-controls p { margin: 0; max-width: 640px; }
+.view-tenant { display: flex; align-items: center; gap: var(--sp-2); font-size: 12px; }
+.view-scope { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+.view-scope-personal { color: var(--accent); }
 .view-section-heading, .view-editor-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
 h2 { margin: 0; color: var(--text-primary); font-size: 14px; font-weight: 600; }
 p { color: var(--text-secondary); line-height: 1.6; font-size: 12px; }

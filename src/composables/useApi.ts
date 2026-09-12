@@ -762,8 +762,10 @@ export function useApi() {
     return await request('/settings/log-views')
   }
 
-  async function saveLogViews(views: LogView[]): Promise<{ views: LogView[] }> {
-    return await request('/settings/log-views', { method: 'PUT', body: JSON.stringify({ views }) })
+  async function saveLogViews(views: LogView[], scope: 'tenant' | 'personal' = 'tenant'): Promise<{ views: LogView[] }> {
+    // Ownership and tenant are resolved from the session and X-Rush-Tenant, not the payload.
+    const definitions = views.map(({ id, name, filters, columns }) => ({ id, name, filters, columns }))
+    return await request(`/settings/log-views?scope=${scope}`, { method: 'PUT', body: JSON.stringify({ views: definitions }) })
   }
 
   async function queryLogs(req: {

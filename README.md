@@ -52,11 +52,26 @@ Explore (unified trace + log search with a query builder), Services and per-serv
 
 ## Saved log views
 
-In **Settings → Log views**, an admin can create a view for the current tenant.
+In **Settings → Log views**, choose a tenant using the selector above the table.
+New and Edit open a right-side drawer. Choose a visibility for new views:
+
+- **Shared with tenant**: everyone with access to that tenant can use the view.
+  Only admins can create, edit, or delete shared views. Existing views remain shared.
+- **Only me**: any signed-in user, including viewers, can manage their own views.
+  Personal views belong to both the selected tenant and that user. They do not
+  appear for other users, including admins browsing their own views.
+
+Non-admin users can open **Explore → Logs → Manage views**, or go directly to
+`/settings/log-views`. This does not grant access to other admin settings.
+**Copy to my views** creates a personal copy of a shared view. Editing an existing
+view does not change its visibility. Each scope allows up to 50 views per tenant.
+
 Choose **Use flight example** to start with `type=event_data` as the base filter
 and **Time | Airline | Flight number | Status** as the columns.
 
-In **Explore → Logs**, select the view. Its base filters apply automatically;
+In **Explore → Logs**, select from **Shared with tenant** or **My views**.
+Personal-view links work only for their owner in the matching tenant. A missing
+view never falls back to an unfiltered search. Its base filters apply automatically;
 the search bar stays empty until you add a search, such as `status=delayed`.
 The search and base filters must both match. Selecting **All logs** removes the
 view's base filters and restores the standard log columns.
@@ -75,8 +90,9 @@ Value suggestions use the current tenant, time range, and view's base filters.
 
 **Columns** in Explore lets you change headings, order, and visible fields for
 the current page. Those overrides are included in shared URLs and do not change
-the saved view. Edit the view in Settings to update it for everyone in the
-tenant. Views are conveniences for browsing, not access-control rules; users
+the saved view. Edit a shared view in Settings to update it for everyone in the
+tenant, or edit a personal view to update only your copy. Views are conveniences
+for browsing, not access-control rules; users
 can still choose All logs. They are available in both frontend editions and
 require a query-api build with `/api/v1/settings/log-views` support.
 

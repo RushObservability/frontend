@@ -229,6 +229,11 @@ const router = createRouter({
       meta: { requiresAdmin: true },
     },
     {
+      path: '/settings/log-views',
+      name: 'log-views',
+      component: () => import('./views/LogViewsView.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('./views/SettingsView.vue'),

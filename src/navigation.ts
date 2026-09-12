@@ -41,7 +41,7 @@ export const NAVIGATION_GROUPS: Array<{ id: NavigationGroupId; label: string }> 
 export const NAVIGATION_ITEMS: NavigationItem[] = [
   {
     id: 'explore', label: 'Explore', path: '/', icon: '⌁', group: 'observe',
-    routeNames: ['explore', 'trace', 'logs', 'traces'], mobilePrimary: true,
+    routeNames: ['explore', 'trace', 'logs', 'traces', 'log-views'], mobilePrimary: true,
     keywords: ['search', 'traces', 'logs', 'apm'],
   },
   {
