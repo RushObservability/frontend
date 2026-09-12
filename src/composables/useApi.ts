@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import type { ProfileQuery, ProfileResult, ProfileSeries } from '../lib/profiles'
 import type { LogView } from '../lib/logViews'
 import { useTenant } from './useTenant'
 import { encodePathSegment } from '../lib/url'
@@ -261,6 +262,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export function useApi() {
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  function profileParams(params: ProfileQuery) {
+    return new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, key === 'from' || key === 'to' ? new Date(Number(value)).toISOString() : String(value)])).toString()
+  }
+  function queryProfiles(params: ProfileQuery, signal?: AbortSignal): Promise<ProfileResult> {
+    return request(`/profiles?${profileParams(params)}`, { signal })
+  }
+  function profileSeries(params: ProfileQuery, signal?: AbortSignal): Promise<{ series: ProfileSeries[]; truncated: boolean }> {
+    return request(`/profiles/series?${profileParams(params)}`, { signal })
+  }
 
   async function getTrace(traceId: string): Promise<TraceResponse> {
     loading.value = true
@@ -2062,7 +2073,7 @@ export function useApi() {
     listFunnels, createFunnel, deleteFunnel, runFunnel,
     listSlos, createSlo, getSlo, updateSlo, deleteSlo, listSloEvents,
     listAnomalyRules, createAnomalyRule, getAnomalyRule, updateAnomalyRule, deleteAnomalyRule, listAllAnomalyEvents, getAnomalyEvent, getEventCorrelations, analyzeAnomalyEvent,
-    listDeploys, createDeploy,
+    listDeploys, createDeploy, queryProfiles, profileSeries,
     listApiKeys, createApiKey, deleteApiKey,
     listServiceLinks, createServiceLink, deleteServiceLink,
     getStats,

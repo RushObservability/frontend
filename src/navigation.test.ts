@@ -12,6 +12,8 @@ describe('visibleNavigationGroups', () => {
     const ids = visibleNavigationGroups(baseContext).flatMap(group => group.items.map(item => item.id))
 
     expect(ids).toContain('explore')
+    expect(ids).toContain('profiles')
+    expect(visibleNavigationGroups(baseContext).find(group => group.id === 'observe')?.items.map(item => item.id)).toEqual(['explore', 'services', 'dashboards', 'metrics', 'rum', 'profiles'])
     expect(ids).toContain('rum')
     expect(ids).not.toContain('settings')
     expect(ids).not.toContain('sre-agent')

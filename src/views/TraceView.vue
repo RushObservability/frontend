@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
+import { relatedProfileLocation } from '../lib/profiles'
 import { useFeatures } from '../composables/useFeatures'
 import type { TraceResponse, SpanNode } from '../types'
 import VirtualTable from '../components/VirtualTable.vue'
@@ -14,6 +15,7 @@ const api = useApi()
 const { features } = useFeatures()
 const trace = ref<TraceResponse | null>(null)
 const selectedSpan = ref<SpanNode | null>(null)
+const relatedProfile = computed(() => selectedSpan.value ? relatedProfileLocation(selectedSpan.value.service_name, selectedSpan.value.timestamp, selectedSpan.value.duration_ns) : null)
 
 onMounted(async () => {
   try {
@@ -436,6 +438,7 @@ function investigateTrace() {
             <span class="mono text-secondary">{{ selectedSpan.http_method }} {{ selectedSpan.http_path }}</span>
           </div>
           <button class="detail-close" @click="selectedSpan = null">&#10005;</button>
+          <router-link v-if="relatedProfile" :to="relatedProfile" title="Service-wide CPU samples around this span">Related CPU profile</router-link>
         </div>
 
         <!-- Quick stats -->

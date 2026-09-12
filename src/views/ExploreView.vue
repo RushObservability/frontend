@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch, nextTick, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
+import { relatedProfileLocation } from '../lib/profiles'
 import { useFeatures } from '../composables/useFeatures'
 import type { RushEvent, Filter, CountBucket, QueryFilter, GroupResult, SavedQuery, TimeseriesBucket, LatencyHeatmapCell, TraceResponse, SpanNode, LogRecord, BubbleUpResponse, ExploreCountKind, ExploreSearchRequest, ExploreSearchResponse } from '../types'
 import SavedQueries from '../components/SavedQueries.vue'
@@ -151,6 +152,13 @@ const activeSpanNode = computed((): import('../types').SpanNode | null => {
   if (!id || !expandedTrace.value) return null
   const allSpans = flattenSpans(expandedTrace.value.spans)
   return allSpans.find(s => s.span_id === id) || null
+})
+
+const relatedProfile = computed(() => {
+  const span = activeSpanNode.value
+  if (span) return relatedProfileLocation(span.service_name, span.timestamp, span.duration_ns)
+  const row = expandedRowData.value
+  return row ? relatedProfileLocation(row.service_name, row.timestamp, row.duration_ns) : null
 })
 
 const expandedTraceSpans = computed(() => {
@@ -4220,6 +4228,7 @@ watch(() => route.query.log_view, (id) => {
               <span v-if="selectedSpanId && expandedRowData && selectedSpanId !== expandedRowData.span_id" class="dp-back-link" @click.stop="selectedSpanId = null">&larr; back to original</span>
             </div>
             <div class="dp-header-right">
+              <router-link v-if="relatedProfile" :to="relatedProfile" class="trace-link" title="Service-wide CPU samples around this span, including other requests" @click.stop>Related CPU profile</router-link>
               <router-link v-if="expandedRowData?.trace_id || (activeSpanNode as any)?.trace_id || modalLogEntry?.trace_id" :to="`/trace/${expandedRowData?.trace_id || (activeSpanNode as any)?.trace_id || modalLogEntry?.trace_id}`" class="trace-link" @click.stop>Full trace &rarr;</router-link>
               <button class="dp-close" @click="closeDetailPanel()" title="Close (Esc)">&times;</button>
             </div>

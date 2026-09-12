@@ -64,6 +64,10 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     keywords: ['browser', 'sessions', 'frontend'],
   },
   {
+    id: 'profiles', label: 'Profiles', path: '/profiles', icon: '▥', group: 'observe',
+    routeNames: ['profiles'], keywords: ['cpu', 'profiling', 'flame graph', 'performance'],
+  },
+  {
     id: 'alerts', label: 'Alerts', path: '/alerts', icon: '!', group: 'respond',
     routeNames: ['alerts', 'monitor-create', 'monitor-detail', 'monitor-edit', 'alert-rule-add', 'alert-rule-edit', 'alert-channel-add'],
     mobilePrimary: true, keywords: ['monitors', 'notifications'],
