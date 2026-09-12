@@ -1636,6 +1636,7 @@ function openTenantForm() {
   newSignalApm.value = true
   newSignalMetrics.value = true
   newSignalRum.value = true
+  newSignalProfiles.value = true
   newTenantAuthRequired.value = true
   newTenantIngestAuthRequired.value = true
   if (!globalRetention.value) loadGlobalRetention()
@@ -1680,6 +1681,7 @@ async function createTenant() {
         apm: newSignalApm.value,
         metrics: newSignalMetrics.value,
         rum: newSignalRum.value,
+        profiles: newSignalProfiles.value,
       },
     })
     // Apply any tenant-only retention overrides set in the drawer. Clamp to the
@@ -1726,8 +1728,10 @@ const newSignalLogs = ref(true)
 const newSignalApm = ref(true)
 const newSignalMetrics = ref(true)
 const newSignalRum = ref(true)
+const newSignalProfiles = ref(true)
 
-const SIGNAL_DEFS: { key: 'logs' | 'apm' | 'metrics' | 'rum'; label: string }[] = [
+const SIGNAL_DEFS: { key: 'logs' | 'apm' | 'metrics' | 'rum' | 'profiles'; label: string }[] = [
+  { key: 'profiles', label: 'Profiles' },
   { key: 'logs', label: 'Logs' },
   { key: 'apm', label: 'APM' },
   { key: 'metrics', label: 'Metrics' },
@@ -1746,12 +1750,12 @@ async function loadAllTenantSignals() {
 }
 
 // Effective enabled flag for a tenant signal (defaults true if not loaded).
-function signalEnabled(tenantId: string, key: 'logs' | 'apm' | 'metrics' | 'rum'): boolean {
+function signalEnabled(tenantId: string, key: 'logs' | 'apm' | 'metrics' | 'rum' | 'profiles'): boolean {
   const s = tenantSignalsMap.value[tenantId]?.signals
-  return s ? s[key] : true
+  return s?.[key] !== false
 }
 
-function signalDropped(tenantId: string, key: 'logs' | 'apm' | 'metrics' | 'rum'): number {
+function signalDropped(tenantId: string, key: 'logs' | 'apm' | 'metrics' | 'rum' | 'profiles'): number {
   return tenantSignalsMap.value[tenantId]?.dropped?.[key] ?? 0
 }
 
@@ -1763,7 +1767,7 @@ function formatDropped(n: number): string {
 }
 
 // Auto-save a single signal toggle (like the auth_required checkbox).
-async function toggleTenantSignal(tenantId: string, key: 'logs' | 'apm' | 'metrics' | 'rum', enabled: boolean) {
+async function toggleTenantSignal(tenantId: string, key: 'logs' | 'apm' | 'metrics' | 'rum' | 'profiles', enabled: boolean) {
   try {
     tenantSignalsMap.value[tenantId] = await api.setTenantSignals(tenantId, { [key]: enabled })
   } catch { /* error surfaced via api.error */ }
@@ -3052,7 +3056,7 @@ function formatDate(ts: string): string {
               <div class="form-group-inline key-form-wide">
                 <label class="form-label">Allowed signals</label>
                 <div class="key-signal-options">
-                  <label v-for="signal in ['logs', 'traces', 'metrics', 'rum', 'collector']" :key="signal" class="checkbox-label">
+                  <label v-for="signal in ['logs', 'traces', 'metrics', 'rum', 'profiles', 'collector']" :key="signal" class="checkbox-label">
                     <input v-model="keySignals" type="checkbox" :value="signal" />
                     <span>{{ signal }}</span>
                   </label>
@@ -5543,6 +5547,7 @@ function formatDate(ts: string): string {
                     <label class="signal-toggle"><input type="checkbox" v-model="newSignalApm" /><span>APM</span></label>
                     <label class="signal-toggle"><input type="checkbox" v-model="newSignalMetrics" /><span>Metrics</span></label>
                     <label class="signal-toggle"><input type="checkbox" v-model="newSignalRum" /><span>RUM</span></label>
+                    <label class="signal-toggle"><input type="checkbox" v-model="newSignalProfiles" /><span>Profiles</span></label>
                   </div>
                 </div>
 

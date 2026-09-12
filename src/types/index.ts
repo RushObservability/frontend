@@ -919,6 +919,7 @@ export interface InvestigationTemplate {
 // ── Tenant types ──
 
 export interface SignalFlags {
+  profiles?: boolean
   logs: boolean
   apm: boolean
   metrics: boolean
@@ -926,6 +927,7 @@ export interface SignalFlags {
 }
 
 export interface SignalDropped {
+  profiles?: number
   logs: number
   apm: number
   metrics: number
