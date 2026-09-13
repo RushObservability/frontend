@@ -13,6 +13,9 @@ const props = withDefaults(defineProps<{
   total: number
   totalKind?: ExploreCountKind
   signal: 'logs' | 'spans'
+  resultLabel?: 'events' | 'traces' | 'spans'
+  logSummary?: { errors: number; warnings: number; services: number; servicesCapped: boolean } | null
+  spanSummary?: { p50: string | null; p99: string | null; sampleSize: number; services: number | null; servicesCapped: boolean }
   from: string
   to: string
   loading?: boolean
@@ -36,10 +39,13 @@ const dragStart = ref<number | null>(null)
 const dragEnd = ref<number | null>(null)
 const dragCompare = ref(false)
 
-const title = computed(() => props.signal === 'logs' ? 'Log volume' : 'Trace volume')
-const itemLabel = computed(() => props.signal === 'logs' ? 'logs' : 'spans')
+const title = computed(() => props.signal === 'logs' ? 'Log volume' : props.resultLabel === 'spans' ? 'Span volume' : 'Trace volume')
+const itemLabel = computed(() => props.resultLabel ?? (props.signal === 'logs' ? 'events' : 'spans'))
+const serviceSummary = computed(() => props.signal === 'logs' ? props.logSummary : props.spanSummary)
 const maxCount = computed(() => Math.max(1, ...props.buckets.map(bucket => bucket.count)))
-const errorCount = computed(() => props.buckets.reduce((sum, bucket) => sum + (bucket.error_count || 0), 0))
+const errorCount = computed(() => props.signal === 'logs' && props.logSummary
+  ? props.logSummary.errors
+  : props.buckets.reduce((sum, bucket) => sum + (bucket.error_count || 0), 0))
 const errorRate = computed(() => props.total > 0 ? (errorCount.value / props.total) * 100 : 0)
 const peakBucket = computed(() => props.buckets.reduce<CountBucket | null>(
   (peak, bucket) => !peak || bucket.count > peak.count ? bucket : peak,
@@ -231,8 +237,9 @@ function errorHeight(bucket: CountBucket): number {
     :range-label="rangeLabel"
     :loading="loading"
     :empty="!loading && buckets.length === 0"
-    empty-title="No activity in this range"
-    :empty-message="`Try a wider time range or remove a ${signal === 'logs' ? 'log' : 'trace'} filter.`"
+    summary-when-empty
+    :empty-title="total > 0 ? 'Volume unavailable' : 'No activity in this range'"
+    :empty-message="total > 0 ? 'Results are available below. Run the search again to retry the volume summary.' : `Try a wider time range or remove a ${signal === 'logs' ? 'log' : 'trace'} filter.`"
     caption="Drag to zoom. Hold Shift while dragging to compare a window."
     :source-label="signal === 'logs' ? 'Logs' : 'Spans'"
   >
@@ -243,20 +250,44 @@ function errorHeight(bucket: CountBucket): number {
     </template>
 
     <template #summary>
-      <div class="timeline-summary">
+      <div class="timeline-summary" :class="{ 'timeline-summary--compact': signal === 'logs' || spanSummary }">
         <div class="timeline-total">
           <strong class="mono">{{ formattedTotal }}</strong>
           <span>{{ itemLabel }}</span>
         </div>
-        <div class="timeline-stat">
+        <div v-if="signal !== 'logs' && !spanSummary" class="timeline-stat">
           <span>Peak</span>
           <strong class="mono">{{ compactNumber(peakBucket?.count || 0) }}</strong>
           <small>{{ intervalLabel }}</small>
         </div>
+        <template v-if="signal === 'logs'">
+          <div class="timeline-stat" :class="{ 'timeline-stat--error': logSummary && logSummary.errors > 0 }">
+            <span>Errors</span>
+            <strong class="mono">{{ logSummary ? logSummary.errors.toLocaleString() : '—' }}</strong>
+          </div>
+          <div class="timeline-stat" :class="{ 'timeline-stat--warning': logSummary && logSummary.warnings > 0 }">
+            <span>Warnings</span>
+            <strong class="mono">{{ logSummary ? logSummary.warnings.toLocaleString() : '—' }}</strong>
+          </div>
+        </template>
         <div class="timeline-stat" :class="{ 'timeline-stat--error': errorCount > 0 }">
           <span>Error rate</span>
-          <strong class="mono">{{ errorPercent(errorRate) }}</strong>
-          <small>{{ errorCount.toLocaleString() }} errors</small>
+          <strong class="mono">{{ signal === 'logs' && !logSummary ? '—' : errorPercent(errorRate) }}</strong>
+          <small v-if="signal !== 'logs'">{{ errorCount.toLocaleString() }} errors</small>
+        </div>
+        <template v-if="signal === 'spans' && spanSummary">
+          <div class="timeline-stat" :title="`P50 of the ${spanSummary.sampleSize.toLocaleString()} loaded ${itemLabel}, not the full time range.`">
+            <span>P50</span>
+            <strong class="mono">{{ spanSummary.p50 ?? '—' }}</strong>
+          </div>
+          <div class="timeline-stat" :title="`P99 of the ${spanSummary.sampleSize.toLocaleString()} loaded ${itemLabel}, not the full time range.`">
+            <span>P99</span>
+            <strong class="mono">{{ spanSummary.p99 ?? '—' }}</strong>
+          </div>
+        </template>
+        <div v-if="signal === 'logs' || spanSummary" class="timeline-stat" :title="serviceSummary?.servicesCapped ? 'At least 200 services. The service list is capped at 200.' : undefined">
+          <span>Services</span>
+          <strong class="mono">{{ serviceSummary?.services != null ? serviceSummary.services.toLocaleString() + (serviceSummary.servicesCapped ? '+' : '') : '—' }}</strong>
         </div>
         <div class="timeline-legend" aria-label="Chart legend">
           <span><i class="timeline-key timeline-key--normal" />Normal</span>
@@ -432,6 +463,11 @@ function errorHeight(bucket: CountBucket): number {
 .timeline-stat strong { color: var(--text-primary); font-size: var(--panel-chart-value-size); font-weight: 680; }
 .timeline-stat small { color: var(--text-muted); font-size: var(--panel-chart-caption-size); }
 .timeline-stat--error strong { color: var(--error); }
+.timeline-stat--warning strong { color: var(--warning); }
+
+.timeline-summary--compact { flex-wrap: wrap; gap: 12px 16px; }
+.timeline-summary--compact .timeline-stat { padding-left: 16px; }
+.timeline-summary--compact .timeline-stat strong { white-space: nowrap; }
 
 .timeline-legend {
   display: flex;

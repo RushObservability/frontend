@@ -18,7 +18,7 @@ describe('SignalTimelinePanel', () => {
   })
 
   it('adapts its language to logs and traces', () => {
-    expect(source).toContain("props.signal === 'logs' ? 'Log volume' : 'Trace volume'")
-    expect(source).toContain("props.signal === 'logs' ? 'logs' : 'spans'")
+    expect(source).toContain("props.signal === 'logs' ? 'Log volume' : props.resultLabel === 'spans' ? 'Span volume' : 'Trace volume'")
+    expect(source).toContain("props.resultLabel ?? (props.signal === 'logs' ? 'events' : 'spans')")
   })
 })
