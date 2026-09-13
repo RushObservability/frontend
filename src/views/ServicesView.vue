@@ -613,8 +613,8 @@ function sfBarColor(p: number) {
         </div>
         <div v-if="apmEnabled && viewMode === 'catalog'" class="catalog-controls">
           <div class="services-search">
-            <span class="search-icon">&#9029;</span>
-            <input v-model="searchFilter" class="services-search-input" placeholder="Filter services..." />
+            <span class="search-icon" aria-hidden="true">&#9029;</span>
+            <input v-model="searchFilter" class="services-search-input" aria-label="Filter services" placeholder="Filter services..." />
           </div>
           <TimePicker v-model="catalogMinutes" />
         </div>
