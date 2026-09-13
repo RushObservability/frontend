@@ -11,11 +11,16 @@ import { onSessionExpired } from './composables/authSession'
 import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from './composables/storageScope'
 import AppNavigation from './components/AppNavigation.vue'
 import CommandPalette from './components/CommandPalette.vue'
+import ApiUnavailableDialog from './components/ApiUnavailableDialog.vue'
+import { createApiAvailabilityMonitor } from './composables/apiAvailability'
 import { visibleNavigationGroups } from './navigation'
 import { defaultTheme } from './config'
 
 const route = useRoute()
 const router = useRouter()
+const apiAvailability = createApiAvailabilityMonitor()
+onMounted(apiAvailability.start)
+onBeforeUnmount(apiAvailability.stop)
 const {
   user,
   isAuthenticated,
@@ -57,6 +62,7 @@ const tenantMenuOpen = ref(false)
 const paletteOpen = ref(false)
 
 function onGlobalKeydown(e: KeyboardEvent) {
+  if (apiAvailability.open.value) return
   onSessionActivity()
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
     e.preventDefault()
@@ -256,6 +262,13 @@ watch(isAuthenticated, async (authed) => {
     </div>
     <router-view v-else />
     <CommandPalette v-model:open="paletteOpen" :navigation-groups="navigationGroups" />
+    <ApiUnavailableDialog
+      :open="apiAvailability.open.value"
+      :checking="apiAvailability.checking.value"
+      :offline="apiAvailability.offline.value"
+      @retry="apiAvailability.check"
+      @dismiss="apiAvailability.dismiss"
+    />
   </div>
 </template>
 
