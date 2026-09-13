@@ -3859,6 +3859,7 @@ function buildQueryParams(): Record<string, string> {
   if (searchInput.value) p.q = searchInput.value
   if (viewMode.value === 'logs') p.mode = 'logs'
   else if (tracesOnly.value) p.mode = 'traces'
+  else p.mode = 'spans'
   if (viewMode.value === 'logs' && selectedLogViewId.value) p.log_view = selectedLogViewId.value
   if (viewMode.value === 'logs' && customLogColumns.value) p.log_columns = JSON.stringify(customLogColumns.value)
   if (customRange.value) {
@@ -3952,6 +3953,7 @@ function restoreFromUrl() {
   }
   if (q.mode === 'logs') viewMode.value = 'logs'
   else if (q.mode === 'traces') { viewMode.value = 'spans'; tracesOnly.value = true }
+  else if (q.mode === 'spans') { viewMode.value = 'spans'; tracesOnly.value = false }
   if (q.from && q.to) {
     customRange.value = { from: String(q.from), to: String(q.to) }
   } else if (q.t) {

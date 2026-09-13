@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import source from './ExploreView.vue?raw'
 import traceViewSource from './TraceView.vue?raw'
 import waterfallComponent from '../components/TraceWaterfall.vue?raw'
+import serviceViewSource from './ServiceDetailView.vue?raw'
 
 function between(start: string, end: string): string {
   const from = source.indexOf(start)
@@ -12,6 +13,20 @@ function between(start: string, end: string): string {
 }
 
 describe('Explore query plan', () => {
+  it('round-trips all-spans mode without applying the root-only default', () => {
+    const queryParams = between('function buildQueryParams()', 'function buildShareUrl()')
+    expect(queryParams).toContain("else p.mode = 'spans'")
+    const restore = between('function restoreFromUrl()', '// ── Export')
+    expect(restore).toContain("else if (q.mode === 'spans') { viewMode.value = 'spans'; tracesOnly.value = false }")
+    expect(restore).toContain("else if (q.mode === 'traces') { viewMode.value = 'spans'; tracesOnly.value = true }")
+  })
+
+  it('opens service endpoint and error drill-downs in all-spans mode', () => {
+    expect(serviceViewSource.match(/query: \{ mode: 'spans', q: parts.join\(' '\), t: String\(minutes.value\) \}/g)).toHaveLength(3)
+    expect(serviceViewSource).not.toContain("query: { q: parts.join(' ')")
+    expect(serviceViewSource).toContain("mode: 'logs', q: `service_name=${serviceName.value} severity=${sev}`")
+  })
+
   it('keeps the latency chart collapsed by default for trace results', () => {
     expect(source).toContain('const scatterExpanded = ref(false)')
     expect(source).toContain('<div v-if="scatterExpanded" id="latency-over-time-chart"')

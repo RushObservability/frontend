@@ -920,7 +920,7 @@ function exploreBriefingEndpoint() {
   const parts = [`service_name=${serviceName.value}`]
   if (e.method) parts.push(`http_method=${e.method}`)
   if (e.path) parts.push(`http_path=${e.path}`)
-  router.push({ path: '/', query: { q: parts.join(' '), t: String(minutes.value) } })
+  router.push({ path: '/', query: { mode: 'spans', q: parts.join(' '), t: String(minutes.value) } })
 }
 
 function openBriefingErrors() {
@@ -1037,7 +1037,7 @@ function exploreEndpoint(e: EndpointRow) {
     if (e.method) parts.push(`http_method=${e.method}`)
     if (e.path) parts.push(`http_path=${e.path}`)
   }
-  router.push({ path: '/', query: { q: parts.join(' '), t: String(minutes.value) } })
+  router.push({ path: '/', query: { mode: 'spans', q: parts.join(' '), t: String(minutes.value) } })
 }
 
 // ═══ Top Errors helpers ═══
@@ -1060,7 +1060,7 @@ function exploreError(g: ErrorGroup) {
     if (g.method) parts.push(`http_method=${g.method}`)
     if (g.path) parts.push(`http_path=${g.path}`)
     if (g.status_code) parts.push(`http_status_code=${g.status_code}`)
-    router.push({ path: '/', query: { q: parts.join(' '), t: String(minutes.value) } })
+    router.push({ path: '/', query: { mode: 'spans', q: parts.join(' '), t: String(minutes.value) } })
   }
 }
 
