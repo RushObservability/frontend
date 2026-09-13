@@ -102,6 +102,7 @@ const queryDurationMs = ref<number | null>(null)
 const searching = ref(false)
 const histogramPhase = ref<'idle' | 'waiting' | 'loading' | 'done'>('idle')
 const exploreSummaryWarning = ref<string | null>(null)
+const summaryReady = ref(false)
 let activeSearchController: AbortController | null = null
 
 function resultAt(index: number): RushEvent {
@@ -171,6 +172,7 @@ const viewMode = ref<'spans' | 'logs'>('spans')
 // Start Explore at the request/trace level. Users can still switch to all
 // spans with the sidebar toggle (or the "a" keyboard shortcut).
 const tracesOnly = ref(true)
+const resultCountLabel = computed(() => viewMode.value === 'logs' ? 'events' : tracesOnly.value ? 'traces' : 'spans')
 const apmResultMode = ref<'individual' | 'groups'>('individual')
 const otelLogs = ref<LogRecord[]>([])
 const logViews = ref<LogView[]>([])
@@ -1071,6 +1073,7 @@ function settleLatencyTimeseries(
 }
 
 function applyExploreRowsResponse(response: ExploreSearchResponse, isLogs: boolean) {
+  summaryReady.value = false
   total.value = response.count.value
   totalKind.value = response.count.kind
   nextCursor.value = response.next_cursor || null
@@ -1086,6 +1089,7 @@ function applyExploreRowsResponse(response: ExploreSearchResponse, isLogs: boole
 
 function applyExploreSummaryResponse(response: ExploreSearchResponse, isLogs: boolean) {
   const summaryUnavailable = Object.keys(response.errors || {}).length > 0
+  summaryReady.value = !summaryUnavailable
   if (!summaryUnavailable) {
     total.value = response.count.value
     totalKind.value = response.count.kind
@@ -1221,6 +1225,7 @@ async function search(opts?: { skipHistory?: boolean }) {
     latencyHeatmap.value = []
     histogramPhase.value = 'waiting'
     exploreSummaryWarning.value = null
+    summaryReady.value = false
     serverServiceCounts.value = new Map()
     serverStatusCounts.value = { ok: 0, clientErr: 0, serverErr: 0 }
     serverMethodCounts.value = new Map()
@@ -1504,41 +1509,26 @@ function getFilteredAttrs(raw: string): Record<string, unknown> {
 
 // ═══ Stats ═══
 
-const stats = computed(() => {
-  if (!results.value.length) return null
-  const rows = results.value
-  const errCount = rows.filter(r => r.status === 'ERROR' || r.http_status_code >= 500).length
-  const durs = rows.map(r => r.duration_ns).sort((a, b) => a - b)
+const spanSummary = computed(() => {
+  const durs = results.value.map(r => r.duration_ns).sort((a, b) => a - b)
   const p50 = durs[Math.floor(durs.length * 0.5)] ?? 0
   const p99 = durs[Math.floor(durs.length * 0.99)] ?? 0
-  const svcs = new Set(rows.map(r => r.service_name))
   return {
-    total: total.value,
-    errorRate: rows.length ? (errCount / rows.length * 100).toFixed(1) : '0.0',
-    p50: formatDuration(p50),
-    p99: formatDuration(p99),
-    services: svcs.size,
+    p50: durs.length ? formatDuration(p50) : null,
+    p99: durs.length ? formatDuration(p99) : null,
+    sampleSize: durs.length,
+    services: summaryReady.value ? serverServiceCounts.value.size : null,
+    servicesCapped: serverServiceCounts.value.size >= 200,
   }
 })
 
-const logStats = computed(() => {
-  if (!otelLogs.value.length) return null
-  const logs = otelLogs.value
-  const errCount = logs.filter(l =>
-    l.SeverityText === 'ERROR' || l.SeverityText === 'FATAL' || l.SeverityText === 'CRITICAL'
-  ).length
-  const warnCount = logs.filter(l =>
-    l.SeverityText === 'WARN' || l.SeverityText === 'WARNING'
-  ).length
-  const svcs = new Set(logs.map(l => l.ServiceName))
-  return {
-    total: logs.length,
-    errors: errCount,
-    warnings: warnCount,
-    errorRate: logs.length ? (errCount / logs.length * 100).toFixed(1) : '0.0',
-    services: svcs.size,
-  }
-})
+const logSummary = computed(() => summaryReady.value ? {
+  errors: serverStatusCounts.value.serverErr,
+  warnings: serverStatusCounts.value.clientErr,
+  services: serverServiceCounts.value.size,
+  // Explore returns at most 200 service facets, not an exact distinct count above that.
+  servicesCapped: serverServiceCounts.value.size >= 200,
+} : null)
 
 // ═══ Duration bar ═══
 
@@ -4887,60 +4877,6 @@ watch(() => route.query.log_view, (id) => {
     </Transition>
     </Teleport>
 
-    <!-- ═══ Stats Bar ═══ -->
-    <div v-if="viewMode === 'spans' && stats" class="stats-bar fade-in">
-      <div class="stat">
-        <div class="stat-value mono">{{ stats.total.toLocaleString() }}</div>
-        <div class="stat-label">events</div>
-      </div>
-      <div class="stat-divider" />
-      <div class="stat">
-        <div class="stat-value mono" :class="{ 'stat-err': parseFloat(stats.errorRate) > 0 }">{{ stats.errorRate }}%</div>
-        <div class="stat-label">error rate</div>
-      </div>
-      <div class="stat-divider" />
-      <div class="stat">
-        <div class="stat-value mono">{{ stats.p50 }}</div>
-        <div class="stat-label">p50</div>
-      </div>
-      <div class="stat-divider" />
-      <div class="stat">
-        <div class="stat-value mono">{{ stats.p99 }}</div>
-        <div class="stat-label">p99</div>
-      </div>
-      <div class="stat-divider" />
-      <div class="stat">
-        <div class="stat-value mono">{{ stats.services }}</div>
-        <div class="stat-label">services</div>
-      </div>
-    </div>
-    <div v-else-if="viewMode === 'logs' && logStats" class="stats-bar fade-in">
-      <div class="stat">
-        <div class="stat-value mono">{{ logStats.total.toLocaleString() }}</div>
-        <div class="stat-label">logs</div>
-      </div>
-      <div class="stat-divider" />
-      <div class="stat">
-        <div class="stat-value mono" :class="{ 'stat-err': logStats.errors > 0 }">{{ logStats.errors.toLocaleString() }}</div>
-        <div class="stat-label">errors</div>
-      </div>
-      <div class="stat-divider" />
-      <div class="stat">
-        <div class="stat-value mono" :class="{ 'stat-warn': logStats.warnings > 0 }">{{ logStats.warnings.toLocaleString() }}</div>
-        <div class="stat-label">warnings</div>
-      </div>
-      <div class="stat-divider" />
-      <div class="stat">
-        <div class="stat-value mono" :class="{ 'stat-err': parseFloat(logStats.errorRate) > 0 }">{{ logStats.errorRate }}%</div>
-        <div class="stat-label">error %</div>
-      </div>
-      <div class="stat-divider" />
-      <div class="stat">
-        <div class="stat-value mono">{{ logStats.services }}</div>
-        <div class="stat-label">services</div>
-      </div>
-    </div>
-
     <!-- ═══ Search ═══ -->
     <div class="search-section">
       <ExploreSearchToolbar
@@ -5101,7 +5037,7 @@ watch(() => route.query.log_view, (id) => {
       <!-- ═══ Facets Sidebar ═══ -->
       <aside class="facet-sidebar">
         <div class="facet-top">
-          <span class="facet-showing mono">{{ viewMode === 'logs' ? logEntries.length.toLocaleString() + ' of ' + formattedTotal + ' logs' : results.length.toLocaleString() + ' of ' + formattedTotal + (tracesOnly ? ' traces' : ' spans') }}<template v-if="queryDurationMs !== null"> &middot; {{ queryDurationMs >= 1000 ? (queryDurationMs / 1000).toFixed(1) + 's' : queryDurationMs + 'ms' }}</template></span>
+          <span class="facet-showing mono">{{ (viewMode === 'logs' ? logEntries.length : results.length).toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}<template v-if="queryDurationMs !== null"> &middot; {{ queryDurationMs >= 1000 ? (queryDurationMs / 1000).toFixed(1) + 's' : queryDurationMs + 'ms' }}</template></span>
           <span v-if="exploreSummaryWarning" class="text-warning" :title="exploreSummaryWarning">Summary partial</span>
           <button
             v-if="hasQuickFilters"
@@ -5575,6 +5511,9 @@ watch(() => route.query.log_view, (id) => {
           :total="total"
           :total-kind="totalKind"
           :signal="viewMode === 'logs' ? 'logs' : 'spans'"
+          :result-label="resultCountLabel"
+          :log-summary="logSummary"
+          :span-summary="viewMode === 'spans' ? spanSummary : undefined"
           :from="timeRange.from"
           :to="timeRange.to"
           :loading="histogramPhase === 'waiting' || histogramPhase === 'loading'"
@@ -5763,10 +5702,10 @@ watch(() => route.query.log_view, (id) => {
               <span class="loading-more-spinner">&#9676;</span> Loading more…
             </div>
             <div v-else-if="hasMore" class="loading-more text-muted">
-              Showing {{ results.length.toLocaleString() }} of {{ formattedTotal }}
+              Showing {{ results.length.toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}
             </div>
             <div v-else-if="results.length && !hasMore" class="loading-more text-muted">
-              All {{ formattedTotal }} spans loaded
+              All {{ formattedTotal }} {{ resultCountLabel }} loaded
             </div>
           </div>
           </template>
@@ -6067,10 +6006,10 @@ watch(() => route.query.log_view, (id) => {
                 <span class="loading-more-spinner">&#9676;</span> Loading more…
               </div>
               <div v-else-if="hasMore" class="loading-more text-muted">
-                {{ logEntries.length.toLocaleString() }} log entries ({{ otelLogs.length.toLocaleString() }} collected + span events)
+                {{ logEntries.length.toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}
               </div>
               <div v-else-if="logEntries.length" class="loading-more text-muted">
-                {{ logEntries.length.toLocaleString() }} of {{ formattedTotal }} log entries
+                {{ logEntries.length.toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}
               </div>
             </div>
             </template>

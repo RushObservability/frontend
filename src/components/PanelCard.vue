@@ -21,6 +21,8 @@ withDefaults(defineProps<{
   error?: string | null
   /** Explicit empty state for complete panel components. */
   empty?: boolean
+  /** Keep available summary values visible when the chart has no buckets. */
+  summaryWhenEmpty?: boolean
   emptyTitle?: string
   emptyMessage?: string
   /** Visual treatment selected by the composed panel component. */
@@ -35,6 +37,7 @@ withDefaults(defineProps<{
   loading: false,
   error: null,
   empty: false,
+  summaryWhenEmpty: false,
   emptyTitle: 'No data yet',
   emptyMessage: 'Try a wider time range or adjust this panel’s query.',
   variant: 'chart',
@@ -78,7 +81,7 @@ const descriptionId = `panel-${panelId}-description`
       </div>
     </header>
 
-    <div v-if="$slots.summary && !loading && !error && !empty" class="panel-summary">
+    <div v-if="$slots.summary && !loading && !error && (!empty || summaryWhenEmpty)" class="panel-summary">
       <slot name="summary" />
     </div>
 
