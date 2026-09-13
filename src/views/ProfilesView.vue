@@ -24,7 +24,6 @@ const focusedFunction = ref('')
 const graphPane = ref<HTMLElement | null>(null)
 const setupOpen = ref(false)
 const comparisonOpen = ref(false)
-const serviceSearch = ref('')
 const sort = ref('self')
 const descending = ref(true)
 let controller: AbortController | undefined
@@ -51,7 +50,7 @@ const pods = computed(() => [...new Set(series.value.filter(s => s.service === s
 const comparing = computed(() => Boolean(compare.value))
 const profileType = computed({ get: () => text('profile_type') || (series.value.some(s => s.service === service.value && s.profile_type === 'cpu') ? 'cpu' : series.value.some(s => s.service === service.value && s.profile_type === 'sampled_cpu') ? 'sampled_cpu' : 'cpu'), set: value => change({ profile_type: value }) })
 const showComparison = computed(() => comparisonOpen.value || comparing.value)
-const serviceRows = computed(() => services.value.filter(name => name.toLowerCase().includes(serviceSearch.value.toLowerCase())).map(name => {
+const serviceRows = computed(() => services.value.map(name => {
   const entries = series.value.filter(s => s.service === name)
   return { name, versions: new Set(entries.map(s => s.version).filter(Boolean)).size, pods: new Set(entries.map(s => s.pod).filter(Boolean)).size }
 }))
@@ -120,7 +119,7 @@ onBeforeUnmount(() => { generation++; controller?.abort() })
 <template>
   <div class="profiles-page">
     <header class="profiles-header">
-      <div class="page-title"><h1>Profiles</h1><span class="preview-label">CPU · Preview</span></div>
+      <div class="page-title"><h1>Profiles</h1></div>
       <div class="header-actions">
         <button type="button" class="text-button" :aria-expanded="setupOpen" aria-controls="profile-setup" @click="setupOpen = !setupOpen">Collection setup</button>
         <TimePicker v-model="minutes" v-model:custom-range="customRange" />
@@ -157,8 +156,8 @@ onBeforeUnmount(() => { generation++; controller?.abort() })
     <div v-if="error" role="alert" class="profile-error"><span>{{ error }}</span><button class="btn" @click="load">Retry</button></div>
     <div v-else-if="loading" role="status" class="profile-loading"><span>Loading CPU profiles…</span><div class="loading-placeholder" aria-hidden="true"></div></div>
     <section v-else-if="!service && services.length" class="service-browser">
-      <div class="section-heading"><div><h2>Profiled services <span class="count">{{ services.length }}</span></h2><p>Select a service to inspect its CPU hotspots.</p></div><label class="search-field"><span>Find a service</span><input v-model="serviceSearch" type="search" placeholder="Filter services" /></label></div>
-      <DataTable :columns="serviceColumns" :rows="serviceRows" row-key="name" empty-label="No services match your search">
+      <div class="section-heading"><div><h2>Profiled services <span class="count">{{ services.length }}</span></h2><p>Select a service to inspect its CPU hotspots.</p></div></div>
+      <DataTable :columns="serviceColumns" :rows="serviceRows" row-key="name" empty-label="No profiled services">
         <template #cell-name="{ row }"><button class="service-link" @click="service = String(row.name)">{{ row.name }} <span aria-hidden="true">→</span></button></template>
       </DataTable>
     </section>
@@ -217,7 +216,7 @@ onBeforeUnmount(() => { generation++; controller?.abort() })
 .profiles-header { justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; }
 h1 { font-size: 24px; font-weight: 650; letter-spacing: -.025em; margin: 0; }
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
-.preview-label, .count { font-size: 11px; color: var(--text-secondary); background: var(--bg-raised); padding: 3px 7px; border: 1px solid var(--border-default); border-radius: 4px; font-weight: 400; }
+.count { font-size: 11px; color: var(--text-secondary); background: var(--bg-raised); padding: 3px 7px; border: 1px solid var(--border-default); border-radius: 4px; font-weight: 400; }
 .header-actions { flex-wrap: wrap; }
 button, select, input { font: inherit; }
 .btn, select, input { background: var(--bg-surface); border: 1px solid var(--border-default); color: var(--text-primary); border-radius: 4px; padding: 8px 10px; font-size: 12px; min-height: 34px; }
@@ -245,7 +244,6 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .section-heading { justify-content: space-between; align-items: end; flex-wrap: wrap; margin-bottom: 16px; }
 .section-heading h2 { font-size: 16px; }
 .section-heading p { margin: 8px 0 0; color: var(--text-secondary); font-size: 13px; }
-.search-field { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 11px; }
 .service-link { display: flex; align-items: center; gap: 16px; border: 0; background: none; color: var(--accent); padding: 4px 0; text-align: left; overflow-wrap: anywhere; }
 .service-link span { color: var(--text-muted); }
 .profile-empty { padding: 64px 24px; max-width: 620px; }
