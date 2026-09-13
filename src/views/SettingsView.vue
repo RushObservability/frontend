@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useApi } from '../composables/useApi'
+import { useApi, type SessionTimeoutSettings } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { useFeatures } from '../composables/useFeatures'
 import { useTenant } from '../composables/useTenant'
@@ -2158,6 +2158,52 @@ const authSessionsLoading = ref(false)
 const authSessionsError = ref('')
 const revokingSessionId = ref('')
 
+const sessionTimeout = ref<SessionTimeoutSettings | null>(null)
+const idleTimeoutMinutes = ref(120)
+const sessionTimeoutLoading = ref(false)
+const sessionTimeoutSaving = ref(false)
+const sessionTimeoutError = ref('')
+const sessionTimeoutSaved = ref(false)
+const maxIdleTimeoutMinutes = computed(() => Math.floor((sessionTimeout.value?.absolute_timeout_seconds ?? 86400) / 60))
+const idleTimeoutValid = computed(() => Number.isInteger(idleTimeoutMinutes.value)
+  && idleTimeoutMinutes.value >= 1 && idleTimeoutMinutes.value <= maxIdleTimeoutMinutes.value)
+const idleTimeoutChanged = computed(() => idleTimeoutMinutes.value * 60 !== sessionTimeout.value?.idle_timeout_seconds)
+
+async function loadSessionTimeout() {
+  if (!isAdmin.value) return
+  sessionTimeoutLoading.value = true
+  sessionTimeoutError.value = ''
+  try {
+    const policy = await api.getSessionTimeoutSettings()
+    if (!Number.isFinite(policy.idle_timeout_seconds)) throw new Error('Session timeout settings are unavailable.')
+    sessionTimeout.value = policy
+    idleTimeoutMinutes.value = policy.idle_timeout_seconds / 60
+  } catch (error: any) {
+    sessionTimeoutError.value = error?.message || 'Could not load session timeout.'
+  } finally {
+    sessionTimeoutLoading.value = false
+  }
+}
+
+async function saveSessionTimeout() {
+  if (!isAdmin.value || !sessionTimeout.value || !idleTimeoutValid.value || sessionTimeoutSaving.value) return
+  sessionTimeoutSaving.value = true
+  sessionTimeoutError.value = ''
+  sessionTimeoutSaved.value = false
+  try {
+    sessionTimeout.value = await api.saveSessionTimeoutSettings(idleTimeoutMinutes.value * 60)
+    idleTimeoutMinutes.value = sessionTimeout.value.idle_timeout_seconds / 60
+    sessionTimeoutSaved.value = true
+    // Read the new deadline without making the policy read itself activity.
+    await useAuth().refreshSession(false)
+    await loadAuthSessions()
+  } catch (error: any) {
+    sessionTimeoutError.value = error?.message || 'Could not save session timeout.'
+  } finally {
+    sessionTimeoutSaving.value = false
+  }
+}
+
 async function loadAuthSessions() {
   if (!isAdmin.value) return
   authSessionsLoading.value = true
@@ -2897,6 +2943,7 @@ onMounted(async () => {
   // Session inventory access depends on the authenticated role, never the URL hash.
   // Load once for admins; the Users tab's Refresh action reloads it on demand.
   if (isAdmin.value) loadAuthSessions()
+  if (isAdmin.value) loadSessionTimeout()
   if (isAdmin.value && activeTab.value === 'performance') loadQueryLimits()
   loadFeatures()
   loadLicense()
@@ -5869,6 +5916,30 @@ function formatDate(ts: string): string {
             </nav>
           </div>
         </div>
+      </div>
+
+      <div v-if="isAdmin" class="section-card card session-timeout-card">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h2 class="card-title">Idle logout</h2>
+            <p class="card-desc text-secondary">Sign users out after inactivity. Applies to all browser sessions, including SSO, across all tenants.</p>
+          </div>
+        </div>
+        <form class="session-timeout-form" @submit.prevent="saveSessionTimeout">
+          <div class="session-timeout-field">
+            <label class="form-label" for="idle-timeout-minutes">Idle timeout in minutes</label>
+            <input id="idle-timeout-minutes" v-model.number="idleTimeoutMinutes" type="number" min="1" :max="maxIdleTimeoutMinutes" step="1" required class="form-input mono"
+              :disabled="!sessionTimeout || sessionTimeoutLoading || sessionTimeoutSaving" aria-describedby="idle-timeout-help" @input="sessionTimeoutSaved = false" />
+            <p id="idle-timeout-help" class="text-secondary fs-11">Default: 120 minutes, or 2 hours. Background refreshes do not count as activity. Maximum: {{ maxIdleTimeoutMinutes }} minutes, the absolute session lifetime.</p>
+          </div>
+          <div class="session-timeout-actions">
+            <button type="submit" class="btn btn-primary" :disabled="!sessionTimeout || !idleTimeoutValid || !idleTimeoutChanged || sessionTimeoutSaving || sessionTimeoutLoading">{{ sessionTimeoutSaving ? 'Saving…' : 'Save idle timeout' }}</button>
+            <button v-if="!sessionTimeout && !sessionTimeoutLoading" type="button" class="action-btn" @click="loadSessionTimeout">Retry</button>
+            <span v-if="sessionTimeoutLoading" class="text-secondary fs-11" role="status">Loading session policy…</span>
+            <span v-if="sessionTimeoutSaved" class="text-secondary fs-11" role="status">Idle timeout saved.</span>
+          </div>
+          <p v-if="sessionTimeoutError" class="text-error fs-11" role="alert">{{ sessionTimeoutError }}</p>
+        </form>
       </div>
 
       <div v-if="isAdmin" class="section-card card session-inventory-card">

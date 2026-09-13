@@ -25,3 +25,4 @@ dist-ssr
 .env
 /claudedocs
 /graphify-out
+/test-results
