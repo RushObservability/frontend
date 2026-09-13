@@ -75,6 +75,11 @@ const router = createRouter({
       component: () => import('./views/MonitorCreateView.vue'),
     },
     {
+      // Preserve metric alert links created before the alert routes were renamed.
+      path: '/alerts/rules/add',
+      redirect: to => ({ name: 'monitor-create', query: to.query, hash: to.hash }),
+    },
+    {
       path: '/alerts/:id',
       name: 'monitor-detail',
       component: () => import('./views/MonitorDetailView.vue'),

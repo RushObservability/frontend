@@ -441,15 +441,14 @@ function loadHistoryEntry(entry: HistoryEntry<MetricsHistoryQuery>) {
 }
 
 function createAlertFromQuery() {
-  const q = encodeURIComponent(query.value.trim())
-  router.push(`/alerts/rules/add?promql=${q}&signal=metrics`)
+  router.push({ name: 'monitor-create', query: { promql: query.value.trim(), signal: 'metrics' } })
 }
 
 function seriesPromql(metric: Record<string, string>): string {
   const name = metric.__name__ || ''
   const labels = Object.entries(metric)
     .filter(([k]) => k !== '__name__')
-    .map(([k, v]) => `${k}="${v}"`)
+    .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
     .join(', ')
   const selector = name + (labels ? `{${labels}}` : '')
   if (looksLikeCounter(name)) return `rate(${selector}[5m])`
@@ -457,8 +456,7 @@ function seriesPromql(metric: Record<string, string>): string {
 }
 
 function createAlertFromSeries(metric: Record<string, string>) {
-  const q = encodeURIComponent(seriesPromql(metric))
-  router.push(`/alerts/rules/add?promql=${q}&signal=metrics`)
+  router.push({ name: 'monitor-create', query: { promql: seriesPromql(metric), signal: 'metrics' } })
 }
 
 function handleExploreSelect(_metric: string, queryStr: string) {

@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import MonitorWizard from '../components/MonitorWizard.vue'
 
 const router = useRouter()
+const route = useRoute()
+const initialMetricExpression = computed(() => typeof route.query.promql === 'string' ? route.query.promql : '')
 
 function onSaved() {
   router.push('/alerts')
@@ -31,7 +34,7 @@ function onCancel() {
     <div class="mcp-divider"></div>
 
     <!-- The form -->
-    <MonitorWizard @saved="onSaved" @cancel="onCancel" />
+    <MonitorWizard :initial-metric-expression="initialMetricExpression" @saved="onSaved" @cancel="onCancel" />
   </div>
 </template>
 

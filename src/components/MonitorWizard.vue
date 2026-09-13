@@ -12,6 +12,7 @@ import type { Monitor, MonitorComparator, MonitorPreview, NotificationChannel } 
 
 const props = defineProps<{
   monitorId?: string
+  initialMetricExpression?: string
 }>()
 
 const emit = defineEmits<{
@@ -35,8 +36,8 @@ const monitorType = ref<'metric' | 'log' | 'apm' | 'composite'>('metric')
 // ── Section 2: Query config per type ──
 
 // Metric config
-const metricExpression = ref('')
-const useVisualBuilder = ref(true)
+const metricExpression = ref(props.monitorId ? '' : props.initialMetricExpression ?? '')
+const useVisualBuilder = ref(!metricExpression.value)
 const metricConfig = ref({
   metric_name: '',
   aggregation: 'avg',
@@ -849,7 +850,13 @@ onMounted(async () => {
       }
     }
   } catch { /* error in api.error */ }
-  finally { loading.value = false }
+  finally {
+    loading.value = false
+    if (!props.monitorId && metricExpression.value.trim()) {
+      schedulePreview()
+      scheduleSuggestions()
+    }
+  }
 })
 
 onUnmounted(() => {
