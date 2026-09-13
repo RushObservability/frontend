@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onBeforeUnmount } from 'vue'
 import { useApi } from '../composables/useApi'
+import { parseSearchComparison } from '../lib/searchComparison'
 import DataTable, { type DataTableColumn } from './DataTable.vue'
 import type { RushEvent, Filter } from '../types'
 
@@ -90,16 +91,15 @@ async function updateAutocomplete() {
   const { token } = getCurrentToken()
   if (!token) { acVisible.value = false; return }
 
-  const opMatch = token.match(/^([^=!<>]+)(=|!=|>=|<=|>|<)(.*)$/)
+  const opMatch = parseSearchComparison(token)
   if (opMatch) {
-    const field = opMatch[1]
-    const prefix = opMatch[3] || ''
+    const { field, operator, value: prefix } = opMatch
     try {
-      const vals = await api.suggestValues(field!, prefix)
+      const vals = await api.suggestValues(field, prefix)
       if (!vals.length) { acVisible.value = false; return }
       acItems.value = vals.slice(0, 12).map(v => ({
         label: v,
-        insert: `${field}${opMatch[2]}${v}`,
+        insert: `${field}${operator}${v}`,
         kind: 'value' as const,
       }))
       acIndex.value = 0

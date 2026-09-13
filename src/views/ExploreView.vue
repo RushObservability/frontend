@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick, onUnmounted } from 'vue'
+import { parseSearchComparison } from '../lib/searchComparison'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { relatedProfileLocation } from '../lib/profiles'
@@ -3583,10 +3584,10 @@ async function updateAutocomplete() {
   }
 
   // Check if token has an operator — means we're completing a value
-  const opMatch = token.match(/^([^=!<>]+)(=|!=|>=|<=|>|<)(.*)$/)
+  const opMatch = parseSearchComparison(token)
   if (opMatch) {
-    const field = opMatch[1]!
-    const prefix = completionPrefix(opMatch[3] || '')
+    const { field, operator } = opMatch
+    const prefix = completionPrefix(opMatch.value)
     const isLogs = viewMode.value === 'logs'
     if (isLogs && (logViewsLoading.value || logViewUnavailable.value)) return
     const local = isLogs ? localLogSuggestions(otelLogs.value, field, prefix) : []
@@ -3594,7 +3595,7 @@ async function updateAutocomplete() {
       if (!current()) return
       acItems.value = [...new Set(values)].slice(0, 12).map(v => ({
         label: v,
-        insert: `${field}${opMatch[2]}${JSON.stringify(v)}`,
+        insert: `${field}${operator}${JSON.stringify(v)}`,
         kind: 'value' as const,
       }))
       acIndex.value = 0
