@@ -517,9 +517,6 @@ function setTab(id: SettingsTabId) {
   if (id === 'agent' && !agentBudgetLoaded.value) {
     loadAgentBudget()
   }
-  if (id === 'users' && isAdmin.value && authSessions.value.length === 0) {
-    loadAuthSessions()
-  }
   if (id === 'integrations') {
     integrationsExpanded.value = true
   }
@@ -2860,7 +2857,9 @@ onMounted(async () => {
   if (isAdmin.value) loadDeployMarkersSetting()
   if (isAdmin.value) loadRumSetting()
   if (isAdmin.value) loadCloudwatchSetting()
-  if (isAdmin.value && activeTab.value === 'users') loadAuthSessions()
+  // Session inventory access depends on the authenticated role, never the URL hash.
+  // Load once for admins; the Users tab's Refresh action reloads it on demand.
+  if (isAdmin.value) loadAuthSessions()
   if (isAdmin.value && activeTab.value === 'performance') loadQueryLimits()
   loadFeatures()
   loadLicense()
