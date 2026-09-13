@@ -138,7 +138,16 @@ interface AuthResponse {
   user: AuthUser
   session?: {
     activity_interval_seconds?: number
+    idle_timeout_seconds?: number
+    idle_remaining_seconds?: number
   }
+}
+
+export interface SessionTimeoutSettings {
+  idle_timeout_seconds: number
+  absolute_timeout_seconds: number
+  min_idle_timeout_seconds: number
+  default_idle_timeout_seconds: number
 }
 // Identical read requests are common when a view is mounted, refreshed, and
 // reacts to a URL/variable change at nearly the same time. Share the promise
@@ -1394,8 +1403,20 @@ export function useApi() {
     await request('/auth/logout', { method: 'POST' })
   }
 
-  async function getMe(): Promise<AuthResponse> {
-    return await request<AuthResponse>('/auth/me')
+  async function getMe(activity = false): Promise<AuthResponse> {
+    return activity
+      ? await request<AuthResponse>('/auth/activity', { method: 'POST' })
+      : await request<AuthResponse>('/auth/me')
+  }
+
+  async function getSessionTimeoutSettings(): Promise<SessionTimeoutSettings> {
+    return await request('/settings/session-policy')
+  }
+
+  async function saveSessionTimeoutSettings(idleTimeoutSeconds: number): Promise<SessionTimeoutSettings> {
+    return await request('/settings/session-policy', {
+      method: 'PUT', body: JSON.stringify({ idle_timeout_seconds: idleTimeoutSeconds }),
+    })
   }
 
   async function listAuthSessions(admin = false): Promise<{ sessions: AuthSession[] }> {
@@ -2060,7 +2081,7 @@ export function useApi() {
 
   return {
     loading, error,
-    login, logout, getMe, listAuthSessions, revokeAuthSession,
+    login, logout, getMe, listAuthSessions, revokeAuthSession, getSessionTimeoutSettings, saveSessionTimeoutSettings,
     getAuditEvents, verifyAuditChain, getKubernetesAccessEvents, getKubernetesAccessEvent, getKubernetesSessionChunks, approveKubernetesLogin, getKubernetesLoginDetails,
     getTrace, queryEvents, queryExplore, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceTimeBreakdown, serviceTimeBreakdownTimeseries, serviceLatencyHistogram, serviceEndpoints, serviceErrors, getLicense, submitExplain, getExplainJob, submitMySqlExplain, getMySqlExplainJob, suggestValues, queryGroup,
     queryLogs, getLogDetail, getLogContext, countLogs, groupLogs, getLogHistogram, getLogViews, saveLogViews, suggestLogValues,

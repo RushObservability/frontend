@@ -11,7 +11,61 @@ describe('useAuth session expiration', () => {
     })
   })
 
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+  it('uses the server remaining idle deadline and renews only explicit activity', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    const user = { id: 'idle-user', username: 'idle', display_name: '', tenant_id: 'default', role: 'read' }
+    const response = () => new Response(JSON.stringify({
+      user, session: { idle_timeout_seconds: 7200, idle_remaining_seconds: 90, activity_interval_seconds: 300 },
+    }))
+    const fetchMock = vi.fn().mockImplementation(response)
+    vi.stubGlobal('fetch', fetchMock)
+    const { useAuth } = await import('./useAuth')
+    const auth = useAuth()
+    await auth.checkSession()
+    expect(auth.sessionIdleDeadlineMs.value).toBe(1_090_000)
+    await auth.refreshSession(false)
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/v1/auth/me')
+    await auth.refreshSession()
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/v1/auth/activity')
+    expect(fetchMock.mock.calls.at(-1)?.[1]?.method).toBe('POST')
+    const { reportSessionExpired } = await import('./authSession')
+    reportSessionExpired()
+    expect(auth.sessionIdleDeadlineMs.value).toBeNull()
+  })
+
+  it('defaults to a two-hour UI deadline when an older API omits policy metadata', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      user: { id: 'old-api', username: 'test', role: 'read' },
+    }))))
+    const { useAuth } = await import('./useAuth')
+    const auth = useAuth()
+    await auth.checkSession()
+    expect(auth.sessionIdleDeadlineMs.value).toBe(8_200_000)
+  })
+
+  it('does not extend the idle deadline by time spent waiting for a response', async () => {
+    let now = 1_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const body = { user: { id: 'slow-api', username: 'test', role: 'read' }, session: {
+      idle_timeout_seconds: 7200, idle_remaining_seconds: 90, activity_interval_seconds: 300,
+    } }
+    let resolve: (response: Response) => void = () => {}
+    const delayed = new Promise<Response>(done => { resolve = done })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(body)))
+      .mockReturnValueOnce(delayed))
+    const { useAuth } = await import('./useAuth')
+    const auth = useAuth()
+    await auth.checkSession()
+    const refresh = auth.refreshSession(false)
+    now += 60_000
+    resolve(new Response(JSON.stringify(body)))
+    await refresh
+    expect(auth.sessionIdleDeadlineMs.value).toBe(1_090_000)
+  })
 
   it('clears cached identity after an authenticated API request returns 401', async () => {
     const user = {

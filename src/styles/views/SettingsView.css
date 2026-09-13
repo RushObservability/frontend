@@ -984,6 +984,11 @@ select.form-input { padding-right: 32px; }
 .group-grid  { grid-template-columns: 1fr 1fr 1fr 1fr 80px 140px; }
 .user-grid   { grid-template-columns: 1fr 1fr 80px max-content; }
 .session-inventory-card { margin-top: var(--sp-2); }
+.session-timeout-form { display: grid; gap: var(--sp-3); padding: var(--sp-4); }
+.session-timeout-field { display: grid; gap: var(--sp-2); }
+.session-timeout-field .form-input { width: 180px; max-width: 100%; }
+.session-timeout-field p { margin: 0; line-height: 1.6; }
+.session-timeout-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
 .session-table-wrap { overflow-x: auto; }
 .session-grid {
   grid-template-columns: minmax(170px, 1fr) minmax(120px, .8fr) minmax(150px, .9fr) minmax(150px, .9fr) minmax(150px, .9fr) 88px;
