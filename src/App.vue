@@ -7,7 +7,7 @@ import { useFeatures } from './composables/useFeatures'
 import { useLicense } from './composables/useLicense'
 import { availableAddons, integrationNavigationChildren } from './integrations/catalog'
 import { isAddonEnabled } from './composables/useIntegrationEnabled'
-import { onSessionExpired } from './composables/authSession'
+import { onSessionExpired, reportSessionExpired } from './composables/authSession'
 import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from './composables/storageScope'
 import AppNavigation from './components/AppNavigation.vue'
 import CommandPalette from './components/CommandPalette.vue'
@@ -27,6 +27,7 @@ const {
   isAdmin,
   checked,
   sessionActivityIntervalMs,
+  sessionIdleDeadlineMs,
   checkSession,
   refreshSession,
   logout,
@@ -70,11 +71,41 @@ function onGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
-let lastSessionActivityTouch = Date.now()
+let lastSessionActivityTouch = 0
+let idleTimer: ReturnType<typeof setTimeout> | undefined
+let appDisposed = false
+
+async function checkIdleDeadline() {
+  if (!isAuthenticated.value || sessionIdleDeadlineMs.value === null || Date.now() < sessionIdleDeadlineMs.value) return
+  // Another tab may have renewed our shared HttpOnly cookie. Validate it
+  // without creating activity, and use the server's remaining deadline.
+  try {
+    await refreshSession(false)
+  } catch {
+    // Lock the UI at its known deadline even when the API is unreachable.
+    if (isAuthenticated.value && sessionIdleDeadlineMs.value !== null && Date.now() >= sessionIdleDeadlineMs.value) {
+      reportSessionExpired()
+    }
+  }
+}
+
+function scheduleIdleCheck() {
+  clearTimeout(idleTimer)
+  if (appDisposed || !isAuthenticated.value || sessionIdleDeadlineMs.value === null) return
+  // Avoid browser timer overflow for deployments with very long lifetimes.
+  const delay = Math.min(2_147_483_647, Math.max(0, sessionIdleDeadlineMs.value - Date.now()))
+  idleTimer = setTimeout(() => { void checkIdleDeadline().finally(scheduleIdleCheck) }, delay)
+}
+
+watch([isAuthenticated, sessionIdleDeadlineMs], scheduleIdleCheck, { immediate: true })
 
 function onSessionActivity() {
   if (!isAuthenticated.value || document.visibilityState === 'hidden') return
   const now = Date.now()
+  if (sessionIdleDeadlineMs.value !== null && now >= sessionIdleDeadlineMs.value) {
+    void checkIdleDeadline()
+    return
+  }
   if (now - lastSessionActivityTouch < sessionActivityIntervalMs.value) return
   lastSessionActivityTouch = now
   void refreshSession().catch(() => {
@@ -84,7 +115,7 @@ function onSessionActivity() {
 }
 
 function onVisibilityChange() {
-  if (document.visibilityState === 'visible') onSessionActivity()
+  if (document.visibilityState === 'visible') void checkIdleDeadline()
 }
 
 function toggleUserMenu() {
@@ -135,6 +166,8 @@ onMounted(() => {
   })
 })
 onBeforeUnmount(() => {
+  appDisposed = true
+  clearTimeout(idleTimer)
   document.removeEventListener('click', onDocumentClick)
   document.removeEventListener('keydown', onGlobalKeydown)
   document.removeEventListener('pointerdown', onSessionActivity)
@@ -181,7 +214,7 @@ onMounted(async () => {
 // which previously left the tenant switcher empty until a manual refresh.
 watch(isAuthenticated, async (authed) => {
   if (authed) {
-    lastSessionActivityTouch = Date.now()
+    lastSessionActivityTouch = 0
     await loadTenants()
     // Tenant validation may replace a stale localStorage value. Refresh the
     // tenant-aware feature flags after that resolution so SRE entry points do

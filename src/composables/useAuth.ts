@@ -10,6 +10,8 @@ const user = ref<AuthUser | null>(null)
 const checked = ref(false)
 const loading = ref(false)
 const sessionActivityIntervalMs = ref(5 * 60 * 1_000)
+const sessionIdleDeadlineMs = ref<number | null>(null)
+let supportsActivityEndpoint = false
 let refreshPromise: Promise<void> | null = null
 
 const isAuthenticated = computed(() => !!user.value)
@@ -18,10 +20,17 @@ const canWrite = computed(() => user.value?.role === 'admin' || user.value?.role
 
 const { login: apiLogin, logout: apiLogout, getMe } = useApi()
 
-function applySessionPolicy(activityIntervalSeconds?: number): void {
-  if (!Number.isFinite(activityIntervalSeconds)) return
-  const seconds = Math.max(30, Number(activityIntervalSeconds))
+function applySessionPolicy(policy: { activity_interval_seconds?: number; idle_remaining_seconds?: number; idle_timeout_seconds?: number } | undefined, requestedAt: number): void {
+  // Older APIs renew GET /auth/me. Keep rolling frontend/API upgrades usable.
+  supportsActivityEndpoint = Number.isFinite(policy?.idle_timeout_seconds)
+  const seconds = Number.isFinite(policy?.activity_interval_seconds)
+    ? Math.max(30, Number(policy?.activity_interval_seconds)) : 300
   sessionActivityIntervalMs.value = seconds * 1_000
+  const remaining = Number.isFinite(policy?.idle_remaining_seconds)
+    ? Math.max(0, Number(policy?.idle_remaining_seconds)) : 2 * 60 * 60
+  // Anchor before the request so a slow response or sleeping browser cannot
+  // make an old server deadline appear newer than it is.
+  sessionIdleDeadlineMs.value = requestedAt + remaining * 1_000
 }
 
 // Clear cached identity as soon as any authenticated transport reports a 401.
@@ -30,6 +39,7 @@ onSessionExpired(() => {
   stopPollingTasks()
   invalidateAnalyticsRequests({ userId: user.value?.id || storageUserId.value || undefined })
   user.value = null
+  sessionIdleDeadlineMs.value = null
   setStorageUserId(null)
   clearAllScopedStorage()
   checked.value = true
@@ -39,14 +49,16 @@ onSessionExpired(() => {
 async function checkSession(): Promise<void> {
   if (checked.value) return
   loading.value = true
+  const requestedAt = Date.now()
   try {
     const response = await getMe()
     user.value = response.user
-    applySessionPolicy(response.session?.activity_interval_seconds)
+    applySessionPolicy(response.session, requestedAt)
     setStorageUserId(user.value.id)
     markSessionActive()
   } catch {
     user.value = null
+    sessionIdleDeadlineMs.value = null
     setStorageUserId(null)
     clearAllScopedStorage()
   } finally {
@@ -56,28 +68,31 @@ async function checkSession(): Promise<void> {
 }
 
 async function login(username: string, password: string): Promise<void> {
+  const requestedAt = Date.now()
   const res = await apiLogin(username, password)
   invalidateAnalyticsRequests()
   if (storageUserId.value && storageUserId.value !== res.user.id) clearAllScopedStorage()
   user.value = res.user
-  applySessionPolicy(res.session?.activity_interval_seconds)
+  applySessionPolicy(res.session, requestedAt)
   setStorageUserId(res.user.id)
   checked.value = true
   markSessionActive()
 }
 
-async function refreshSession(): Promise<void> {
+async function refreshSession(activity = true): Promise<void> {
   if (!user.value) return
   if (refreshPromise) return refreshPromise
   const expectedUserId = user.value.id
 
   refreshPromise = (async () => {
-    const response = await getMe()
+    const requestedAt = Date.now()
+    const response = await getMe(activity && supportsActivityEndpoint)
     // Do not restore identity if logout or session expiration won the race
     // while this activity refresh was in flight.
     if (user.value?.id !== expectedUserId) return
+    if (!response.user?.id) throw new Error('Invalid session response')
     user.value = response.user
-    applySessionPolicy(response.session?.activity_interval_seconds)
+    applySessionPolicy(response.session, requestedAt)
     setStorageUserId(response.user.id)
     markSessionActive()
   })()
@@ -102,6 +117,7 @@ async function logout(): Promise<void> {
   stopPollingTasks()
   invalidateAnalyticsRequests({ userId: user.value?.id || storageUserId.value || undefined })
   user.value = null
+  sessionIdleDeadlineMs.value = null
   setStorageUserId(null)
   clearAllScopedStorage()
   checked.value = false
@@ -116,6 +132,7 @@ export function useAuth() {
     checked: readonly(checked),
     loading: readonly(loading),
     sessionActivityIntervalMs: readonly(sessionActivityIntervalMs),
+    sessionIdleDeadlineMs: readonly(sessionIdleDeadlineMs),
     checkSession,
     refreshSession,
     login,
