@@ -13,6 +13,7 @@ import AlertRoutingRules from '../components/AlertRoutingRules.vue'
 import RegexHelp from '../components/RegexHelp.vue'
 import SettingsNavigation from '../components/SettingsNavigation.vue'
 import LogViewsSettings from './settings/LogViewsSettings.vue'
+import { directoryRole, filterDirectoryUsers, type UserRole, type UserStatus } from './settings/userDirectory'
 import EmptyState from '../components/EmptyState.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 import { getAddon } from '../integrations/catalog'
@@ -2037,14 +2038,24 @@ const editUserGroupsUsername = computed(() => {
 })
 
 const userGroupMap = ref<Record<string, string[]>>({})
+const userGroupsError = ref('')
 
 async function loadAllUserGroups() {
-  for (const u of users.value) {
-    try {
-      const res = await api.getUserGroups(u.id)
-      userGroupMap.value[u.id] = res.group_ids
-    } catch { /* ignore */ }
-  }
+  userGroupsError.value = ''
+  const pending = [...users.value]
+  // Bound concurrency so the directory does not issue one request per user at once.
+  await Promise.all(Array.from({ length: Math.min(6, pending.length) }, async () => {
+    while (pending.length) {
+      const u = pending.shift()!
+      try {
+        const res = await api.getUserGroups(u.id)
+        userGroupMap.value[u.id] = res.group_ids
+      } catch {
+        delete userGroupMap.value[u.id]
+        userGroupsError.value = 'Some user groups could not be loaded. Group and role search may be incomplete.'
+      }
+    }
+  }))
 }
 
 function openEditUserGroups(userId: string) {
@@ -2077,6 +2088,29 @@ function groupNameById(gid: string): string {
 
 // ── Users state ──
 const users = ref<User[]>([])
+const usersLoading = ref(false)
+const userSearch = ref('')
+const userRoleFilter = ref<UserRole | 'all'>('all')
+const userStatusFilter = ref<UserStatus>('all')
+const userPageSize = ref(25)
+const userPage = ref(1)
+const filteredUsers = computed(() => filterDirectoryUsers(users.value, groups.value, userGroupMap.value, userSearch.value, userRoleFilter.value, userStatusFilter.value))
+const userPageCount = computed(() => Math.max(1, Math.ceil(filteredUsers.value.length / userPageSize.value)))
+const pagedUsers = computed(() => filteredUsers.value.slice((userPage.value - 1) * userPageSize.value, userPage.value * userPageSize.value))
+const userRangeStart = computed(() => filteredUsers.value.length ? (userPage.value - 1) * userPageSize.value + 1 : 0)
+const userRangeEnd = computed(() => Math.min(userPage.value * userPageSize.value, filteredUsers.value.length))
+const hasUserFilters = computed(() => !!userSearch.value || userRoleFilter.value !== 'all' || userStatusFilter.value !== 'all')
+watch([userSearch, userRoleFilter, userStatusFilter, userPageSize], () => { userPage.value = 1 }, { flush: 'sync' })
+watch(userPageCount, count => { userPage.value = Math.min(userPage.value, count) }, { flush: 'sync' })
+function clearUserFilters() {
+  userSearch.value = ''
+  userRoleFilter.value = 'all'
+  userStatusFilter.value = 'all'
+}
+function userRoleLabel(user: User): string {
+  const role = directoryRole(userGroupMap.value[user.id], groups.value)
+  return { admin: 'Admin', write: 'Write', viewer: 'Viewer', unknown: 'Unavailable' }[role]
+}
 const showUserForm = ref(false)
 const newUserUsername = ref('')
 const newUserPassword = ref('')
@@ -2110,10 +2144,13 @@ const changePasswordUsername = computed(() => {
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 
 async function loadUsers() {
+  usersLoading.value = true
   try {
     const res = await api.listUsers()
     users.value = res.users
+    await loadAllUserGroups()
   } catch { /* error surfaced via api.error */ }
+  finally { usersLoading.value = false }
 }
 
 const authSessions = ref<AuthSession[]>([])
@@ -2853,7 +2890,7 @@ onMounted(async () => {
   window.addEventListener('hashchange', onHashChange)
 
   await Promise.all([loadKeys(), loadServiceLinks(), loadServiceSuggestions(), loadCustomSkills(), loadTenants(), loadGroups(), loadUsers(), loadSsoConfig(), loadAlertChannels()])
-  await Promise.all([loadAllUserGroups(), loadAllTenantRetention(), loadAllTenantSignals(), loadExportMaxRows(), loadGlobalRetention()])
+  await Promise.all([loadAllTenantRetention(), loadAllTenantSignals(), loadExportMaxRows(), loadGlobalRetention()])
   if (isAdmin.value) loadDeployMarkersSetting()
   if (isAdmin.value) loadRumSetting()
   if (isAdmin.value) loadCloudwatchSetting()
@@ -5728,7 +5765,7 @@ function formatDate(ts: string): string {
           <div class="card-header-text">
             <h2 class="card-title">Users</h2>
             <p class="card-desc text-secondary">
-              Manage local user accounts for authentication and access control.
+              Manage user accounts, group membership, and access.
             </p>
           </div>
           <button v-if="isAdmin" class="btn-create" @click="showUserForm = true">
@@ -5742,51 +5779,96 @@ function formatDate(ts: string): string {
           <span>{{ api.error.value }}</span>
         </div>
 
-        <!-- Users Table -->
-        <div v-if="users.length > 0" class="grid-table user-grid">
-          <div class="grid-head">
-            <div>User</div>
-            <div>Groups</div>
-            <div>Enabled</div>
-            <div>Actions</div>
-          </div>
-          <template v-for="u in users" :key="u.id">
-            <div class="grid-row" :class="{ 'grid-row-dim': !u.enabled }">
-              <div class="grid-cell">
-                <span class="cell-avatar">{{ (u.display_name || u.username).charAt(0).toUpperCase() }}</span>
-                <span class="mono fw-600">{{ u.username }}</span>
-                <span v-if="u.display_name && u.display_name !== u.username" class="text-muted fs-11">{{ u.display_name }}</span>
-              </div>
-              <div class="grid-cell">
-                <span
-                  v-for="gid in (userGroupMap[u.id] || [])"
-                  :key="gid"
-                  class="cell-tag cell-tag-muted"
-                  style="margin-right: 4px; font-size: 10px"
-                >{{ groupNameById(gid) }}</span>
-                <span v-if="!(userGroupMap[u.id] || []).length" class="text-muted fs-11">none</span>
-              </div>
-              <div class="grid-cell">
+        <div class="user-directory-toolbar">
+          <label class="user-directory-search">
+            <span class="form-label">Search users</span>
+            <input v-model="userSearch" type="search" class="form-input" placeholder="Username, email, name, role, or group" aria-controls="user-directory-table" />
+          </label>
+          <label class="user-directory-filter">
+            <span id="user-directory-role-label" class="form-label">Role</span>
+            <select v-model="userRoleFilter" class="form-input" aria-labelledby="user-directory-role-label" aria-controls="user-directory-table">
+              <option value="all">All roles</option>
+              <option value="admin">Admin</option>
+              <option value="write">Write</option>
+              <option value="viewer">Viewer</option>
+            </select>
+          </label>
+          <label class="user-directory-filter">
+            <span id="user-directory-status-label" class="form-label">Status</span>
+            <select v-model="userStatusFilter" class="form-input" aria-labelledby="user-directory-status-label" aria-controls="user-directory-table">
+              <option value="all">All statuses</option>
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
+          <button v-if="hasUserFilters" type="button" class="action-btn" @click="clearUserFilters">Clear filters</button>
+        </div>
+        <div v-if="userGroupsError" class="error-row" role="status">
+          <span>{{ userGroupsError }}</span>
+          <button type="button" class="action-btn" :disabled="usersLoading" @click="loadUsers">Retry</button>
+        </div>
+        <div v-if="usersLoading" class="keys-empty text-muted" role="status">Loading users…</div>
+        <DataTable v-else-if="pagedUsers.length" id="user-directory-table" class="user-directory-table" bare>
+          <thead>
+            <tr><th scope="col">User</th><th scope="col">Groups</th><th scope="col">Role</th><th scope="col">Enabled</th><th scope="col">Actions</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in pagedUsers" :key="u.id" :class="{ 'user-directory-disabled': !u.enabled }">
+              <td>
+                <div class="user-directory-identity">
+                  <span class="cell-avatar" aria-hidden="true">{{ (u.display_name || u.username).charAt(0).toUpperCase() }}</span>
+                  <div class="user-directory-name">
+                    <span class="mono fw-600">{{ u.username }}</span>
+                    <span v-if="u.display_name && u.display_name !== u.username" class="text-muted fs-11">{{ u.display_name }}</span>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="user-directory-groups">
+                  <span v-for="gid in (userGroupMap[u.id] || [])" :key="gid" class="cell-tag cell-tag-muted">{{ groupNameById(gid) }}</span>
+                  <span v-if="!userGroupMap[u.id]" class="text-muted fs-11">Unavailable</span>
+                  <span v-else-if="!userGroupMap[u.id]!.length" class="text-muted fs-11">None</span>
+                </div>
+              </td>
+              <td><span class="cell-tag cell-tag-muted">{{ userRoleLabel(u) }}</span></td>
+              <td>
                 <label v-if="isAdmin" class="toggle">
-                  <input type="checkbox" :checked="u.enabled" @change="toggleUserEnabled(u.id, !u.enabled)" />
+                  <input type="checkbox" :aria-label="`Enable ${u.username}`" :checked="u.enabled" @change="toggleUserEnabled(u.id, !u.enabled)" />
                   <span class="toggle-slider"></span>
                 </label>
-                <span v-else :style="{ color: u.enabled ? 'var(--ok)' : 'var(--text-muted)' }">{{ u.enabled ? 'Yes' : 'No' }}</span>
-              </div>
-              <div class="grid-cell grid-actions">
-                <button v-if="isAdmin" class="action-btn" @click="openEditUserGroups(u.id)">Groups</button>
-                <button class="action-btn" @click="changePasswordUserId = u.id; changePasswordValue = ''">Password</button>
-                <template v-if="u.username !== 'admin' && isAdmin">
-                  <button class="action-btn action-btn-danger" @click="askDelete('user', u.id, u.username)">Delete</button>
-                </template>
-                <span v-else class="text-muted">-</span>
-              </div>
-            </div>
-          </template>
-        </div>
-
-        <!-- Empty State -->
+                <span v-else>{{ u.enabled ? 'Yes' : 'No' }}</span>
+              </td>
+              <td>
+                <div class="user-directory-actions">
+                  <button v-if="isAdmin" class="action-btn" @click="openEditUserGroups(u.id)">Groups</button>
+                  <button class="action-btn" @click="changePasswordUserId = u.id; changePasswordValue = ''">Password</button>
+                  <button v-if="u.username !== 'admin' && isAdmin" class="action-btn action-btn-danger" @click="askDelete('user', u.id, u.username)">Delete</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </DataTable>
+        <EmptyState v-else-if="hasUserFilters" class="keys-empty" title="No matching users" description="Try a different search or clear the filters." compact />
         <EmptyState v-else class="keys-empty" title="No users yet" description="Create a user, then assign their groups and access." compact />
+
+        <div class="user-directory-footer">
+          <span class="text-muted" role="status" aria-live="polite">
+            {{ userRangeStart }}–{{ userRangeEnd }} of {{ filteredUsers.length }} users<span v-if="hasUserFilters"> · {{ users.length }} total</span>
+          </span>
+          <div class="user-directory-paging">
+            <label class="user-directory-page-size">
+              <span>Rows per page</span>
+              <select v-model.number="userPageSize" class="form-input">
+                <option :value="25">25</option><option :value="50">50</option><option :value="100">100</option>
+              </select>
+            </label>
+            <nav aria-label="User list pagination" class="user-directory-paging">
+              <button type="button" class="action-btn" aria-label="Previous page of users" :disabled="userPage <= 1 || usersLoading" @click="userPage--">Previous</button>
+              <span class="text-muted">Page {{ userPage }} of {{ userPageCount }}</span>
+              <button type="button" class="action-btn" aria-label="Next page of users" :disabled="userPage >= userPageCount || usersLoading" @click="userPage++">Next</button>
+            </nav>
+          </div>
+        </div>
       </div>
 
       <div v-if="isAdmin" class="section-card card session-inventory-card">
