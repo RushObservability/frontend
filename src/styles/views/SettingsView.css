@@ -485,6 +485,16 @@ select.form-input { padding-right: 32px; }
 
 /* ── Empty State ── */
 .keys-empty {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.alert-channels-empty.empty-state-block--compact {
+  grid-template-columns: auto minmax(0, max-content);
+  justify-content: center;
+}
+
+/* Shared EmptyState owns its grid; legacy placeholders still use a column. */
+.keys-empty:not(.empty-state-block) {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -492,7 +502,6 @@ select.form-input { padding-right: 32px; }
   padding: var(--sp-8);
   gap: var(--sp-1);
   font-size: 13px;
-  border-top: 1px solid var(--border-subtle);
 }
 
 /* ── Service Links Form ── */

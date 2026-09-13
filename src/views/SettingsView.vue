@@ -5886,7 +5886,7 @@ function formatDate(ts: string): string {
         <div v-if="!alertChannelsLoaded" class="keys-empty text-muted">Loading…</div>
         <EmptyState
           v-else-if="alertChannels.length === 0 && !showChannelForm"
-          class="keys-empty"
+          class="keys-empty alert-channels-empty"
           title="No alert channels yet"
           description="Add a channel to route monitor notifications to your team."
           compact

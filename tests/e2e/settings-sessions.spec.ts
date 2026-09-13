@@ -70,3 +70,24 @@ test('server denial is shown without rendering session data', async ({ page }) =
   await expect(inventory.locator('.session-grid')).toHaveCount(0)
   expect(state.sessionRequests).toBe(1)
 })
+
+for (const width of [1280, 390]) {
+  test(`empty alert channel icon stays beside its text at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    await stubSettingsApi(page, 'admin')
+    await openSettings(page, '#alerting')
+    const empty = page.locator('#panel-alerting .empty-state-block')
+    await expect(empty).toContainText('No alert channels yet')
+    await empty.screenshot({ path: testInfo.outputPath('empty-alert-channel.png'), animations: 'disabled' })
+    const icon = await empty.locator('.empty-state-block-icon').boundingBox()
+    const copy = await empty.locator('.empty-state-block-copy').boundingBox()
+    expect(icon).not.toBeNull()
+    expect(copy).not.toBeNull()
+    expect(icon!.x + icon!.width).toBeLessThan(copy!.x)
+    expect(Math.abs(icon!.y + icon!.height / 2 - copy!.y - copy!.height / 2)).toBeLessThan(2)
+    const box = await empty.boundingBox()
+    const noticeCenter = (icon!.x + copy!.x + copy!.width) / 2
+    expect(Math.abs(noticeCenter - box!.x - box!.width / 2)).toBeLessThan(2)
+    expect(await empty.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  })
+}
