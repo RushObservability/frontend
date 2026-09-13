@@ -9,11 +9,22 @@
 .toggle-btn.active { background: var(--amber-dim); color: var(--amber); }
 .toggle-btn:hover:not(.active) { color: var(--text-secondary); }
 
-.services-search { display: flex; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--r-md); padding: 0 var(--sp-3); transition: border-color 0.15s; }
-.services-search:focus-within { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber-dim); }
+.services-search { display: flex; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--r-md); padding: 0 var(--sp-3); transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease; }
+.services-search:hover,
+.services-search:focus-within {
+  background: var(--bg-raised);
+  border-color: var(--accent-muted);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .search-icon { color: var(--text-muted); font-size: 14px; margin-right: var(--sp-2); }
 .services-search-input { padding: var(--sp-2) 0; width: 200px; font-size: 12px; }
+/* The enclosing control owns the focus indicator, including its icon. */
+.services-search-input:focus-visible { outline: none; }
 .services-search-input::placeholder { color: var(--text-muted); }
+
+@media (forced-colors: active) {
+  .services-search:focus-within { outline: 2px solid Highlight; outline-offset: 2px; }
+}
 
 .graph-controls { display: flex; align-items: center; gap: var(--sp-3); }
 .refresh-btn { padding: var(--sp-1) var(--sp-3); font-size: 11px; color: var(--text-secondary); background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--r-md); cursor: pointer; transition: all 0.15s; }

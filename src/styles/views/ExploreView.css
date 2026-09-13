@@ -105,11 +105,13 @@
   border: 1px solid var(--border-default);
   border-radius: var(--r-md);
   padding: 0 var(--sp-3);
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
+.search-bar:hover,
 .search-bar:focus-within {
-  border-color: var(--amber);
-  box-shadow: 0 0 0 1px var(--amber-dim), 0 0 16px var(--amber-dim);
+  background: var(--bg-raised);
+  border-color: var(--accent-muted);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .search-prompt {
   color: var(--amber-muted);
@@ -125,6 +127,11 @@
   color: var(--text-primary);
 }
 .search-input::placeholder { color: var(--text-muted); }
+/* The search bar owns the input's focus indicator; buttons keep their own. */
+.search-input:focus-visible { outline: none; }
+@media (forced-colors: active) {
+  .search-bar:focus-within { outline: 2px solid Highlight; outline-offset: 2px; }
+}
 .search-btn {
   padding: 5px 14px;
   background: var(--amber);
@@ -222,7 +229,7 @@
   border-color: var(--amber);
   background: var(--amber-dim);
 }
-.search-bar.nl-mode {
+.search-bar.nl-mode:not(:focus-within):not(:hover) {
   border-color: color-mix(in srgb, var(--amber) 60%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber) 20%, transparent), 0 0 16px color-mix(in srgb, var(--amber) 10%, transparent);
 }
