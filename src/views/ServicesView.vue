@@ -657,8 +657,10 @@ function sfBarColor(p: number) {
         @row-click="openService"
       >
         <template #cell-service_name="{ row }">
-          <span class="svc-dot" :class="statsLoaded ? rowHealth(row.health) : 'loading'" />
-          <span class="svc-name mono">{{ row.service_name }}</span>
+          <span class="svc-name-cell">
+            <span class="svc-dot" :class="statsLoaded ? rowHealth(row.health) : 'loading'" />
+            <span class="svc-name mono">{{ row.service_name }}</span>
+          </span>
         </template>
         <template #cell-health="{ row }">
           <span v-if="statsLoaded" class="health-badge" :class="rowHealth(row.health)">{{ rowHealth(row.health) }}</span>
