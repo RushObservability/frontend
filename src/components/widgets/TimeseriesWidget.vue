@@ -10,8 +10,11 @@ import type { TimeSeriesPanelSeries } from '../panels/types'
 import { straightLinePath, straightAreaPath, fmtAxis, resolveTimeDomain, type Pt } from '../../lib/chart'
 import { useChartHover } from '../../composables/useChartHover'
 import EmptyState from '../EmptyState.vue'
+import { stackTimeSeries } from '../../lib/stackedTimeBars'
 
 const props = defineProps<{
+  displayMode?: 'lines' | 'stacked-bars'
+  bucketSeconds?: number
   buckets: CountBucket[]
   deploys?: DeployMarker[]
   /** Multi-series mode (PromQL/metrics source). When present, takes precedence over buckets. */
@@ -110,6 +113,13 @@ const xLabels = computed(() => {
 })
 
 // ── Multi-series (metrics) geometry ──
+const stackedMode = computed(() => props.displayMode === 'stacked-bars')
+const stacks = computed(() => stackedMode.value ? stackTimeSeries(props.series || []) : [])
+const barInterval = computed(() => {
+  if (props.bucketSeconds && props.bucketSeconds > 0) return props.bucketSeconds
+  const times = [...new Set(stacks.value.map(bar => bar.time))].sort((a, b) => a - b)
+  return times.length > 1 ? Math.min(...times.slice(1).map((t, i) => t - times[i]!)) : 60
+})
 const seriesBounds = computed(() => {
   let minT = Infinity, maxT = -Infinity, maxLeft = 0, maxRight = 0
   for (const s of props.series || []) {
@@ -119,6 +129,11 @@ const seriesBounds = computed(() => {
       if (s.axis === 'right') maxRight = Math.max(maxRight, v)
       else maxLeft = Math.max(maxLeft, v)
     }
+  }
+  if (stackedMode.value) {
+    maxLeft = Math.max(0, ...stacks.value.filter(bar => bar.axis === 'left').map(bar => bar.top))
+    maxRight = Math.max(0, ...stacks.value.filter(bar => bar.axis === 'right').map(bar => bar.top))
+    maxT += barInterval.value
   }
   // Extend the range so threshold lines stay on-chart even above the data peak.
   for (const th of props.thresholds || []) if (th.value > maxLeft) maxLeft = th.value
@@ -145,7 +160,7 @@ const thresholdLines = computed(() => {
 })
 
 const seriesPaths = computed(() => {
-  if (!seriesMode.value) return []
+  if (!seriesMode.value || stackedMode.value) return []
   const { minT, maxT, maxLeft, maxRight } = seriesBounds.value
   const span = maxT - minT || 1
   return (props.series || []).map((s, i) => {
@@ -162,6 +177,29 @@ const seriesPaths = computed(() => {
       lineStyle: s.lineStyle || 'solid',
       opacity: s.opacity ?? 1,
     }
+  })
+})
+
+const stackedBars = computed(() => {
+  const { minT, maxT, maxLeft, maxRight } = seriesBounds.value
+  const span = maxT - minT || 1
+  return stacks.value.flatMap(bar => {
+    const start = Math.max(minT, bar.time)
+    const end = Math.min(maxT, bar.time + barInterval.value)
+    if (end <= start || bar.value === 0) return []
+    const width = (end - start) / span * plotWidth
+    const gap = Math.min(1.5, width * .15)
+    const max = bar.axis === 'right' ? maxRight : maxLeft
+    const series = props.series![bar.seriesIndex]!
+    return [{
+      ...bar,
+      x: padLeft + (start - minT) / span * plotWidth + gap / 2,
+      y: padTop + plotHeight - bar.top / max * plotHeight,
+      width: width - gap,
+      height: bar.value / max * plotHeight,
+      color: series.color || SERIES_COLORS[bar.seriesIndex % SERIES_COLORS.length]!,
+      name: series.name,
+    }]
   })
 })
 
@@ -330,7 +368,11 @@ const tooltip = computed(() => {
         if (pt[0] < firstSample) firstSample = pt[0]
         if (pt[0] > lastSample) lastSample = pt[0]
       }
-      if (t < firstSample || t > lastSample) return null
+      if (stackedMode.value) {
+        const interval = s.pts.find(([start]) => t >= start && t < start + barInterval.value)
+        if (!interval) return null
+        best = interval
+      } else if (t < firstSample || t > lastSample) return null
       return { name: s.name, color: s.color, value: fmtAxisU(best[1]), t: best[0] }
     })
     .filter(Boolean) as Array<{ name: string; color: string; value: string; t: number }>
@@ -367,6 +409,13 @@ function onLeave() { hover.set(null) }
       <svg v-if="seriesMode" :viewBox="`0 0 ${svgWidth} ${svgHeight}`" preserveAspectRatio="none" class="ch-svg ch-animate ts-svg" @pointermove="onHover" @pointerleave="onLeave">
         <line v-for="tick in seriesYTicks" :key="'sy' + tick.value" :x1="padLeft" :y1="tick.y" :x2="svgWidth - padRight" :y2="tick.y" :class="['ch-grid', { 'ch-grid--baseline': tick.value === 0 }]" />
         <line v-for="xl in seriesXLabels" :key="'sv' + xl.x" :x1="xl.x" :y1="padTop" :x2="xl.x" :y2="padTop + plotHeight" class="ch-grid" />
+        <rect
+          v-for="bar in stackedBars"
+          :key="`${bar.seriesIndex}:${bar.time}`"
+          :x="bar.x" :y="bar.y" :width="bar.width" :height="bar.height"
+          :fill="bar.color"
+          class="ts-stacked-bar"
+        ><title>{{ bar.name }}: {{ fmtAxisU(bar.value) }}</title></rect>
         <path
           v-for="(sp, i) in seriesPaths"
           :key="'sp' + i"

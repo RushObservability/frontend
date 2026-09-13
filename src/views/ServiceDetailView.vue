@@ -1635,11 +1635,14 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
         <TimeSeriesPanel
           class="svc-chart-card svc-time-series-card"
           title="Application vs database time"
-          description="Average time per request in each interval. Database time is capped per transaction to represent wall-clock impact."
-          caption="Application time excludes database child spans; parallel calls can make raw database time higher."
+          description="Stacked bars show the application and estimated database portions of average request duration in each interval."
+          caption="Each bar totals average request duration. Database impact is capped; raw DB call time is shown separately below."
           source-label="Spans"
           :range-label="humanWindow"
           :series="timeBreakdownChartSeries"
+          display-mode="stacked-bars"
+          :bucket-seconds="({ '1m': 60, '2m': 120, '10m': 600, '30m': 1800, '3h': 10800 }[detailInterval()] || 120)"
+          :time-domain="{ from: parseTs(windowFrom) / 1000, to: parseTs(windowTo) / 1000 }"
           :loading="timeBreakdownLoading"
           unit="ms"
         >

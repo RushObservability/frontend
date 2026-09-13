@@ -50,6 +50,8 @@ const hasData = () => Boolean(
       v-else
       :buckets="buckets"
       :series="series"
+      :display-mode="displayMode"
+      :bucket-seconds="bucketSeconds"
       :time-domain="timeDomain"
       :deploys="deploys"
       :thresholds="thresholds"

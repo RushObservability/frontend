@@ -28,6 +28,9 @@ export interface TimeSeriesPanelSeries {
 }
 
 export interface TimeSeriesPanelProps extends PanelFrameProps {
+  displayMode?: 'lines' | 'stacked-bars'
+  /** Width of each bar's time bucket, in seconds. */
+  bucketSeconds?: number
   buckets?: CountBucket[]
   series?: TimeSeriesPanelSeries[]
   timeDomain?: TimeDomain
