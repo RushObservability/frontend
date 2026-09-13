@@ -1,12 +1,14 @@
 import { test, expect, type Page } from '@playwright/test'
+import type { TraceResponse } from '../../src/types'
 
 async function stubExplore(page: Page) {
-  const state = { total: 410_936, kind: 'exact', summaryFails: false, searches: [] as Record<string, any>[] }
+  const state = { total: 410_936, kind: 'exact', summaryFails: false, searches: [] as Record<string, any>[], trace: null as TraceResponse | null }
   await page.route('**/api/v1/**', async route => {
     const path = new URL(route.request().url()).pathname
     let body: unknown = { views: [], services: [], buckets: [], keys: [], groups: [], values: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'count-test', username: 'tester', role: 'admin' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
+    if (path.startsWith('/api/v1/traces/') && state.trace) body = state.trace
     if (path === '/api/v1/explore/search') {
       const query = route.request().postDataJSON()
       state.searches.push(query)
@@ -19,7 +21,7 @@ async function stubExplore(page: Page) {
       const rows = Array.from({ length: logs ? 500 : 100 }, (_, index) => logs ? {
         Timestamp: timestamp - index * 1_000_000, TimestampNs: String(timestamp - index * 1_000_000),
         ServiceName: 'payments', SeverityText: 'INFO', SeverityNumber: 9,
-        TraceId: '', SpanId: '', Body: `Payment event ${index}`, LogAttributes: {}, ResourceAttributes: {},
+        TraceId: index === 0 ? state.trace?.trace_id ?? '' : '', SpanId: '', Body: `Payment event ${index}`, LogAttributes: {}, ResourceAttributes: {},
       } : {
         timestamp: timestamp - index * 1_000_000, trace_id: `trace-${index}`, span_id: `span-${index}`,
         parent_span_id: '', service_name: 'payments', service_version: '', environment: '', host_name: '',
@@ -44,6 +46,44 @@ async function stubExplore(page: Page) {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
   })
   return state
+}
+
+for (const mode of ['traces', 'logs']) {
+  test(`${mode} inline trace bars match the full trace service and error colors`, async ({ page }, testInfo) => {
+    const state = await stubExplore(page)
+    state.trace = {
+      trace_id: 'trace-0', services: ['gateway', 'articles', 'payments'],
+      duration_ns: 100_000_000, span_count: 6,
+      spans: ['gateway', 'articles', 'payments', 'articles', 'payments', 'gateway'].map((service, index) => ({
+        span_id: `span-${index}`, parent_span_id: '', service_name: service, service_version: '',
+        timestamp: `2026-09-13 10:00:00.0${index}0000000`,
+        duration_ns: 40_000_000, http_method: 'GET', http_path: `/work/${index}`,
+        http_status_code: index === 5 ? 404 : 200,
+        status: index === 3 ? 'ERROR' : index === 4 ? 'error' : 'OK',
+        attributes: {}, events: [], children: [],
+      })),
+    }
+    await page.goto(`/?mode=${mode}&t=60`)
+    // Open the row preview without first opening the separate detail panel.
+    await page.locator('.et-trace-link').first().click()
+    const preview = page.locator('.inline-trace-preview')
+    const bars = preview.locator('.inline-wf-bar')
+    await expect(bars).toHaveCount(6)
+    await expect(bars.nth(0)).toHaveCSS('background-color', 'rgb(59, 130, 246)')
+    await expect(bars.nth(1)).toHaveCSS('background-color', 'rgb(71, 184, 129)')
+    await expect(bars.nth(2)).toHaveCSS('background-color', 'rgb(91, 141, 217)')
+    await expect(preview.locator('.inline-wf-error')).toHaveCount(3)
+    const inlineColors = await bars.evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor))
+    expect(new Set(inlineColors.slice(3)).size).toBe(1)
+    expect(inlineColors[3]).not.toBe(inlineColors[1])
+    await preview.screenshot({ path: testInfo.outputPath(`${mode}-inline-trace-colors.png`) })
+
+    await preview.getByRole('link', { name: 'View Full Trace' }).click()
+    await expect(page).toHaveURL(/\/trace\/trace-0$/)
+    const fullBars = page.locator('.tw-bar')
+    await expect(fullBars).toHaveCount(6)
+    expect(await fullBars.evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor))).toEqual(inlineColors)
+  })
 }
 
 test('log event totals use the full filtered time range instead of the 500 loaded rows', async ({ page }) => {
