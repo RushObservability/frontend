@@ -19,6 +19,7 @@ import { searchTokens, searchTokenAt, completionPrefix, filterValue, logSearchFi
 import { DEFAULT_LOG_COLUMNS, logColumnValue, logViewFilters, logViewKey, logViewScope, validateLogColumns, type LogView, type LogViewColumn } from '../lib/logViews'
 import { useAuth } from '../composables/useAuth'
 import TraceWaterfall from '../components/TraceWaterfall.vue'
+import { isSpanError, serviceColor } from '../lib/traceWaterfall'
 import ExploreSearchToolbar from '../components/ExploreSearchToolbar.vue'
 import ExploreResultsState from '../components/ExploreResultsState.vue'
 import SignalTimelinePanel from '../components/panels/SignalTimelinePanel.vue'
@@ -3063,16 +3064,8 @@ const mockedNodeMetrics = computed(() => {
   }
 })
 
-// ── Service color palette (matches TraceView) ──
-const dpServiceColors = [
-  '#3b82f6', '#47b881', '#5b8dd9', '#9b7dd4',
-  '#e5584f', '#06b6d4', '#84cc16', '#f97316',
-]
 function dpServiceColor(name: string): string {
-  const services = expandedTrace.value?.services
-  if (!services) return dpServiceColors[0]!
-  const idx = services.indexOf(name)
-  return dpServiceColors[(idx >= 0 ? idx : 0) % dpServiceColors.length]!
+  return serviceColor(name, expandedTrace.value?.services)
 }
 
 // Parse "YYYY-MM-DD HH:MM:SS.nnnnnnnnn" from trace timestamps into ms
@@ -5662,7 +5655,7 @@ watch(() => route.query.log_view, (id) => {
                     v-for="span in flattenSpans(inlineTraceData.spans).slice(0, 20)"
                     :key="span.span_id"
                     class="inline-wf-row"
-                    :class="{ 'inline-wf-error': span.status === 'error' || span.http_status_code >= 400 }"
+                    :class="{ 'inline-wf-error': isSpanError(span) }"
                   >
                     <span class="inline-wf-svc">{{ span.service_name }}</span>
                     <div class="inline-wf-bar-track">
@@ -5671,7 +5664,7 @@ watch(() => route.query.log_view, (id) => {
                         :style="{
                           left: inlineSpanLeft(span, inlineTraceData!),
                           width: inlineSpanWidth(span, inlineTraceData!),
-                          background: span.status === 'error' || span.http_status_code >= 400 ? 'var(--error)' : dpServiceColor(span.service_name),
+                          background: isSpanError(span) ? 'var(--error)' : serviceColor(span.service_name, inlineTraceData.services),
                         }"
                       />
                     </div>
@@ -5975,7 +5968,7 @@ watch(() => route.query.log_view, (id) => {
                       v-for="span in flattenSpans(inlineTraceData.spans).slice(0, 20)"
                       :key="span.span_id"
                       class="inline-wf-row"
-                      :class="{ 'inline-wf-error': span.status === 'error' || span.http_status_code >= 400 }"
+                      :class="{ 'inline-wf-error': isSpanError(span) }"
                     >
                       <span class="inline-wf-svc">{{ span.service_name }}</span>
                       <div class="inline-wf-bar-track">
@@ -5984,7 +5977,7 @@ watch(() => route.query.log_view, (id) => {
                           :style="{
                             left: inlineSpanLeft(span, inlineTraceData!),
                             width: inlineSpanWidth(span, inlineTraceData!),
-                            background: span.status === 'error' || span.http_status_code >= 400 ? 'var(--error)' : dpServiceColor(span.service_name),
+                            background: isSpanError(span) ? 'var(--error)' : serviceColor(span.service_name, inlineTraceData.services),
                           }"
                         />
                       </div>

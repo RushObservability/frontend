@@ -7,6 +7,7 @@ import { useFeatures } from '../composables/useFeatures'
 import type { TraceResponse, SpanNode } from '../types'
 import VirtualTable from '../components/VirtualTable.vue'
 import TraceWaterfall from '../components/TraceWaterfall.vue'
+import { serviceColor as traceServiceColor } from '../lib/traceWaterfall'
 
 const props = defineProps<{ traceId: string }>()
 const router = useRouter()
@@ -72,16 +73,8 @@ function onWaterfallSelect(spanId: string) {
 
 
 
-// Color assignment per service
-const serviceColors = [
-  '#3b82f6', '#47b881', '#5b8dd9', '#9b7dd4',
-  '#e5584f', '#06b6d4', '#84cc16', '#f97316',
-]
-
 function serviceColor(name: string): string {
-  if (!trace.value) return serviceColors[0]!
-  const idx = trace.value.services.indexOf(name)
-  return serviceColors[idx % serviceColors.length]!
+  return traceServiceColor(name, trace.value?.services)
 }
 
 // ═══ Journey narrative ═══
