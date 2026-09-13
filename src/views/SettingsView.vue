@@ -5942,6 +5942,30 @@ function formatDate(ts: string): string {
         </form>
       </div>
 
+      <div v-if="isAdmin" class="section-card card session-timeout-card">
+        <div class="card-header">
+          <div class="card-header-text">
+            <h2 class="card-title">Idle logout</h2>
+            <p class="card-desc text-secondary">Sign users out after inactivity. Applies to all browser sessions, including SSO, across all tenants.</p>
+          </div>
+        </div>
+        <form class="session-timeout-form" @submit.prevent="saveSessionTimeout">
+          <div class="session-timeout-field">
+            <label class="form-label" for="idle-timeout-minutes">Idle timeout in minutes</label>
+            <input id="idle-timeout-minutes" v-model.number="idleTimeoutMinutes" type="number" min="1" :max="maxIdleTimeoutMinutes" step="1" required class="form-input mono"
+              :disabled="!sessionTimeout || sessionTimeoutLoading || sessionTimeoutSaving" aria-describedby="idle-timeout-help" @input="sessionTimeoutSaved = false" />
+            <p id="idle-timeout-help" class="text-secondary fs-11">Default: 120 minutes, or 2 hours. Background refreshes do not count as activity. Maximum: {{ maxIdleTimeoutMinutes }} minutes, the absolute session lifetime.</p>
+          </div>
+          <div class="session-timeout-actions">
+            <button type="submit" class="btn btn-primary" :disabled="!sessionTimeout || !idleTimeoutValid || !idleTimeoutChanged || sessionTimeoutSaving || sessionTimeoutLoading">{{ sessionTimeoutSaving ? 'Saving…' : 'Save idle timeout' }}</button>
+            <button v-if="!sessionTimeout && !sessionTimeoutLoading" type="button" class="action-btn" @click="loadSessionTimeout">Retry</button>
+            <span v-if="sessionTimeoutLoading" class="text-secondary fs-11" role="status">Loading session policy…</span>
+            <span v-if="sessionTimeoutSaved" class="text-secondary fs-11" role="status">Idle timeout saved.</span>
+          </div>
+          <p v-if="sessionTimeoutError" class="text-error fs-11" role="alert">{{ sessionTimeoutError }}</p>
+        </form>
+      </div>
+
       <div v-if="isAdmin" class="section-card card session-inventory-card">
         <div class="card-header">
           <div class="card-header-text">
