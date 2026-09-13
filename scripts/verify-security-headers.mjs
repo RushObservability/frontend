@@ -1,3 +1,5 @@
+import { containsRemoteFontReference } from './security-policy.mjs'
+
 const target = process.argv[2]
 if (!target) {
   console.error('Usage: node scripts/verify-security-headers.mjs <url>')
@@ -35,7 +37,7 @@ for (const directive of [
 ]) {
   if (!csp.includes(directive)) throw new Error(`Content-Security-Policy is missing ${directive}`)
 }
-if (csp.includes("'unsafe-inline'") || /fonts\.(?:googleapis|gstatic)\.com/.test(csp)) {
+if (csp.includes("'unsafe-inline'") || containsRemoteFontReference(csp)) {
   throw new Error('Content-Security-Policy contains an unsafe inline or third-party font allowance')
 }
 

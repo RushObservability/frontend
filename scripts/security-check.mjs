@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
+import { containsRemoteFontReference } from './security-policy.mjs'
 
 const root = process.cwd()
 const failures = []
@@ -97,7 +98,7 @@ for (const directive of [
 ]) {
   if (!headers.includes(directive)) fail(`CSP is missing ${directive}`)
 }
-if (headers.includes("'unsafe-inline'") || /fonts\.(?:googleapis|gstatic)\.com/.test(headers)) {
+if (headers.includes("'unsafe-inline'") || containsRemoteFontReference(headers)) {
   fail('CSP must not allow inline styles/scripts or third-party font hosts')
 }
 if (!headers.includes('Content-Security-Policy-Report-Only') || !headers.includes('/api/v1/security/csp-report')) {
@@ -112,7 +113,7 @@ if (!ciWorkflow.includes('npm run security:headers -- http://127.0.0.1:4174/')) 
 }
 
 const indexHtml = read('index.html')
-if (/fonts\.(?:googleapis|gstatic)\.com/.test(indexHtml)) {
+if (containsRemoteFontReference(indexHtml)) {
   fail('index.html must use bundled fonts instead of third-party font hosts')
 }
 
