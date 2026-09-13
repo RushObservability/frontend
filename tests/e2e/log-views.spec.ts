@@ -1,6 +1,17 @@
 import { test, expect, type Page } from '@playwright/test'
 import type { LogView } from '../../src/lib/logViews'
 
+let pageErrors: string[] = []
+
+test.beforeEach(({ page }) => {
+  pageErrors = []
+  page.on('pageerror', error => pageErrors.push(error.message))
+})
+
+test.afterEach(() => {
+  expect(pageErrors, 'Log views must not cause uncaught browser errors').toEqual([])
+})
+
 async function stubLogApi(page: Page, initialViews: LogView[] = [], role = 'admin') {
   const state = { views: initialViews, searches: [] as Record<string, any>[], saves: [] as Record<string, any>[], userId: 'test-user' }
   const personal = new Map<string, LogView[]>()
@@ -10,6 +21,7 @@ async function stubLogApi(page: Page, initialViews: LogView[] = [], role = 'admi
     const path = new URL(request.url()).pathname
     let body: unknown = { keys: [], groups: [], users: [], links: [], channels: [], skills: [], values: [], providers: [], mappings: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: state.userId, username: 'tester', role, display_name: 'Tester' } }
+    if (path === '/api/v1/auth/admin/sessions') body = { sessions: [] }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }, { id: 'other', name: 'other', enabled: true }] }
     if (path === '/api/v1/services') body = { services: [] }
     if (path === '/api/v1/settings/log-views') {
