@@ -475,3 +475,9 @@ select.filter-input { cursor: pointer; padding-right: 6px; }
 @keyframes audit-spin {
   to { transform: rotate(360deg); }
 }
+.audit-scope-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}

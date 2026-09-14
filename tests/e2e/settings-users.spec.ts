@@ -98,7 +98,7 @@ test('failed group loading is visible and can be retried', async ({ page }) => {
   await expect(page.getByText('Some user groups could not be loaded.', { exact: false })).toBeVisible()
   await expect(page.locator('#user-directory-table tbody tr').first()).toContainText('Unavailable')
   state.failGroups = false
-  await page.locator('#panel-users').getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByRole('button', { name: 'Retry user group loading', exact: true }).click()
   await expect(page.getByText('Some user groups could not be loaded.', { exact: false })).toHaveCount(0)
   await expect(page.locator('#user-directory-table tbody tr').first()).toContainText('Admin')
 })

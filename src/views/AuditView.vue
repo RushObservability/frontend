@@ -187,6 +187,8 @@ onMounted(() => {
       </h2>
     </div>
 
+    <p class="audit-scope-note">User activity, authentication, and configuration changes. Ingestion failures are recorded in the API logs.</p>
+
     <!-- Integrity badge -->
     <div
       class="integrity-banner"
