@@ -358,73 +358,252 @@ select.filter-input { cursor: pointer; padding-right: 6px; }
   background: color-mix(in srgb, var(--error) 12%, transparent);
 }
 
-/* ── Detail panel: SIEM field/value table (Splunk "Fields") ── */
-/* Flat, dense, edge-to-edge. Recessed into bg-void so it reads as part of the
-   row without a loud accent. No cards, no chips. */
+/* ── Expanded event detail ── */
 .audit-detail {
-  padding: 0;
-  background: var(--bg-void);
+  padding: var(--sp-5) var(--sp-6) var(--sp-4) 54px;
+  background: var(--bg-surface);
   border-bottom: 1px solid var(--border-default);
+  box-shadow: inset 3px 0 0 var(--amber);
 }
 
-.field-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
+.audit-detail-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  padding-bottom: var(--sp-3);
 }
 
-.field-row { border-bottom: 1px solid var(--border-subtle); }
-.field-row:last-child { border-bottom: none; }
-.field-row:hover { background: var(--bg-raised); }
-
-.field-key {
-  width: 180px;
-  padding: 5px var(--sp-3) 5px var(--sp-4);
-  vertical-align: top;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  border-right: 1px solid var(--border-subtle);
-  user-select: none;
+.audit-detail-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 
-.field-val {
-  padding: 5px var(--sp-4);
-  vertical-align: top;
-  font-size: 12px;
+.audit-detail-description {
+  max-width: 760px;
+  margin: 0;
   color: var(--text-primary);
-  word-break: break-word;
-  white-space: pre-wrap;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.5;
 }
 
-.field-hash { color: var(--text-secondary); word-break: break-all; }
+.audit-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0 var(--sp-8);
+}
 
-/* Raw JSON payloads — labelled, recessed code blocks. */
-.raw-block { border-top: 1px solid var(--border-default); }
+.audit-detail-section {
+  min-width: 0;
+  padding: var(--sp-5) 0 var(--sp-4);
+}
 
-.raw-head {
-  padding: 6px var(--sp-4);
-  font-family: var(--font-mono);
+.audit-detail-section + .audit-detail-section {
+  padding-left: 0;
+}
+
+.audit-detail-section h3,
+.audit-payload-head h3 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.audit-field-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4) var(--sp-5);
+  margin: var(--sp-4) 0 0;
+}
+
+.audit-field {
+  min-width: 0;
+}
+
+.audit-field-wide {
+  grid-column: 1 / -1;
+}
+
+.audit-field dt,
+.audit-hash-list dt {
+  margin-bottom: 4px;
+  color: var(--text-muted);
   font-size: 10px;
   font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  background: var(--bg-raised);
-  border-bottom: 1px solid var(--border-subtle);
 }
 
-.raw-json {
+.audit-field dd,
+.audit-hash-list dd {
+  min-width: 0;
   margin: 0;
-  padding: var(--sp-3) var(--sp-4);
-  font-size: 11px;
-  line-height: 1.55;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 360px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.audit-inline-type {
+  margin-left: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.audit-payloads {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0 var(--sp-4);
+}
+
+.audit-payload {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  background: var(--bg-raised);
+}
+
+.audit-payload:only-child {
+  grid-column: 1 / -1;
+}
+
+.audit-payload-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 9px var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.audit-payload-head > span {
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.audit-json {
+  max-height: 280px;
+  margin: 0;
+  padding: var(--sp-3);
   overflow: auto;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.audit-integrity {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.audit-integrity summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.audit-integrity summary::-webkit-details-marker {
+  display: none;
+}
+
+.audit-integrity summary::before {
+  content: '›';
+  margin-right: 2px;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 0.18s ease;
+}
+
+.audit-integrity[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.audit-integrity summary > span:first-child {
+  margin-right: auto;
+}
+
+.audit-integrity-summary {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.audit-hash-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-5);
+  margin: 0;
+  padding: 0 0 var(--sp-4) 22px;
+}
+
+.audit-hash-list dd {
+  color: var(--text-secondary);
+  font-size: 10px;
+  word-break: break-all;
+}
+
+@media (max-width: 900px) {
+  .audit-detail {
+    padding: var(--sp-4);
+  }
+
+  .audit-detail-grid,
+  .audit-payloads {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .audit-detail-section + .audit-detail-section {
+    padding-left: 0;
+    border-left: none;
+  }
+
+  .audit-payload:only-child {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .audit-detail-intro {
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+
+  .audit-detail-intro .outcome-pill {
+    align-self: flex-start;
+  }
+
+  .audit-field-list,
+  .audit-hash-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .audit-hash-list {
+    padding-left: 0;
+  }
 }
 
 /* ── Pagination ── */
