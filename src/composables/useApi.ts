@@ -55,6 +55,7 @@ import type {
   LabelBreakdownResponse,
   UsageMeteringSummary,
   UsageMeteringBreakdown,
+  UsageMeteringTenantBreakdown,
   UsageMeteringTenantsResponse,
   AnomalyRule,
   AnomalyEvent,
@@ -956,17 +957,28 @@ export function useApi() {
     signal_type?: string
     days?: number
     limit?: number
+    global?: boolean
+    tenant_id?: string
   }): Promise<UsageResponse> {
     const qs = new URLSearchParams()
     if (params?.signal_type) qs.set('signal_type', params.signal_type)
     if (params?.days) qs.set('days', String(params.days))
     if (params?.limit) qs.set('limit', String(params.limit))
+    if (params?.global) qs.set('global', 'true')
+    if (params?.tenant_id) qs.set('tenant_id', params.tenant_id)
     const query = qs.toString()
     return await request(`/usage${query ? '?' + query : ''}`)
   }
 
-  async function getLabelBreakdown(metric: string): Promise<LabelBreakdownResponse> {
-    return await request(`/usage/cardinality/${encodePathSegment(metric)}`)
+  async function getLabelBreakdown(metric: string, params?: {
+    global?: boolean
+    tenant_id?: string
+  }): Promise<LabelBreakdownResponse> {
+    const qs = new URLSearchParams()
+    if (params?.global) qs.set('global', 'true')
+    if (params?.tenant_id) qs.set('tenant_id', params.tenant_id)
+    const query = qs.toString()
+    return await request(`/usage/cardinality/${encodePathSegment(metric)}${query ? '?' + query : ''}`)
   }
 
   // ── Usage Metering API (per-tenant ingest volume) ──
@@ -975,11 +987,13 @@ export function useApi() {
     from?: string
     to?: string
     global?: boolean
+    tenant_id?: string
   }): Promise<UsageMeteringSummary> {
     const qs = new URLSearchParams()
     if (params?.from) qs.set('from', params.from)
     if (params?.to) qs.set('to', params.to)
     if (params?.global) qs.set('global', 'true')
+    if (params?.tenant_id) qs.set('tenant_id', params.tenant_id)
     const query = qs.toString()
     return await request(`/usage/summary${query ? '?' + query : ''}`)
   }
@@ -989,14 +1003,31 @@ export function useApi() {
     to?: string
     interval?: string
     signal?: string
+    global?: boolean
+    tenant_id?: string
   }): Promise<UsageMeteringBreakdown> {
     const qs = new URLSearchParams()
     if (params?.from) qs.set('from', params.from)
     if (params?.to) qs.set('to', params.to)
     if (params?.interval) qs.set('interval', params.interval)
     if (params?.signal) qs.set('signal', params.signal)
+    if (params?.global) qs.set('global', 'true')
+    if (params?.tenant_id) qs.set('tenant_id', params.tenant_id)
     const query = qs.toString()
     return await request(`/usage/breakdown${query ? '?' + query : ''}`)
+  }
+
+  async function getUsageMeteringTenantBreakdown(params?: {
+    from?: string
+    to?: string
+    interval?: string
+  }): Promise<UsageMeteringTenantBreakdown> {
+    const qs = new URLSearchParams()
+    if (params?.from) qs.set('from', params.from)
+    if (params?.to) qs.set('to', params.to)
+    if (params?.interval) qs.set('interval', params.interval)
+    const query = qs.toString()
+    return await request(`/usage/tenant-breakdown${query ? '?' + query : ''}`)
   }
 
   async function getUsageMeteringTenants(params?: {
@@ -2102,7 +2133,7 @@ export function useApi() {
     getStoragePartitions,
     getIngestBuffer,
     getUsage, getLabelBreakdown,
-    getUsageMeteringSummary, getUsageMeteringBreakdown, getUsageMeteringTenants,
+    getUsageMeteringSummary, getUsageMeteringBreakdown, getUsageMeteringTenantBreakdown, getUsageMeteringTenants,
     rumApps, queryRumEvents, rumVitals, rumPages, rumErrors, rumSessions, rumSession,
     promQuery, promQueryRange, promLabels, promLabelValues,
     getArgoApps, getArgoApp, getArgoAppSets,

@@ -128,6 +128,58 @@ describe('tenant-aware API transport', () => {
     ])
   })
 
+  it('passes admin-selected scopes to ingest metering endpoints', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        tenant_id: 'all', from: '', to: '', signals: {},
+        totals: { events_count: 0, bytes_count: 0 },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        tenant_id: 'customer-a', interval: 'hour', buckets: [],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        interval: 'day', buckets: [],
+      }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { useApi } = await import('./useApi')
+    const api = useApi()
+    await api.getUsageMeteringSummary({ global: true })
+    await api.getUsageMeteringBreakdown({ tenant_id: 'customer-a', interval: 'hour' })
+    await api.getUsageMeteringTenantBreakdown({ interval: 'day' })
+
+    const summaryUrl = new URL(fetchMock.mock.calls[0]?.[0], 'http://rush.local')
+    const breakdownUrl = new URL(fetchMock.mock.calls[1]?.[0], 'http://rush.local')
+    const tenantBreakdownUrl = new URL(fetchMock.mock.calls[2]?.[0], 'http://rush.local')
+    expect(summaryUrl.searchParams.get('global')).toBe('true')
+    expect(breakdownUrl.searchParams.get('tenant_id')).toBe('customer-a')
+    expect(breakdownUrl.searchParams.get('interval')).toBe('hour')
+    expect(tenantBreakdownUrl.pathname).toBe('/api/v1/usage/tenant-breakdown')
+    expect(tenantBreakdownUrl.searchParams.get('interval')).toBe('day')
+  })
+
+  it('passes the Usage tenant scope to inventory and cardinality reads', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        usage: [], total: 0, unused: [], cardinality: [],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        metric_name: 'http_requests_total', labels: [], total_series: 0,
+      }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { useApi } = await import('./useApi')
+    const api = useApi()
+    await api.getUsage({ global: true, days: 30 })
+    await api.getLabelBreakdown('http_requests_total', { tenant_id: 'test' })
+
+    const usageUrl = new URL(fetchMock.mock.calls[0]?.[0], 'http://rush.local')
+    const cardinalityUrl = new URL(fetchMock.mock.calls[1]?.[0], 'http://rush.local')
+    expect(usageUrl.searchParams.get('global')).toBe('true')
+    expect(usageUrl.searchParams.get('days')).toBe('30')
+    expect(cardinalityUrl.searchParams.get('tenant_id')).toBe('test')
+  })
+
   it('passes an abort signal to monitor list refreshes', async () => {
     let requestSignal: AbortSignal | undefined
     const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
