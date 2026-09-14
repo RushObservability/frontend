@@ -1,8 +1,8 @@
 import { test, expect, type Page } from '@playwright/test'
-import type { TraceResponse } from '../../src/types'
+import type { CountBucket, TraceResponse } from '../../src/types'
 
 async function stubExplore(page: Page) {
-  const state = { total: 410_936, kind: 'exact', summaryFails: false, searches: [] as Record<string, any>[], trace: null as TraceResponse | null }
+  const state = { total: 410_936, kind: 'exact', summaryFails: false, searches: [] as Record<string, any>[], trace: null as TraceResponse | null, histogram: null as CountBucket[] | null }
   await page.route('**/api/v1/**', async route => {
     const path = new URL(route.request().url()).pathname
     let body: unknown = { views: [], services: [], buckets: [], keys: [], groups: [], values: [] }
@@ -34,7 +34,7 @@ async function stubExplore(page: Page) {
         count: query.include_summary ? { value: state.total, kind: state.kind } : { value: rows.length, kind: 'capped' },
         rows: query.include_rows ? rows : [], next_cursor: query.include_rows ? 'next-page' : null,
         summary: {
-          histogram: [{ bucket: new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString().slice(0, 19).replace('T', ' '), count: state.total, error_count: 1_600 }],
+          histogram: state.histogram ?? [{ bucket: new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString().slice(0, 19).replace('T', ' '), count: state.total, error_count: 1_600 }],
           facets: {
             services: Array.from({ length: 9 }, (_, index) => ({ key: `service-${index}`, count: 1000 })),
             statuses: [{ key: 'error', count: 1_600 }, { key: 'warn', count: 3_800 }], methods: [],
@@ -46,6 +46,78 @@ async function stubExplore(page: Page) {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
   })
   return state
+}
+
+for (const mode of ['logs', 'traces', 'spans']) {
+  for (const width of [1440, 390]) {
+    test(`${mode} volume inspection stays outside the bars at ${width}px`, async ({ page }, testInfo) => {
+      const state = await stubExplore(page)
+      const now = Math.floor(Date.now() / 60_000) * 60_000
+      state.histogram = Array.from({ length: 60 }, (_, index) => ({
+        bucket: new Date(now - (59 - index) * 60_000).toISOString().slice(0, 19).replace('T', ' '),
+        count: index === 30 ? 9_500 : 1_000 + (index % 5) * 200,
+        error_count: index === 30 ? 500 : 0,
+      }))
+      await page.setViewportSize({ width, height: 1000 })
+      await page.goto(`/?mode=${mode}&t=60`)
+      const panel = page.locator('.signal-timeline')
+      const plot = panel.locator('.timeline-bars')
+      const readout = panel.locator('.timeline-tooltip')
+      await expect(plot).toBeVisible()
+      await plot.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }))
+      const plotBox = (await plot.boundingBox())!
+      for (const position of [0.01, 0.51, 0.99]) {
+        await page.mouse.move(plotBox.x + plotBox.width * position, plotBox.y + plotBox.height / 2)
+        await expect(readout).toBeVisible()
+        await expect(panel.locator('.timeline-column--active')).toHaveCount(1)
+        const detailsBox = (await readout.boundingBox())!
+        expect(detailsBox.y + detailsBox.height <= plotBox.y || detailsBox.y >= plotBox.y + plotBox.height).toBe(true)
+        expect(detailsBox.y).toBeGreaterThanOrEqual(0)
+        const panelBox = (await panel.boundingBox())!
+        expect(detailsBox.x).toBeGreaterThanOrEqual(panelBox.x)
+        expect(detailsBox.x + detailsBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width)
+        expect((await plot.boundingBox())!).toEqual(plotBox)
+      }
+      const spike = panel.locator('.timeline-column').filter({ has: page.locator('.timeline-stack') }).nth(30)
+      await spike.hover()
+      await expect(readout).toContainText('9,500')
+      await expect(readout).toContainText('500')
+      await page.screenshot({ path: testInfo.outputPath(`${mode}-volume-inspection-${width}.png`) })
+      await page.mouse.move(plotBox.x, plotBox.y - 10)
+      await expect(readout).toBeHidden()
+      await plot.focus()
+      await page.keyboard.press('Home')
+      await expect(readout).toBeVisible()
+      const firstTime = await readout.locator('.timeline-tooltip-time').innerText()
+      await page.keyboard.press('ArrowRight')
+      await expect(readout.locator('.timeline-tooltip-time')).not.toHaveText(firstTime)
+      await page.keyboard.press('Escape')
+      await expect(readout).toBeHidden()
+      await page.keyboard.press('End')
+      await expect(readout).toBeVisible()
+      await page.keyboard.press('Tab')
+      await expect(readout).toBeHidden()
+      // Near the viewport top, put the popup below the plot instead of clipping it.
+      await plot.focus()
+      await plot.evaluate(el => el.scrollIntoView({ block: 'start', behavior: 'instant' }))
+      await page.keyboard.press('Home')
+      await expect(readout).toHaveClass(/timeline-tooltip--below/)
+      const topPlot = (await plot.boundingBox())!
+      const belowPopup = (await readout.boundingBox())!
+      expect(belowPopup.y).toBeGreaterThanOrEqual(topPlot.y + topPlot.height)
+      await page.keyboard.press('Escape')
+      // The floating tooltip must not intercept zoom selection.
+      await plot.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }))
+      const dragBox = (await plot.boundingBox())!
+      await page.mouse.move(dragBox.x + dragBox.width * 0.2, dragBox.y + 30)
+      await page.mouse.down()
+      await page.mouse.move(dragBox.x + dragBox.width * 0.7, dragBox.y + 30)
+      await expect(readout).toBeHidden()
+      await expect(panel.locator('.timeline-selection')).toBeVisible()
+      await page.mouse.up()
+      await expect(panel.getByRole('button', { name: 'Reset zoom' })).toBeVisible()
+    })
+  }
 }
 
 for (const mode of ['traces', 'logs']) {

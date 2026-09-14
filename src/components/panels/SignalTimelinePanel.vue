@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CountBucket, ExploreCountKind } from '../../types'
 import PanelCard from '../PanelCard.vue'
 
@@ -34,10 +34,31 @@ const emit = defineEmits<{
 }>()
 
 const plotEl = ref<HTMLElement | null>(null)
+const tooltipEl = ref<HTMLElement | null>(null)
+const tooltipBelow = ref(false)
 const hoveredIndex = ref<number | null>(null)
 const dragStart = ref<number | null>(null)
 const dragEnd = ref<number | null>(null)
 const dragCompare = ref(false)
+
+function updateTooltipPlacement() {
+  if (!plotEl.value) return
+  const height = tooltipEl.value?.offsetHeight ?? 160
+  tooltipBelow.value = plotEl.value.getBoundingClientRect().top < height + 20
+}
+
+watch(hoveredIndex, async () => {
+  await nextTick()
+  updateTooltipPlacement()
+})
+onMounted(() => {
+  window.addEventListener('scroll', updateTooltipPlacement, true)
+  window.addEventListener('resize', updateTooltipPlacement)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', updateTooltipPlacement, true)
+  window.removeEventListener('resize', updateTooltipPlacement)
+})
 
 const title = computed(() => props.signal === 'logs' ? 'Log volume' : props.resultLabel === 'spans' ? 'Span volume' : 'Trace volume')
 const itemLabel = computed(() => props.resultLabel ?? (props.signal === 'logs' ? 'events' : 'spans'))
@@ -320,6 +341,8 @@ function errorHeight(bucket: CountBucket): number {
           @keydown.right.prevent="moveKeyboardHover(1)"
           @keydown.home.prevent="hoveredIndex = 0"
           @keydown.end.prevent="hoveredIndex = buckets.length - 1"
+          @keydown.esc.prevent="hoveredIndex = null"
+          @blur="hoveredIndex = null"
         >
           <div
             v-for="(bucket, index) in buckets"
@@ -360,12 +383,13 @@ function errorHeight(bucket: CountBucket): number {
 
           <div
             v-if="hoveredBucket && hoveredIndex !== null && dragStart === null"
+            ref="tooltipEl"
             class="timeline-tooltip"
-            :class="{
-              'timeline-tooltip--start': hoveredIndex < buckets.length * 0.2,
-              'timeline-tooltip--end': hoveredIndex > buckets.length * 0.8,
-            }"
-            :style="{ left: `${((hoveredIndex + 0.5) / buckets.length) * 100}%` }"
+            :class="{ 'timeline-tooltip--below': tooltipBelow }"
+            :style="{ left: `clamp(0px, calc(${((hoveredIndex + 0.5) / buckets.length) * 100}% - 92px), calc(100% - 184px))` }"
+            role="tooltip"
+            aria-live="polite"
+            aria-atomic="true"
           >
             <div class="timeline-tooltip-time mono">{{ hoveredBucket.time }}</div>
             <div><span>Total</span><strong class="mono">{{ hoveredBucket.total.toLocaleString() }}</strong></div>
@@ -654,42 +678,38 @@ function errorHeight(bucket: CountBucket): number {
 .timeline-tooltip {
   position: absolute;
   z-index: 8;
-  top: 8px;
-  width: 164px;
-  padding: 9px 10px;
-  transform: translateX(-50%);
+  bottom: calc(100% + 12px);
+  width: 184px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
   color: var(--text-secondary);
   background: var(--bg-overlay);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  box-shadow: 0 10px 28px rgba(16, 24, 40, .16);
+  box-shadow: 0 4px 16px rgba(16, 24, 40, .16);
   font-size: 10px;
   pointer-events: none;
 }
 
-.timeline-tooltip--start { transform: translateX(4px); }
-.timeline-tooltip--end { transform: translateX(calc(-100% - 4px)); }
-
+.timeline-tooltip--below { top: calc(100% + 32px); bottom: auto; }
 .timeline-tooltip-time {
-  padding-bottom: 6px;
-  margin-bottom: 5px;
-  color: var(--text-primary);
+  padding-bottom: 4px;
+  margin-bottom: 4px;
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 10px;
+  color: var(--text-primary);
   font-weight: 650;
 }
-
 .timeline-tooltip > div:not(.timeline-tooltip-time) {
   display: flex;
-  min-height: 19px;
+  min-height: 20px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
 }
-
-.timeline-tooltip strong { color: var(--text-primary); font-size: 10px; }
+.timeline-tooltip strong { color: var(--text-primary); }
 .timeline-tooltip .timeline-tooltip-error { color: var(--error); }
-.timeline-tooltip-rate { padding-top: 4px; margin-top: 3px; border-top: 1px solid var(--border-subtle); }
+.timeline-tooltip-rate { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border-subtle); }
 
 .timeline-x-axis {
   position: relative;

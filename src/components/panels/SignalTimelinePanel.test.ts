@@ -21,4 +21,12 @@ describe('SignalTimelinePanel', () => {
     expect(source).toContain("props.signal === 'logs' ? 'Log volume' : props.resultLabel === 'spans' ? 'Span volume' : 'Trace volume'")
     expect(source).toContain("props.resultLabel ?? (props.signal === 'logs' ? 'events' : 'spans')")
   })
+
+  it('keeps the floating tooltip outside the plot and clears keyboard inspection on exit', () => {
+    expect(source).toContain('bottom: calc(100% + 12px)')
+    expect(source).toContain('timeline-tooltip--below')
+    expect(source).toContain('role="tooltip"')
+    expect(source).toContain('@keydown.esc.prevent="hoveredIndex = null"')
+    expect(source).toContain('@blur="hoveredIndex = null"')
+  })
 })
