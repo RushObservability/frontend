@@ -5852,7 +5852,15 @@ function formatDate(ts: string): string {
         </div>
         <div v-if="userGroupsError" class="error-row" role="status">
           <span>{{ userGroupsError }}</span>
-          <button type="button" class="action-btn" :disabled="usersLoading" @click="loadUsers">Retry</button>
+          <button
+            type="button"
+            class="action-btn"
+            aria-label="Retry user group loading"
+            :disabled="usersLoading"
+            @click="loadAllUserGroups"
+          >
+            Retry
+          </button>
         </div>
         <div v-if="usersLoading" class="keys-empty text-muted" role="status">Loading users…</div>
         <DataTable v-else-if="pagedUsers.length" id="user-directory-table" class="user-directory-table" bare>
