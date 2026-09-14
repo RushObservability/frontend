@@ -755,6 +755,13 @@ export interface UsageEntry {
   source: string
   last_queried_at: string
   query_count: number
+  low_duration_ms?: number | null
+  avg_duration_ms?: number | null
+  high_duration_ms?: number | null
+  low_result_rows?: number | null
+  avg_result_rows?: number | null
+  high_result_rows?: number | null
+  query_samples?: number
 }
 
 export interface UnusedMetric {
@@ -809,6 +816,16 @@ export interface UsageMeteringBreakdown {
   tenant_id: string
   interval: string
   buckets: UsageMeteringBreakdownBucket[]
+}
+
+export interface UsageMeteringTenantBreakdownBucket {
+  timestamp: string
+  tenants: Record<string, UsageMeteringSignalCounts>
+}
+
+export interface UsageMeteringTenantBreakdown {
+  interval: string
+  buckets: UsageMeteringTenantBreakdownBucket[]
 }
 
 export interface UsageMeteringTenantEntry {

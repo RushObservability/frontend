@@ -5,24 +5,27 @@ import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { useTenant } from '../composables/useTenant'
 import DataTable from '../components/DataTable.vue'
+import { TimeSeriesPanel, type TimeSeriesPanelSeries } from '../components/panels'
 import type {
   UsageResponse, UsageEntry, UnusedMetric, CardinalityEntry,
   LabelBreakdownResponse, LabelCardinality, UsageMeteringSummary,
-  UsageMeteringBreakdown, UsageMeteringTenantsResponse, StatsResponse,
-  PartitionStorage,
+  UsageMeteringBreakdown, UsageMeteringTenantBreakdown, UsageMeteringTenantsResponse, StatsResponse,
+  PartitionStorage, TimeDomain,
 } from '../types'
 
 const api = useApi()
 const route = useRoute()
 const router = useRouter()
 const { isAdmin } = useAuth()
-const { activeTenantName } = useTenant()
+const { activeTenantName, tenants, loadTenants } = useTenant()
 
 const usage = ref<UsageResponse | null>(null)
 const loadingUsage = ref(false)
 const loadError = ref('')
 const metering = ref<UsageMeteringSummary | null>(null)
+const overviewMetering = ref<UsageMeteringSummary | null>(null)
 const meteringBreakdown = ref<UsageMeteringBreakdown | null>(null)
+const tenantMeteringBreakdown = ref<UsageMeteringTenantBreakdown | null>(null)
 const tenantRanking = ref<UsageMeteringTenantsResponse | null>(null)
 const stats = ref<StatsResponse | null>(null)
 const ingestBuffer = ref<{ backend: string; pending_bytes: number; pending_count: number; max_bytes: number; used_pct: number; oldest_age_secs: number; committed_total: number } | null>(null)
@@ -35,13 +38,17 @@ const partitionsLoaded = ref(false)
 const partitionsError = ref('')
 const expandedCold = ref<Record<string, boolean>>({})
 
-const filterType = ref<string>('')
 const daysBack = ref(30)
+const selectedTimeDomain = ref<TimeDomain>()
+const allTenantsValue = '__all__'
+const selectedUsageTenant = ref(isAdmin.value ? allTenantsValue : activeTenantName.value)
+let usageRequestId = 0
 
-const usageSectionKeys = ['overview', 'ingest', 'metrics', 'apm', 'logs', 'cardinality', 'unused'] as const
+const usageSectionKeys = ['overview', 'ingest', 'metrics', 'apm', 'logs'] as const
 type UsageSection = typeof usageSectionKeys[number]
 const activeUsageSection = computed<UsageSection>(() => {
   const tab = String(route.params.tab || '')
+  if (tab === 'cardinality' || tab === 'unused') return 'metrics'
   return usageSectionKeys.includes(tab as UsageSection) ? tab as UsageSection : 'overview'
 })
 
@@ -67,26 +74,46 @@ const expandedMetric = ref<string | null>(null)
 const labelBreakdown = ref<LabelBreakdownResponse | null>(null)
 const loadingBreakdown = ref(false)
 
-onMounted(() => {
+onMounted(async () => {
+  if (isAdmin.value) await loadTenants()
+  selectedUsageTenant.value = isAdmin.value ? allTenantsValue : activeTenantName.value
   loadUsage()
   loadStats()
   if (isAdmin.value) loadIngestBuffer()
 })
 
+function selectedUsageScope() {
+  return selectedUsageTenant.value === allTenantsValue
+    ? { global: true }
+    : selectedUsageTenant.value !== activeTenantName.value
+      ? { tenant_id: selectedUsageTenant.value }
+      : {}
+}
+
 async function loadUsage() {
+  const requestId = ++usageRequestId
+  const requestedTenant = selectedUsageTenant.value
   loadingUsage.value = true
   loadError.value = ''
   const to = new Date()
   const from = new Date(to.getTime() - daysBack.value * 86400000)
   const range = { from: from.toISOString(), to: to.toISOString() }
+  const usageScope = selectedUsageScope()
+  selectedTimeDomain.value = { from: from.getTime() / 1000, to: to.getTime() / 1000 }
 
   // The original signal-usage view must remain useful when a newer optional
   // metering endpoint is unavailable during a rolling backend deployment.
-  const [signalResult, ingestResult, breakdownResult] = await Promise.allSettled([
-    api.getUsage({ signal_type: filterType.value || undefined, days: daysBack.value, limit: 200 }),
-    api.getUsageMeteringSummary(range),
-    api.getUsageMeteringBreakdown({ ...range, interval: daysBack.value > 31 ? 'day' : 'hour' }),
+  const interval = daysBack.value > 31 ? 'day' : 'hour'
+  const [signalResult, ingestResult, breakdownResult, tenantBreakdownResult] = await Promise.allSettled([
+    api.getUsage({ days: daysBack.value, limit: 200, ...usageScope }),
+    api.getUsageMeteringSummary({ ...range, ...usageScope }),
+    api.getUsageMeteringBreakdown({ ...range, ...usageScope, interval }),
+    requestedTenant === allTenantsValue
+      ? api.getUsageMeteringTenantBreakdown({ ...range, interval })
+      : Promise.resolve(null),
   ])
+
+  if (requestId !== usageRequestId) return
 
   if (signalResult.status === 'fulfilled') {
     usage.value = signalResult.value
@@ -95,18 +122,30 @@ async function loadUsage() {
     loadError.value = signalResult.reason?.message || 'Unable to load signal usage.'
   }
   metering.value = ingestResult.status === 'fulfilled' ? ingestResult.value : null
-  meteringBreakdown.value = breakdownResult.status === 'fulfilled' ? breakdownResult.value : null
-
-  if (isAdmin.value) {
-    try {
-      tenantRanking.value = await api.getUsageMeteringTenants({ ...range, limit: 25 })
-    } catch { tenantRanking.value = null }
+  if (ingestResult.status === 'fulfilled' && requestedTenant === activeTenantName.value) {
+    overviewMetering.value = ingestResult.value
   }
-  loadingUsage.value = false
+  meteringBreakdown.value = breakdownResult.status === 'fulfilled' ? breakdownResult.value : null
+  tenantMeteringBreakdown.value = tenantBreakdownResult.status === 'fulfilled'
+    ? tenantBreakdownResult.value
+    : null
+
+  if (isAdmin.value && requestedTenant === allTenantsValue) {
+    try {
+      const result = await api.getUsageMeteringTenants({ ...range, limit: 25 })
+      if (requestId === usageRequestId) tenantRanking.value = result
+    } catch {
+      if (requestId === usageRequestId) tenantRanking.value = null
+    }
+  } else if (requestId === usageRequestId) {
+    tenantRanking.value = null
+  }
+  if (requestId === usageRequestId) loadingUsage.value = false
 }
 
-function selectType(t: string) {
-  filterType.value = t
+function selectUsageTenant() {
+  expandedMetric.value = null
+  labelBreakdown.value = null
   loadUsage()
 }
 
@@ -164,7 +203,7 @@ async function toggleMetric(metric: string) {
   expandedMetric.value = metric
   loadingBreakdown.value = true
   try {
-    labelBreakdown.value = await api.getLabelBreakdown(metric)
+    labelBreakdown.value = await api.getLabelBreakdown(metric, selectedUsageScope())
   } catch {
     labelBreakdown.value = null
   } finally {
@@ -173,6 +212,15 @@ async function toggleMetric(metric: string) {
 }
 
 const usageList = computed<UsageEntry[]>(() => usage.value?.usage ?? [])
+const usageTenantOptions = computed(() => {
+  const names = new Set(tenants.value.map(tenant => tenant.name))
+  names.add(activeTenantName.value)
+  return [...names].sort((a, b) => a.localeCompare(b))
+})
+const selectedUsageTenantLabel = computed(() => selectedUsageTenant.value === allTenantsValue
+  ? 'All tenants'
+  : selectedUsageTenant.value)
+const isGlobalUsageScope = computed(() => selectedUsageTenant.value === allTenantsValue)
 const usageGroups = computed(() => [
   {
     key: 'metric',
@@ -189,7 +237,7 @@ const usageGroups = computed(() => [
   {
     key: 'log',
     label: 'Logs',
-    description: 'Log searches made during this window, with the most recent activity and query count.',
+    description: 'Log searches made during this window, including query frequency, latency, and returned rows.',
     entries: usageList.value.filter(row => row.signal_type === 'log'),
   },
 ])
@@ -197,6 +245,11 @@ const unusedList = computed<UnusedMetric[]>(() => usage.value?.unused ?? [])
 const cardinalityList = computed<CardinalityEntry[]>(() => usage.value?.cardinality ?? [])
 const totalTracked = computed(() => usage.value?.total ?? 0)
 const totalSeries = computed(() => cardinalityList.value.reduce((sum, c) => sum + c.series_count, 0))
+const metricInventoryCount = computed(() => new Set([
+  ...usageGroups.value[0]!.entries.map(row => row.signal_name),
+  ...cardinalityList.value.map(row => row.metric_name),
+  ...unusedList.value.map(row => row.metric_name),
+]).size)
 const activeUsageGroup = computed(() => usageGroups.value.find(group => group.key === (
   activeUsageSection.value === 'apm' ? 'span' : activeUsageSection.value.slice(0, -1)
 )))
@@ -244,29 +297,59 @@ const ingestSignals = computed(() => Object.entries(metering.value?.signals ?? {
 const usageNavigation = computed(() => [
   { key: 'overview' as UsageSection, label: 'Overview', count: null },
   { key: 'ingest' as UsageSection, label: 'Ingest', count: metering.value?.totals.events_count ?? null },
-  { key: 'metrics' as UsageSection, label: 'Metrics', count: usageGroups.value[0]?.entries.length ?? 0 },
-  { key: 'apm' as UsageSection, label: 'APM / Spans', count: usageGroups.value[1]?.entries.length ?? 0 },
-  { key: 'logs' as UsageSection, label: 'Logs', count: usageGroups.value[2]?.entries.length ?? 0 },
-  { key: 'cardinality' as UsageSection, label: 'Cardinality', count: cardinalityList.value.length },
-  { key: 'unused' as UsageSection, label: 'Unused metrics', count: unusedList.value.length },
+  { key: 'metrics' as UsageSection, label: 'Metrics', count: metricInventoryCount.value },
+  { key: 'apm' as UsageSection, label: 'APM / Spans', count: null },
+  { key: 'logs' as UsageSection, label: 'Logs', count: null },
 ])
 const activeUsageLabel = computed(() => usageNavigation.value.find(item => item.key === activeUsageSection.value)?.label ?? 'Overview')
-const ingestTimeline = computed(() => (meteringBreakdown.value?.buckets ?? []).map(bucket => ({
-  timestamp: bucket.timestamp,
-  bytes: Object.values(bucket.signals).reduce((sum, value) => sum + value.bytes_count, 0),
-  events: Object.values(bucket.signals).reduce((sum, value) => sum + value.events_count, 0),
-})))
-const ingestTimelineMax = computed(() => Math.max(1, ...ingestTimeline.value.map(point => point.bytes)))
-const ingestTimelinePath = computed(() => {
-  const points = ingestTimeline.value
-  if (!points.length) return ''
-  const width = 680
-  const height = 118
-  return points.map((point, index) => {
-    const x = points.length === 1 ? width / 2 : (index / (points.length - 1)) * width
-    const y = height - (point.bytes / ingestTimelineMax.value) * (height - 10) - 5
-    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`
-  }).join(' ')
+const ingestChartSeries = computed<TimeSeriesPanelSeries[]>(() => ingestSignals.value.flatMap(signal => {
+  const points = (meteringBreakdown.value?.buckets ?? []).flatMap(bucket => {
+    const timestamp = new Date(bucket.timestamp).getTime() / 1000
+    return Number.isFinite(timestamp)
+      ? [[timestamp, bucket.signals[signal.signal]?.bytes_count ?? 0] as [number, number]]
+      : []
+  })
+  return points.length ? [{
+    name: signalLabel(signal.signal),
+    color: signalColor(signal.signal),
+    points,
+  }] : []
+}))
+const ingestBucketSeconds = computed(() => meteringBreakdown.value?.interval === 'day' ? 86_400 : 3_600)
+const tenantSeriesColors = ['#2f6fec', '#e2884d', '#4caf7c', '#9c6ade', '#d4605a', '#47a3a3', '#c45ea0', '#7c8ea0']
+const overviewIngestSeries = computed<TimeSeriesPanelSeries[]>(() => {
+  if (!isGlobalUsageScope.value) {
+    const points = (meteringBreakdown.value?.buckets ?? []).flatMap(bucket => {
+      const timestamp = new Date(bucket.timestamp).getTime() / 1000
+      const bytes = Object.values(bucket.signals).reduce((sum, signal) => sum + signal.bytes_count, 0)
+      return Number.isFinite(timestamp) ? [[timestamp, bytes] as [number, number]] : []
+    })
+    return points.length ? [{
+      name: selectedUsageTenantLabel.value,
+      color: tenantSeriesColors[0]!,
+      points,
+    }] : []
+  }
+
+  const totals = new Map<string, number>()
+  for (const bucket of tenantMeteringBreakdown.value?.buckets ?? []) {
+    for (const [tenantId, counts] of Object.entries(bucket.tenants)) {
+      totals.set(tenantId, (totals.get(tenantId) ?? 0) + counts.bytes_count)
+    }
+  }
+
+  return [...totals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([tenantId], index) => ({
+      name: tenantId,
+      color: tenantSeriesColors[index % tenantSeriesColors.length]!,
+      points: (tenantMeteringBreakdown.value?.buckets ?? []).flatMap(bucket => {
+        const timestamp = new Date(bucket.timestamp).getTime() / 1000
+        return Number.isFinite(timestamp)
+          ? [[timestamp, bucket.tenants[tenantId]?.bytes_count ?? 0] as [number, number]]
+          : []
+      }),
+    }))
 })
 
 function formatBytes(bytes: number): string {
@@ -289,6 +372,17 @@ function formatRate(rate: number): string {
   if (rate >= 1) return `${rate.toFixed(1)}/s`
   if (rate >= 0.01) return `${rate.toFixed(2)}/s`
   return `${rate.toFixed(3)}/s`
+}
+
+function formatQueryDuration(value: number | null | undefined): string {
+  if (value == null) return '—'
+  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10_000 ? 1 : 2)}s`
+  return `${Math.round(value)}ms`
+}
+
+function formatQueryResults(value: number | null | undefined): string {
+  if (value == null) return '—'
+  return formatCount(Math.round(value))
 }
 
 function compressionRatio(row: { compressed_bytes: number; uncompressed_bytes: number }): string {
@@ -319,11 +413,6 @@ function signalLabel(signal: string): string {
 
 function signalColor(signal: string): string {
   return signal === 'metrics' ? 'var(--ok)' : signal === 'logs' ? '#5b8dd9' : signal === 'traces' ? 'var(--amber)' : '#9b7dd4'
-}
-
-function formatBucket(ts: string): string {
-  const date = new Date(ts)
-  return Number.isNaN(date.getTime()) ? ts : date.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
 const breakdownTotal = computed(() => {
@@ -372,27 +461,6 @@ function treemapPct(label: LabelCardinality): number {
       <p class="subtitle">Track which metrics, spans, and logs are being queried</p>
     </header>
 
-    <!-- Controls -->
-    <div class="usage-controls">
-      <div class="control-group">
-        <label>Signal type</label>
-        <div class="btn-group">
-          <button :class="{ active: filterType === '' }" @click="selectType('')">All</button>
-          <button :class="{ active: filterType === 'metric' }" @click="selectType('metric')">Metrics</button>
-          <button :class="{ active: filterType === 'span' }" @click="selectType('span')">Spans</button>
-          <button :class="{ active: filterType === 'log' }" @click="selectType('log')">Logs</button>
-        </div>
-      </div>
-      <div class="control-group">
-        <label>Lookback</label>
-        <div class="btn-group">
-          <button v-for="d in dayPresets" :key="d" :class="{ active: daysBack === d }" @click="selectDays(d)">
-            {{ d }}d
-          </button>
-        </div>
-      </div>
-    </div>
-
     <div v-if="loadError" class="usage-load-error" role="alert">
       <span>{{ loadError }}</span>
       <button type="button" @click="loadUsage">Retry</button>
@@ -403,9 +471,34 @@ function treemapPct(label: LabelCardinality): number {
         <div>
           <div class="section-kicker">Usage analysis · selected window</div>
           <h2>{{ activeUsageLabel }}</h2>
-          <p>Move between collection, signal usage, cardinality, and unused metrics without stacking every view on one page.</p>
+          <p>Move between collection and signal families. Metric usage, cardinality, and unused metrics stay together.</p>
         </div>
-        <span class="scope-chip"><span class="scope-dot"></span>{{ daysBack }} day lookback</span>
+        <div class="usage-header-filters">
+          <label v-if="isAdmin" class="usage-tenant-filter">
+            <span class="usage-control-label">Tenant</span>
+            <select v-model="selectedUsageTenant" aria-label="Ingest tenant" @change="selectUsageTenant">
+              <option :value="allTenantsValue">All tenants</option>
+              <option v-for="tenantName in usageTenantOptions" :key="tenantName" :value="tenantName">
+                {{ tenantName }}
+              </option>
+            </select>
+          </label>
+          <div class="usage-lookback" role="group" aria-label="Lookback">
+            <span class="usage-control-label">Lookback</span>
+            <div class="btn-group">
+              <button
+                v-for="d in dayPresets"
+                :key="d"
+                type="button"
+                :class="{ active: daysBack === d }"
+                :aria-pressed="daysBack === d"
+                @click="selectDays(d)"
+              >
+                {{ d }}d
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
       <nav class="usage-subnav" aria-label="Usage sections">
         <button
@@ -440,19 +533,19 @@ function treemapPct(label: LabelCardinality): number {
           <div class="snapshot-label"><span class="snapshot-dot snapshot-dot-metrics"></span>Metrics</div>
           <strong>{{ formatCount(stats.metrics.total_datapoints) }}</strong>
           <span>{{ formatRate(stats.metrics.datapoints_per_sec) }} · {{ formatCount(stats.metrics.unique_series) }} series</span>
-          <small v-if="metering?.signals.metrics">{{ formatBytes(metering.signals.metrics.bytes_count) }} ingested</small>
+          <small v-if="overviewMetering?.signals.metrics">{{ formatBytes(overviewMetering.signals.metrics.bytes_count) }} ingested</small>
         </article>
         <article class="stats-snapshot-card">
           <div class="snapshot-label"><span class="snapshot-dot snapshot-dot-traces"></span>Spans</div>
           <strong>{{ formatCount(stats.spans.total_events) }}</strong>
           <span>{{ formatRate(stats.spans.events_per_sec) }} · {{ formatCount(stats.spans.events_today) }} today</span>
-          <small v-if="metering?.signals.traces">{{ formatBytes(metering.signals.traces.bytes_count) }} ingested</small>
+          <small v-if="overviewMetering?.signals.traces">{{ formatBytes(overviewMetering.signals.traces.bytes_count) }} ingested</small>
         </article>
         <article class="stats-snapshot-card">
           <div class="snapshot-label"><span class="snapshot-dot snapshot-dot-logs"></span>Logs</div>
           <strong>{{ formatCount(stats.logs.total_events) }}</strong>
           <span>{{ formatRate(stats.logs.events_per_sec) }} · {{ formatCount(stats.logs.events_today) }} today</span>
-          <small v-if="metering?.signals.logs">{{ formatBytes(metering.signals.logs.bytes_count) }} ingested</small>
+          <small v-if="overviewMetering?.signals.logs">{{ formatBytes(overviewMetering.signals.logs.bytes_count) }} ingested</small>
         </article>
         <article class="stats-snapshot-card stats-snapshot-card--storage">
           <div class="snapshot-label"><span class="snapshot-dot snapshot-dot-storage"></span>Storage</div>
@@ -513,16 +606,16 @@ function treemapPct(label: LabelCardinality): number {
       </Transition>
     </section>
 
-    <!-- Tenant-scoped ingest footprint: volume is kept separate from query
-         usage so an operator can distinguish collection cost from exploration. -->
+    <!-- Ingest volume is kept separate from query usage so an operator can
+         distinguish collection cost from exploration. -->
     <section v-if="metering && activeUsageSection === 'ingest'" class="ingest-board">
       <div class="section-heading-row">
         <div>
-          <div class="section-kicker">Active tenant · {{ activeTenantName || metering.tenant_id }}</div>
+          <div class="section-kicker">{{ isGlobalUsageScope ? 'Global ingest' : 'Tenant ingest' }} · {{ selectedUsageTenantLabel }}</div>
           <h2>Ingest footprint</h2>
-          <p>What this tenant is sending into Rush during the selected window.</p>
+          <p>{{ isGlobalUsageScope ? 'Combined ingestion from every tenant during the selected window.' : `Ingestion from ${selectedUsageTenantLabel} during the selected window.` }}</p>
         </div>
-        <span class="scope-chip"><span class="scope-dot"></span> tenant scoped</span>
+        <span class="scope-chip" :class="{ 'scope-chip--global': isGlobalUsageScope }"><span class="scope-dot"></span>{{ isGlobalUsageScope ? 'all tenants' : 'tenant scoped' }}</span>
       </div>
 
       <div class="ingest-summary-grid">
@@ -559,25 +652,23 @@ function treemapPct(label: LabelCardinality): number {
           <div v-else class="inline-empty">No ingest has been recorded in this window.</div>
         </div>
 
-        <div class="ingest-panel ingest-panel--timeline">
-          <div class="panel-heading">
-            <div><span class="section-kicker">Throughput</span><h3>Ingest over time</h3></div>
-            <span class="panel-meta mono">{{ meteringBreakdown?.interval || 'hour' }}</span>
-          </div>
-          <div v-if="ingestTimeline.length" class="timeline-chart">
-            <svg viewBox="0 0 680 128" role="img" aria-label="Ingest bytes over time" preserveAspectRatio="none">
-              <path class="timeline-gridline" d="M0 113H680M0 65H680M0 17H680" />
-              <path class="timeline-area" :d="`${ingestTimelinePath} L 680 118 L 0 118 Z`" />
-              <path class="timeline-line" :d="ingestTimelinePath" />
-            </svg>
-            <div class="timeline-labels mono"><span>{{ formatBucket(ingestTimeline[0]!.timestamp) }}</span><span>{{ formatBucket(ingestTimeline[ingestTimeline.length - 1]!.timestamp) }}</span></div>
-          </div>
-          <div v-else class="inline-empty">No time buckets are available yet.</div>
-        </div>
+        <TimeSeriesPanel
+          class="ingest-timeline-panel"
+          title="Ingest over time"
+          description="Bytes received in each interval, stacked by signal. Hover over a bucket to compare its logs, traces, metrics, and RUM volume."
+          :range-label="`${daysBack}d`"
+          display-mode="stacked-bars"
+          :bucket-seconds="ingestBucketSeconds"
+          :time-domain="selectedTimeDomain"
+          :series="ingestChartSeries"
+          unit="B"
+          empty-title="No ingest buckets"
+          empty-message="No ingest was recorded in the selected window."
+        />
       </div>
     </section>
 
-    <section v-if="activeUsageSection === 'ingest' && isAdmin && tenantRanking?.tenants.length" class="tenant-ranking-section">
+    <section v-if="activeUsageSection === 'ingest' && isAdmin && isGlobalUsageScope && tenantRanking?.tenants.length" class="tenant-ranking-section">
       <div class="section-heading-row">
         <div><div class="section-kicker">Admin view · all tenants</div><h2>Collection load by tenant</h2><p>Use this ranking to spot noisy tenants before they dominate shared capacity.</p></div>
         <span class="scope-chip scope-chip--global"><span class="scope-dot"></span> global read</span>
@@ -628,13 +719,34 @@ function treemapPct(label: LabelCardinality): number {
         </div>
       </section>
 
+      <TimeSeriesPanel
+        v-if="activeUsageSection === 'overview'"
+        class="usage-overview-ingest-panel"
+        :title="isGlobalUsageScope ? 'Ingestion by tenant' : `Ingestion for ${selectedUsageTenantLabel}`"
+        :description="isGlobalUsageScope
+          ? 'Each bucket is the total bytes received. Tenant series stack to the combined ingestion total.'
+          : `Bytes received from ${selectedUsageTenantLabel} in each interval.`"
+        :range-label="`${daysBack}d`"
+        display-mode="stacked-bars"
+        :bucket-seconds="ingestBucketSeconds"
+        :time-domain="selectedTimeDomain"
+        :series="overviewIngestSeries"
+        unit="B"
+        empty-title="No ingestion in this window"
+        :empty-message="isGlobalUsageScope ? 'No tenants sent data during the selected window.' : `${selectedUsageTenantLabel} did not send data during the selected window.`"
+      />
+
       <!-- Keep each query family in its own surface so operators can scan one
-           signal type without sorting through a mixed table. -->
+           signal type without sorting through a mixed table. Metrics also owns
+           inventory health because cardinality and unused series are metric-only. -->
       <section v-if="activeUsageGroup" class="usage-section usage-section--signal">
         <div class="usage-section-heading">
           <div>
-            <div class="section-kicker">Signal usage · {{ activeUsageGroup.key === 'span' ? 'apm' : activeUsageGroup.key }}</div>
-            <h2>{{ activeUsageGroup.label }} <span class="badge-count">{{ activeUsageGroup.entries.length }}</span></h2>
+            <div class="section-kicker">Query activity · {{ activeUsageGroup.key === 'span' ? 'apm' : activeUsageGroup.key }}</div>
+            <h2>
+              {{ activeUsageGroup.key === 'metric' ? 'Queried metrics' : activeUsageGroup.label }}
+              <span v-if="activeUsageGroup.key === 'metric'" class="badge-count">{{ activeUsageGroup.entries.length }}</span>
+            </h2>
             <p>{{ activeUsageGroup.description }}</p>
           </div>
           <span class="usage-section-marker" :class="`usage-section-marker--${activeUsageGroup.key}`"></span>
@@ -646,6 +758,8 @@ function treemapPct(label: LabelCardinality): number {
                 <th>Signal Name</th>
                 <th>Source</th>
                 <th>Last Queried</th>
+                <th v-if="activeUsageGroup.key === 'log'">Query time</th>
+                <th v-if="activeUsageGroup.key === 'log'">Results returned</th>
                 <th class="num">Queries</th>
               </tr>
             </thead>
@@ -654,20 +768,40 @@ function treemapPct(label: LabelCardinality): number {
                 <td class="signal-name">{{ row.signal_name }}</td>
                 <td class="source-cell">{{ row.source }}</td>
                 <td class="date-cell">{{ formatDate(row.last_queried_at) }}</td>
+                <td v-if="activeUsageGroup.key === 'log'">
+                  <div v-if="row.query_samples" class="query-stat-range" aria-label="Low, average, and high query time">
+                    <span><small>LOW</small><strong>{{ formatQueryDuration(row.low_duration_ms) }}</strong></span>
+                    <span><small>AVG</small><strong>{{ formatQueryDuration(row.avg_duration_ms) }}</strong></span>
+                    <span><small>HIGH</small><strong>{{ formatQueryDuration(row.high_duration_ms) }}</strong></span>
+                  </div>
+                  <span v-else class="query-stat-unavailable">—</span>
+                </td>
+                <td v-if="activeUsageGroup.key === 'log'">
+                  <div v-if="row.query_samples" class="query-stat-range" aria-label="Low, average, and high results returned">
+                    <span><small>LOW</small><strong>{{ formatQueryResults(row.low_result_rows) }}</strong></span>
+                    <span><small>AVG</small><strong>{{ formatQueryResults(row.avg_result_rows) }}</strong></span>
+                    <span><small>HIGH</small><strong>{{ formatQueryResults(row.high_result_rows) }}</strong></span>
+                  </div>
+                  <span v-else class="query-stat-unavailable">—</span>
+                </td>
                 <td class="num">{{ row.query_count }}</td>
               </tr>
             </tbody>
           </DataTable>
-          <div v-else class="empty-state">No {{ activeUsageGroup.label.toLowerCase() }} usage in this window.</div>
+          <div v-else class="empty-state">
+            {{ activeUsageGroup.key === 'metric'
+              ? 'No PromQL metric queries were recorded in this window. Cardinality and unused metrics are still available below.'
+              : `No ${activeUsageGroup.label.toLowerCase()} usage in this window.` }}
+          </div>
         </div>
       </section>
 
       <!-- Cardinality explorer -->
-      <section class="usage-section" v-if="activeUsageSection === 'cardinality'">
-        <h2>Cardinality Explorer <span class="badge-count">{{ totalSeries.toLocaleString() }} series</span></h2>
+      <section class="usage-section" v-if="activeUsageSection === 'metrics'">
+        <h2>Cardinality explorer <span class="badge-count">{{ totalSeries.toLocaleString() }} series</span></h2>
         <p class="section-desc">Click a metric to see which labels drive its cardinality.</p>
         <div v-if="cardinalityList.length > 0" class="usage-table-wrap">
-          <DataTable class="usage-table cardinality-table" bare>
+          <DataTable class="usage-table usage-table-scroll cardinality-table" bare>
             <thead>
               <tr>
                 <th>Metric Name</th>
@@ -754,11 +888,11 @@ function treemapPct(label: LabelCardinality): number {
       </section>
 
       <!-- Unused metrics -->
-      <section class="usage-section" v-if="activeUsageSection === 'unused'">
-        <h2>Unused Metrics <span class="badge-count">{{ unusedList.length }}</span></h2>
+      <section class="usage-section" v-if="activeUsageSection === 'metrics'">
+        <h2>Unused metrics <span class="badge-count">{{ unusedList.length }}</span></h2>
         <p class="section-desc">These metrics are being collected but haven't been queried in the last {{ daysBack }} days.</p>
         <div v-if="unusedList.length > 0" class="usage-table-wrap">
-          <DataTable class="usage-table" bare>
+          <DataTable class="usage-table usage-table-scroll" bare>
             <thead>
               <tr>
                 <th>Metric Name</th>
