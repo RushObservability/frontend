@@ -2,7 +2,6 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useApi } from '../composables/useApi'
 import TimePicker from '../components/TimePicker.vue'
-import DataTable from '../components/DataTable.vue'
 import type { AuditEvent, AuditQueryParams, AuditVerifyResponse } from '../types'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 
@@ -159,6 +158,18 @@ function prettyJson(raw: string): string {
   }
 }
 
+function hasPayload(raw: string): boolean {
+  if (!raw.trim()) return false
+  try {
+    const value = JSON.parse(raw)
+    if (Array.isArray(value)) return value.length > 0
+    if (value && typeof value === 'object') return Object.keys(value).length > 0
+    return value !== null
+  } catch {
+    return true
+  }
+}
+
 // Tenants for the filter dropdown.
 const tenants = ref<{ id: string; name: string }[]>([])
 async function loadTenants() {
@@ -298,7 +309,17 @@ onMounted(() => {
       </div>
 
       <template v-for="ev in events" :key="ev.id">
-        <div class="audit-row" :class="{ expanded: isExpanded(ev.id) }" @click="toggleRow(ev.id)">
+        <div
+          class="audit-row"
+          :class="{ expanded: isExpanded(ev.id) }"
+          role="button"
+          tabindex="0"
+          :aria-expanded="isExpanded(ev.id)"
+          :aria-controls="`audit-detail-${ev.id}`"
+          @click="toggleRow(ev.id)"
+          @keydown.enter.prevent="toggleRow(ev.id)"
+          @keydown.space.prevent="toggleRow(ev.id)"
+        >
           <span class="col-expand">
             <svg class="audit-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           </span>
@@ -321,39 +342,112 @@ onMounted(() => {
           <span class="col-ip mono text-muted">{{ ev.ip_address || '—' }}</span>
         </div>
 
-        <!-- Detail panel — SIEM-style flat field/value table (Splunk "Fields") -->
-        <div v-if="isExpanded(ev.id)" class="audit-detail">
-          <DataTable class="field-table" bare>
-            <tbody>
-              <tr class="field-row"><td class="field-key">seq</td><td class="field-val mono">{{ ev.seq }}</td></tr>
-              <tr class="field-row"><td class="field-key">event_id</td><td class="field-val mono">{{ ev.id }}</td></tr>
-              <tr class="field-row"><td class="field-key">timestamp</td><td class="field-val mono">{{ formatTime(ev.timestamp) }}</td></tr>
-              <tr class="field-row"><td class="field-key">action</td><td class="field-val mono">{{ ev.action }}</td></tr>
-              <tr class="field-row"><td class="field-key">outcome</td><td class="field-val mono">{{ ev.outcome }}</td></tr>
-              <tr class="field-row"><td class="field-key">actor_name</td><td class="field-val">{{ ev.actor_name || '—' }}</td></tr>
-              <tr class="field-row"><td class="field-key">actor_id</td><td class="field-val mono">{{ ev.actor_id || '—' }}</td></tr>
-              <tr class="field-row"><td class="field-key">actor_type</td><td class="field-val mono">{{ ev.actor_type }}</td></tr>
-              <tr class="field-row"><td class="field-key">resource_type</td><td class="field-val mono">{{ ev.resource_type || '—' }}</td></tr>
-              <tr class="field-row"><td class="field-key">resource_id</td><td class="field-val mono">{{ ev.resource_id || '—' }}</td></tr>
-              <tr class="field-row"><td class="field-key">tenant_id</td><td class="field-val mono">{{ ev.tenant_id || '—' }}</td></tr>
-              <tr class="field-row"><td class="field-key">ip_address</td><td class="field-val mono">{{ ev.ip_address || '—' }}</td></tr>
-              <tr class="field-row"><td class="field-key">request_id</td><td class="field-val mono">{{ ev.request_id || '—' }}</td></tr>
-              <tr class="field-row"><td class="field-key">user_agent</td><td class="field-val mono">{{ ev.user_agent || '—' }}</td></tr>
-              <tr class="field-row"><td class="field-key">description</td><td class="field-val">{{ ev.description || '—' }}</td></tr>
-              <tr class="field-row"><td class="field-key">hash</td><td class="field-val mono field-hash">{{ ev.hash || '—' }}</td></tr>
-              <tr class="field-row"><td class="field-key">prev_hash</td><td class="field-val mono field-hash">{{ ev.prev_hash || '—' }}</td></tr>
-            </tbody>
-          </DataTable>
-
-          <div class="raw-block">
-            <div class="raw-head">changes</div>
-            <pre class="raw-json mono">{{ prettyJson(ev.changes) }}</pre>
+        <div
+          v-if="isExpanded(ev.id)"
+          :id="`audit-detail-${ev.id}`"
+          class="audit-detail"
+          role="region"
+          :aria-label="`Details for ${ev.action}`"
+        >
+          <div class="audit-detail-intro">
+            <div>
+              <span class="audit-detail-kicker mono">Event {{ ev.seq }}</span>
+              <p class="audit-detail-description">{{ ev.description || 'No description was recorded for this event.' }}</p>
+            </div>
+            <span class="outcome-pill" :class="'outcome-' + ev.outcome">{{ ev.outcome }}</span>
           </div>
 
-          <div v-if="ev.metadata && ev.metadata !== '{}'" class="raw-block">
-            <div class="raw-head">metadata</div>
-            <pre class="raw-json mono">{{ prettyJson(ev.metadata) }}</pre>
+          <div class="audit-detail-grid">
+            <section class="audit-detail-section" aria-label="Event record">
+              <h3>Event record</h3>
+              <dl class="audit-field-list">
+                <div class="audit-field audit-field-wide">
+                  <dt>Event ID</dt>
+                  <dd class="mono">{{ ev.id }}</dd>
+                </div>
+                <div class="audit-field">
+                  <dt>Recorded</dt>
+                  <dd>{{ formatTime(ev.timestamp) }}</dd>
+                </div>
+                <div class="audit-field">
+                  <dt>Action</dt>
+                  <dd class="mono">{{ ev.action }}</dd>
+                </div>
+                <div class="audit-field">
+                  <dt>Resource type</dt>
+                  <dd class="mono">{{ ev.resource_type || 'Not recorded' }}</dd>
+                </div>
+                <div class="audit-field">
+                  <dt>Resource ID</dt>
+                  <dd class="mono">{{ ev.resource_id || 'Not recorded' }}</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section class="audit-detail-section" aria-label="Request context">
+              <h3>Request context</h3>
+              <dl class="audit-field-list">
+                <div class="audit-field">
+                  <dt>Actor</dt>
+                  <dd>{{ ev.actor_name || 'Not recorded' }} <span class="audit-inline-type mono">{{ ev.actor_type }}</span></dd>
+                </div>
+                <div class="audit-field">
+                  <dt>Tenant</dt>
+                  <dd class="mono">{{ ev.tenant_id || 'Not recorded' }}</dd>
+                </div>
+                <div class="audit-field">
+                  <dt>Actor ID</dt>
+                  <dd class="mono">{{ ev.actor_id || 'Not recorded' }}</dd>
+                </div>
+                <div class="audit-field">
+                  <dt>Request ID</dt>
+                  <dd class="mono">{{ ev.request_id || 'Not recorded' }}</dd>
+                </div>
+                <div class="audit-field">
+                  <dt>IP address</dt>
+                  <dd class="mono">{{ ev.ip_address || 'Not recorded' }}</dd>
+                </div>
+                <div class="audit-field audit-field-wide">
+                  <dt>Client</dt>
+                  <dd>{{ ev.user_agent || 'Not recorded' }}</dd>
+                </div>
+              </dl>
+            </section>
           </div>
+
+          <div v-if="hasPayload(ev.changes) || hasPayload(ev.metadata)" class="audit-payloads">
+            <section v-if="hasPayload(ev.changes)" class="audit-payload" aria-label="Recorded changes">
+              <div class="audit-payload-head">
+                <h3>Changes</h3>
+                <span class="mono">JSON</span>
+              </div>
+              <pre class="audit-json mono">{{ prettyJson(ev.changes) }}</pre>
+            </section>
+            <section v-if="hasPayload(ev.metadata)" class="audit-payload" aria-label="Event metadata">
+              <div class="audit-payload-head">
+                <h3>Metadata</h3>
+                <span class="mono">JSON</span>
+              </div>
+              <pre class="audit-json mono">{{ prettyJson(ev.metadata) }}</pre>
+            </section>
+          </div>
+
+          <details class="audit-integrity">
+            <summary>
+              <span>Integrity proof</span>
+              <span class="audit-integrity-summary mono">Sequence {{ ev.seq }}</span>
+            </summary>
+            <dl class="audit-hash-list">
+              <div>
+                <dt>Event hash</dt>
+                <dd class="mono">{{ ev.hash || 'Not recorded' }}</dd>
+              </div>
+              <div>
+                <dt>Previous hash</dt>
+                <dd class="mono">{{ ev.prev_hash || 'Not recorded' }}</dd>
+              </div>
+            </dl>
+          </details>
         </div>
       </template>
     </div>
