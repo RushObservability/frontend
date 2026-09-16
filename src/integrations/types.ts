@@ -8,6 +8,19 @@ export interface AddonPage {
   group?: string
 }
 
+export interface AddonPresentation {
+  /** Optional class supplied by an edition for integration-specific theming. */
+  shellClass?: string
+  /** Use grouped navigation when an integration has a large diagnostic catalog. */
+  navigation?: 'tabs' | 'grouped'
+  /** Preferred order for grouped page navigation. */
+  groupOrder?: string[]
+  /** Optional contextual label above the integration name. */
+  kicker?: string
+  /** Optional short description below the integration name. */
+  subtitle?: string
+}
+
 export interface AddonDef {
   key: string
   label: string
@@ -24,6 +37,10 @@ export interface AddonDef {
   serverDiscoveryMetric?: string
   /** PromQL metric whose db label enumerates databases within an instance. */
   dbDiscoveryMetric?: string
+  /** Whether database-backed pages permit an aggregate all-databases scope. */
+  databaseSelection?: 'optional' | 'required'
+  /** Edition-owned visual treatment for this integration. */
+  presentation?: AddonPresentation
   /** Shown when an entitled integration has no reporting instance yet. */
   setupComponent?: Component
   pages: AddonPage[]

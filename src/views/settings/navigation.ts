@@ -1,4 +1,6 @@
-export type SettingsTabId = 'keys' | 'auth' | 'links' | 'integrations' | 'agent' | 'tenants' | 'retention' | 'groups' | 'users' | 'alerting' | 'general' | 'performance' | 'firewall' | 'license' | 'config' | 'log-views'
+import type { Component } from 'vue'
+
+export type SettingsTabId = string
 export type AgentSubtabId = 'access' | 'providers' | 'models' | 'limits' | 'skills'
 
 export interface SettingsTabDef {
@@ -6,6 +8,8 @@ export interface SettingsTabDef {
   label: string
   hint: string
   group: string
+  /** Optional edition-owned top-level settings page. */
+  component?: Component
 }
 
 export interface SettingsTabGroup {
@@ -17,13 +21,20 @@ export interface SettingsIntegrationNavItem {
   key: string
   label: string
   desc: string
+  /** Optional edition-owned settings panel. */
+  component?: Component
+}
+
+export interface SettingsConfigPanel {
+  key: string
+  component: Component
 }
 
 export const SETTINGS_TABS: SettingsTabDef[] = [
   { id: 'general', label: 'General', group: 'Workspace', hint: 'Workspace-wide preferences and defaults.' },
   { id: 'performance', label: 'Query limits', group: 'Workspace', hint: 'Protect interactive work with admission, time-range, and ClickHouse resource budgets.' },
-  { id: 'config', label: 'Configuration', group: 'Workspace', hint: 'Runtime wiring, loaded integrations, and redacted secrets.' },
-  { id: 'license', label: 'License', group: 'Workspace', hint: 'Review license status and entitled add-ons.' },
+  { id: 'config', label: 'Configuration', group: 'Workspace', hint: 'Runtime wiring and redacted configuration values.' },
+  ...frontendEdition.settingsTabs,
   { id: 'integrations', label: 'Integrations', group: 'Workspace', hint: 'Connect external tools and observability add-ons.' },
   { id: 'agent', label: 'AI Agent', group: 'Workspace', hint: 'Configure investigation access, models, budgets, and playbooks.' },
   { id: 'users', label: 'Users', group: 'Access & Identity', hint: 'Manage local user accounts and access.' },
@@ -52,4 +63,6 @@ export const SETTINGS_INTEGRATIONS: SettingsIntegrationNavItem[] = [
   { key: 'cloudwatch', label: 'CloudWatch Logs', desc: 'Ingest AWS CloudWatch Logs through Kinesis Data Firehose.' },
   ...frontendEdition.settingsIntegrations,
 ]
+
+export const SETTINGS_CONFIG_PANELS: SettingsConfigPanel[] = frontendEdition.settingsConfigPanels
 import { frontendEdition } from '../../edition/manifest'

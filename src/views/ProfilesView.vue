@@ -129,7 +129,7 @@ onBeforeUnmount(() => { generation++; controller?.abort() })
 
     <section v-if="setupOpen" id="profile-setup" class="profile-setup" aria-label="Collection setup">
       <div class="setup-heading"><h2>Send CPU profiles to Rush</h2><button class="text-button" @click="setupOpen = false">Close setup</button></div>
-      <p>Profiling is built in and requires no integration or paid license. Forward OTLP/HTTP protobuf CPU profiles to <code>/v1development/profiles</code>.</p>
+      <p>Profiling is built in and needs no extra integration. Forward OTLP/HTTP protobuf CPU profiles to <code>/v1development/profiles</code>.</p>
       <ol>
         <li>Create an ingest key with the <code>profiles</code> signal for your tenant.</li>
         <li>Send the key as a Bearer token and set <code>X-Rush-Tenant</code>.</li>

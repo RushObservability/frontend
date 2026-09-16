@@ -128,7 +128,7 @@ test('empty profiles explain collection without fabricated data', async ({ page 
   await expect(page.getByRole('region', { name: 'CPU flame graph' })).toHaveCount(0)
   await page.screenshot({ path: info.outputPath('profiles-empty.png'), fullPage: true })
   await page.getByRole('button', { name: 'Set up CPU profiling' }).click()
-  await expect(page.getByText(/Profiling is built in and requires no integration or paid license/)).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Collection setup' })).toContainText('Profiling is built in and needs no extra integration.')
 })
 
 test('service browser gives the unfiltered page a useful starting point', async ({ page }, info) => {
