@@ -12,4 +12,6 @@ export const frontendEdition: FrontendEdition = {
   routes: [],
   navigationItems: [],
   settingsIntegrations: [],
+  settingsTabs: [],
+  settingsConfigPanels: [],
 }

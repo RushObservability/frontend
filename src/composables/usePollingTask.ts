@@ -6,7 +6,7 @@ export type PollingCategory =
   | 'capacity'
   | 'dashboard'
   | 'explore_live'
-  | 'postgres_activity'
+  | 'integration_activity'
   | 'service_graph'
   | 'slo_detail'
   | 'slo_list'

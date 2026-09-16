@@ -1,10 +1,10 @@
 import type { RumEvent } from '@rushobservability/rum-sdk'
+import { frontendEdition } from '../edition/manifest'
 
 const PRIVATE_RUM_PATHS = [
   /^\/login(?:\/|$)/,
   /^\/setup\/sso(?:\/|$)/,
   /^\/settings(?:\/|$)/,
-  /^\/kubernetes-access\/login(?:\/|$)/,
 ]
 
 const PRIVATE_EVENT_TYPES = new Set(['error', 'frustration', 'interaction'])
@@ -12,6 +12,7 @@ const SAFE_ERROR_TYPE = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/
 
 function isPrivatePath(pathname: string): boolean {
   return PRIVATE_RUM_PATHS.some(pattern => pattern.test(pathname))
+    || (frontendEdition.privateRumPathPrefixes ?? []).some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`))
 }
 
 function interactionElement(target: string | undefined): string | undefined {

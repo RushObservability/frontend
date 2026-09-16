@@ -8,6 +8,8 @@ describe('open-source frontend edition', () => {
     expect(frontendEdition.routes).toEqual([])
     expect(frontendEdition.navigationItems).toEqual([])
     expect(frontendEdition.settingsIntegrations).toEqual([])
+    expect(frontendEdition.settingsTabs).toEqual([])
+    expect(frontendEdition.settingsConfigPanels).toEqual([])
   })
 
   it('does not statically import licensed views from the core router', () => {
