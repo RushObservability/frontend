@@ -39,6 +39,7 @@ const colSpan = ref(6)
 const rowSpan = ref(2)
 const description = ref('')
 const unit = ref('')
+const fill = ref(false)
 const activeEditorTab = ref<'query' | 'panel'>('query')
 
 interface EditorQuery extends Omit<WidgetPanelQuery, 'filters'> {
@@ -159,6 +160,7 @@ const metricsOk = computed(() => widgetType.value === 'timeseries' || widgetType
 
 watch(() => props.widget, (widget) => {
   if (!widget) {
+    fill.value = false
     queries.value = [makeQuery({ ref_id: 'A' })]
     activeQueryId.value = 'A'
     return
@@ -170,6 +172,9 @@ watch(() => props.widget, (widget) => {
   rowSpan.value = widget.position.row_span || 2
   description.value = (widget.display_config?.description as string) || ''
   unit.value = (widget.display_config?.unit as string) || ''
+  fill.value = typeof widget.display_config?.fill === 'boolean'
+    ? widget.display_config.fill
+    : widget.widget_type === 'timeseries' && !widget.query_config.queries?.length && widget.query_config.source === 'logs'
 
   const stored = widget.query_config.queries?.length
     ? widget.query_config.queries
@@ -338,6 +343,8 @@ function save() {
   const u = unit.value.trim()
   if (desc) displayConfig.description = desc; else delete displayConfig.description
   if (u) displayConfig.unit = u; else delete displayConfig.unit
+  if (widgetType.value === 'timeseries') displayConfig.fill = fill.value
+  else delete displayConfig.fill
   emit('save', {
     title: title.value || 'Untitled',
     widget_type: widgetType.value,
@@ -392,7 +399,7 @@ function save() {
                 <CounterWidget v-if="widgetType === 'counter'" :value="previewData.count || 0" :label="title || 'Stat'" />
                 <BarWidget v-else-if="widgetType === 'bar'" :groups="previewData.groups || []" />
                 <TableWidget v-else-if="widgetType === 'table'" :rows="(previewData.rows || []) as Record<string, unknown>[]" />
-                <TimeseriesWidget v-else-if="widgetType === 'timeseries'" :buckets="previewData.buckets || []" :series="previewData.series" :unit="unit" />
+                <TimeseriesWidget v-else-if="widgetType === 'timeseries'" :buckets="previewData.buckets || []" :series="previewData.series" :unit="unit" :fill="fill" />
               </template>
               <div v-else class="we-preview-msg"><strong>No preview yet</strong><span>Configure a query in the panel editor.</span></div>
             </div>
@@ -596,6 +603,10 @@ function save() {
               <label class="we-label">Unit</label>
               <input v-model="unit" class="we-input mono" placeholder="req/s, ms, %, B/s" />
             </div>
+            <label v-if="widgetType === 'timeseries'" class="we-fill-option">
+              <input v-model="fill" type="checkbox" />
+              <span><strong>Fill under lines</strong><small>Shade each series down to the x-axis.</small></span>
+            </label>
           </section>
 
           <section class="we-config-section">
