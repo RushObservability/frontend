@@ -622,7 +622,7 @@ function save() {
                 <option value="lines">Lines</option>
                 <option value="stacked-lines">Stacked lines</option>
               </select>
-              <small class="we-field-help">Stacked lines add series values at matching timestamps.</small>
+              <small class="we-field-help">Stacks matching timestamps; series with smaller averages sit underneath.</small>
             </div>
             <label v-if="widgetType === 'timeseries'" class="we-fill-option">
               <input v-model="fill" type="checkbox" />

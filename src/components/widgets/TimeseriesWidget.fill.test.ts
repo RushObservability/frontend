@@ -45,6 +45,18 @@ describe('time-series area fill', () => {
     expect((html.match(/class="ch-area ts-stacked-area"/g) || [])).toHaveLength(2)
   })
 
+  it('keeps the larger A series on top with its own color', async () => {
+    const html = await render({
+      series: [
+        { name: 'A', color: '#3b82f6', points: [[0, 10], [60, 10]] },
+        { name: 'B', color: '#e5584f', points: [[0, 1], [60, 1]] },
+      ],
+      displayMode: 'stacked-lines',
+    })
+    expect(html).toMatch(/d="M40,12 L558,12 L558,110\.18 L40,110\.18 Z" class="ch-area ts-stacked-area" style="color:#3b82f6/)
+    expect(html).toMatch(/d="M40,110\.18 L558,110\.18 L558,120 L40,120 Z" class="ch-area ts-stacked-area" style="color:#e5584f/)
+  })
+
   it('can show stacked lines without their area fill', async () => {
     const html = await render({ series, displayMode: 'stacked-lines', fill: false })
     expect(html).toContain('class="ch-line ts-line"')
