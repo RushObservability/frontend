@@ -109,6 +109,13 @@ export function straightAreaPath(pts: Pt[], baselineY: number): string {
   return `${line} L${fmt(last[0])},${fmt(baselineY)} L${fmt(first[0])},${fmt(baselineY)} Z`
 }
 
+/** Close a line against another line with matching x coordinates. */
+export function straightBandPath(top: Pt[], bottom: Pt[]): string {
+  if (!top.length || top.length !== bottom.length) return ''
+  const lower = [...bottom].reverse().map(([x, y]) => `L${fmt(x)},${fmt(y)}`).join(' ')
+  return `${straightLinePath(top)} ${lower} Z`
+}
+
 /** Round to 2 decimals and strip trailing zeros — keeps path strings compact. */
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return '0'

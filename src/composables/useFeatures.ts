@@ -3,11 +3,11 @@ import { useTenant } from './useTenant'
 import { authenticatedFetch } from './authSession'
 
 export interface Features {
+  [key: string]: boolean | number
   sre_agent: boolean
   argocd: boolean
   fluxcd: boolean
   kubernetes: boolean
-  kubernetes_logging: boolean
   cloudwatch: boolean
   export_max_rows: number
   deploy_markers: boolean

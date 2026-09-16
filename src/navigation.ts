@@ -12,6 +12,8 @@ export interface NavigationItem {
   routeNames: string[]
   adminOnly?: boolean
   feature?: keyof Features
+  /** Paid destination shown only when the current license carries this entitlement. */
+  entitlement?: string
   enabledByDefault?: boolean
   requiresIntegrations?: boolean
   mobilePrimary?: boolean
@@ -28,6 +30,7 @@ export interface NavigationContext {
   isAdmin: boolean
   features: Partial<Features>
   hasIntegrations: boolean
+  hasEntitlement?: (entitlement: string) => boolean
 }
 
 export const NAVIGATION_GROUPS: Array<{ id: NavigationGroupId; label: string }> = [
@@ -91,7 +94,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   {
     id: 'integrations', label: 'Integrations', path: '/integrations', icon: '↔', group: 'integrations',
     routeNames: ['integrations', 'integration-page'], requiresIntegrations: true,
-    keywords: ['postgresql', 'mysql', 'kubernetes', 'argocd'],
+    keywords: ['database', 'kubernetes', 'argocd'],
   },
   {
     id: 'usage', label: 'Usage', path: '/usage', icon: '◫', group: 'control',
@@ -114,6 +117,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
 
 export function navigationItemVisible(item: NavigationItem, context: NavigationContext): boolean {
   if (item.adminOnly && !context.isAdmin) return false
+  if (item.entitlement && !context.hasEntitlement?.(item.entitlement)) return false
   if (item.requiresIntegrations && !context.hasIntegrations) return false
   if (item.feature) {
     const value = context.features[item.feature]

@@ -5,7 +5,7 @@ import { useAuth } from './composables/useAuth'
 import { useTenant } from './composables/useTenant'
 import { useFeatures } from './composables/useFeatures'
 import { useLicense } from './composables/useLicense'
-import { availableAddons, integrationNavigationChildren } from './integrations/catalog'
+import { availableAddons, hasAddonEntitlement, integrationNavigationChildren } from './integrations/catalog'
 import { isAddonEnabled } from './composables/useIntegrationEnabled'
 import { onSessionExpired, reportSessionExpired } from './composables/authSession'
 import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from './composables/storageScope'
@@ -56,6 +56,7 @@ const navigationGroups = computed(() => visibleNavigationGroups({
   isAdmin: isAdmin.value,
   features: features.value,
   hasIntegrations: hasIntegrations.value,
+  hasEntitlement: entitlement => hasAddonEntitlement(hasEntitlement, entitlement),
 }))
 
 const userMenuOpen = ref(false)

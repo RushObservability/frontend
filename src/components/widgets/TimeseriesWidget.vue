@@ -7,13 +7,16 @@ let chartIdSeq = 0
 import { computed } from 'vue'
 import type { CountBucket, DeployMarker, TimeDomain } from '../../types'
 import type { TimeSeriesPanelSeries } from '../panels/types'
-import { straightLinePath, straightAreaPath, fmtAxis, resolveTimeDomain, type Pt } from '../../lib/chart'
+import { straightLinePath, straightAreaPath, straightBandPath, fmtAxis, resolveTimeDomain, type Pt } from '../../lib/chart'
 import { useChartHover } from '../../composables/useChartHover'
 import EmptyState from '../EmptyState.vue'
 import { stackTimeSeries } from '../../lib/stackedTimeBars'
+import { stackTimeLines } from '../../lib/stackedTimeLines'
 
-const props = defineProps<{
-  displayMode?: 'lines' | 'stacked-bars'
+const props = withDefaults(defineProps<{
+  displayMode?: 'lines' | 'stacked-lines' | 'stacked-bars'
+  /** Defaults to the existing single-series area treatment when omitted. */
+  fill?: boolean | null
   bucketSeconds?: number
   buckets: CountBucket[]
   deploys?: DeployMarker[]
@@ -27,7 +30,7 @@ const props = defineProps<{
   unit?: string
   /** Label for the single-series legend entry (defaults to "value"). */
   seriesName?: string
-}>()
+}>(), { fill: null })
 
 // Distinct line colors for split/grouped series. The palette is intentionally
 // longer than the editor's query palette because a single APM or PromQL query
@@ -114,7 +117,10 @@ const xLabels = computed(() => {
 
 // ── Multi-series (metrics) geometry ──
 const stackedMode = computed(() => props.displayMode === 'stacked-bars')
+const stackedLinesMode = computed(() => props.displayMode === 'stacked-lines' && seriesMode.value)
+const showFill = computed(() => !stackedMode.value && (props.fill ?? (stackedLinesMode.value || !seriesMode.value)))
 const stacks = computed(() => stackedMode.value ? stackTimeSeries(props.series || []) : [])
+const stackedLineLayers = computed(() => stackedLinesMode.value ? stackTimeLines(props.series || []) : [])
 const barInterval = computed(() => {
   if (props.bucketSeconds && props.bucketSeconds > 0) return props.bucketSeconds
   const times = [...new Set(stacks.value.map(bar => bar.time))].sort((a, b) => a - b)
@@ -134,6 +140,18 @@ const seriesBounds = computed(() => {
     maxLeft = Math.max(0, ...stacks.value.filter(bar => bar.axis === 'left').map(bar => bar.top))
     maxRight = Math.max(0, ...stacks.value.filter(bar => bar.axis === 'right').map(bar => bar.top))
     maxT += barInterval.value
+  }
+  if (stackedLinesMode.value) {
+    maxLeft = 0
+    maxRight = 0
+    for (const layer of stackedLineLayers.value) {
+      for (const segment of layer.segments) {
+        for (const point of segment) {
+          if (layer.axis === 'right') maxRight = Math.max(maxRight, point.top)
+          else maxLeft = Math.max(maxLeft, point.top)
+        }
+      }
+    }
   }
   // Extend the range so threshold lines stay on-chart even above the data peak.
   for (const th of props.thresholds || []) if (th.value > maxLeft) maxLeft = th.value
@@ -163,6 +181,31 @@ const seriesPaths = computed(() => {
   if (!seriesMode.value || stackedMode.value) return []
   const { minT, maxT, maxLeft, maxRight } = seriesBounds.value
   const span = maxT - minT || 1
+  if (stackedLinesMode.value) {
+    return stackedLineLayers.value.flatMap(layer => {
+      const series = props.series![layer.seriesIndex]!
+      const axisMax = layer.axis === 'right' ? maxRight : maxLeft
+      return layer.segments.map(segment => {
+        const top: Pt[] = segment.map(point => [
+          padLeft + ((point.time - minT) / span) * plotWidth,
+          padTop + plotHeight - (point.top / axisMax) * plotHeight,
+        ])
+        const bottom: Pt[] = segment.map(point => [
+          padLeft + ((point.time - minT) / span) * plotWidth,
+          padTop + plotHeight - (point.bottom / axisMax) * plotHeight,
+        ])
+        return {
+          d: straightLinePath(top),
+          area: straightBandPath(top, bottom),
+          color: series.color || SERIES_COLORS[layer.seriesIndex % SERIES_COLORS.length]!,
+          name: series.name,
+          axis: layer.axis,
+          lineStyle: series.lineStyle || 'solid',
+          opacity: series.opacity ?? 1,
+        }
+      })
+    })
+  }
   return (props.series || []).map((s, i) => {
     const axisMax = s.axis === 'right' ? maxRight : maxLeft
     const pts: Pt[] = s.points.map(([t, v]) => [
@@ -171,6 +214,7 @@ const seriesPaths = computed(() => {
     ] as Pt)
     return {
       d: straightLinePath(pts),
+      area: straightAreaPath(pts, padTop + plotHeight),
       color: s.color || SERIES_COLORS[i % SERIES_COLORS.length]!,
       name: s.name,
       axis: s.axis || 'left',
@@ -417,6 +461,13 @@ function onLeave() { hover.set(null) }
           class="ts-stacked-bar"
         ><title>{{ bar.name }}: {{ fmtAxisU(bar.value) }}</title></rect>
         <path
+          v-for="(sp, i) in showFill ? seriesPaths : []"
+          :key="'area' + i"
+          :d="sp.area"
+          :class="['ch-area', { 'ts-stacked-area': stackedLinesMode }]"
+          :style="{ color: sp.color, opacity: sp.opacity }"
+        />
+        <path
           v-for="(sp, i) in seriesPaths"
           :key="'sp' + i"
           :d="sp.d"
@@ -455,8 +506,8 @@ function onLeave() { hover.set(null) }
           :x2="xl.x" :y2="padTop + plotHeight"
           class="ch-grid"
         />
-        <!-- Area fill + smooth line -->
-        <path v-if="areaPath" :d="areaPath" class="ch-area" style="color: var(--amber)" />
+        <!-- Area fill + line -->
+        <path v-if="showFill && areaPath" :d="areaPath" class="ch-area" style="color: var(--amber)" />
         <path v-if="linePath" :d="linePath" class="ch-line ts-line" style="color: var(--amber)" />
         <!-- Threshold reference lines -->
         <g v-for="(th, i) in thresholdLines" :key="'th' + i">

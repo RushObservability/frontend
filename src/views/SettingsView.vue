@@ -6,7 +6,7 @@ import { useAuth } from '../composables/useAuth'
 import { useFeatures } from '../composables/useFeatures'
 import { useTenant } from '../composables/useTenant'
 import { apiBaseUrl } from '../config'
-import type { ApiKey, ApiKeyCreated, ServiceLink, CustomSkill, Group, Tenant, TenantRetention, TenantSignals, GlobalRetention, User, AuthSession, SsoProvider, IdpGroupMapping, SetupToken, NotificationChannel, MetricFirewallRule, MetricFirewallInput, LicenseStatus, QueryLimitsConfig, QueryWorkloadBudget, QueryWorkloadClass, KubernetesClientSession, KubernetesGatewayCluster, KubernetesLoggingSettings, KubernetesRbacGrant, KubernetesRbacGrantInput, KubernetesRbacRoleKind, KubernetesRbacScope, KubernetesRbacClusterMatch, LlmProvider, LlmProviderInput, LlmProviderKind, LlmModel, LlmModelInput } from '../types'
+import type { ApiKey, ApiKeyCreated, ServiceLink, CustomSkill, Group, Tenant, TenantRetention, TenantSignals, GlobalRetention, User, AuthSession, SsoProvider, IdpGroupMapping, SetupToken, NotificationChannel, MetricFirewallRule, MetricFirewallInput, QueryLimitsConfig, QueryWorkloadBudget, QueryWorkloadClass, LlmProvider, LlmProviderInput, LlmProviderKind, LlmModel, LlmModelInput } from '../types'
 import SkillEditDialog from '../components/SkillEditDialog.vue'
 import ChannelForm from '../components/ChannelForm.vue'
 import AlertRoutingRules from '../components/AlertRoutingRules.vue'
@@ -20,6 +20,7 @@ import { getAddon } from '../integrations/catalog'
 import { isAddonEnabled, setAddonEnabled, addonNamespace, saveAddonNamespace, namespaceValid } from '../composables/useIntegrationEnabled'
 import {
   SETTINGS_INTEGRATIONS,
+  SETTINGS_CONFIG_PANELS,
   SETTINGS_TAB_GROUPS,
   SETTINGS_TABS,
   type AgentSubtabId,
@@ -87,328 +88,6 @@ function saveKubernetes() {
   setTimeout(() => { k8sSaved.value = false }, 2000)
 }
 
-// ── Integrations (Kubernetes request and session logging) ──
-const kubernetesLogging = ref<KubernetesLoggingSettings | null>(null)
-const kubernetesSessionMinutes = ref(60)
-const kubernetesLoggingLoading = ref(false)
-const kubernetesLoggingSaving = ref(false)
-const kubernetesLoggingSaved = ref(false)
-const kubernetesLoggingError = ref('')
-type KubernetesLoggingTab = 'roles' | 'gateways' | 'users'
-const activeKubernetesLoggingTab = ref<KubernetesLoggingTab>('roles')
-const pendingKubernetesRevoke = ref('')
-const revokingKubernetesClient = ref('')
-const showKubernetesRoleForm = ref(false)
-const editingKubernetesRoleId = ref<string | null>(null)
-const kubernetesRoleSaving = ref(false)
-const pendingKubernetesRoleDelete = ref('')
-const kubernetesRoleName = ref('')
-const kubernetesRoleGroupId = ref('')
-const kubernetesRoleClusterId = ref('')
-const kubernetesRoleClusterMatch = ref<KubernetesRbacClusterMatch>('single')
-const kubernetesRoleClusterPattern = ref('')
-const kubernetesRoleKind = ref<KubernetesRbacRoleKind>('view')
-const kubernetesExistingRoleName = ref('')
-const kubernetesRoleScope = ref<KubernetesRbacScope>('namespaces')
-const kubernetesRoleNamespaces = ref('default')
-
-interface KubernetesRbacRuleDraft {
-  apiGroups: string
-  resources: string
-  verbs: string
-}
-
-const kubernetesRoleRules = ref<KubernetesRbacRuleDraft[]>([])
-const kubernetesRoleGroups = computed(() => {
-  const tenantId = tenants.value.find(tenant => tenant.name === activeTenantName.value)?.id
-    || activeTenantName.value
-  return groups.value.filter(group => group.tenant_ids.includes(tenantId))
-})
-
-function newKubernetesRule(): KubernetesRbacRuleDraft {
-  return { apiGroups: '', resources: 'pods', verbs: 'get, list, watch' }
-}
-
-function splitKubernetesRbacValues(value: string): string[] {
-  return [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))]
-}
-
-function kubernetesRoleKindLabel(grant: Pick<KubernetesRbacGrant, 'role_kind' | 'role_name'>): string {
-  if (grant.role_kind === 'existing') return grant.role_name || 'Existing ClusterRole'
-  if (grant.role_kind === 'custom') return 'Custom role'
-  return grant.role_kind.charAt(0).toUpperCase() + grant.role_kind.slice(1)
-}
-
-function kubernetesRoleScopeLabel(grant: Pick<KubernetesRbacGrant, 'scope' | 'namespaces'>): string {
-  return grant.scope === 'cluster' ? 'All namespaces' : grant.namespaces.join(', ')
-}
-
-function kubernetesClusterTargetLabel(grant: Pick<KubernetesRbacGrant, 'cluster_match' | 'cluster_id' | 'cluster_pattern'>): string {
-  if (grant.cluster_match === 'all') return 'All clusters'
-  if (grant.cluster_match === 'pattern') return grant.cluster_pattern
-  return grant.cluster_id
-}
-
-function kubernetesGatewayStatus(gateway: KubernetesGatewayCluster): { label: string; tone: 'active' | 'configured' | 'seen' } {
-  if (gateway.last_activity) {
-    const normalized = gateway.last_activity.includes('T')
-      ? gateway.last_activity
-      : `${gateway.last_activity.replace(' ', 'T')}Z`
-    const age = Date.now() - new Date(normalized).getTime()
-    if (Number.isFinite(age) && age >= 0 && age <= 5 * 60 * 1000) {
-      return { label: 'Recent traffic', tone: 'active' }
-    }
-  }
-  if (gateway.configured) return { label: 'Configured', tone: 'configured' }
-  return { label: 'Previously seen', tone: 'seen' }
-}
-
-function kubernetesGatewayActivityLabel(gateway: KubernetesGatewayCluster): string {
-  if (!gateway.last_activity) return 'No requests recorded'
-  return `Last request ${formatKubernetesClientTime(gateway.last_activity)}`
-}
-
-function openKubernetesRoleForm(grant?: KubernetesRbacGrant) {
-  pendingKubernetesRoleDelete.value = ''
-  if (groups.value.length === 0) void loadGroups()
-  if (grant) {
-    editingKubernetesRoleId.value = grant.id
-    kubernetesRoleName.value = grant.name
-    kubernetesRoleGroupId.value = grant.group_id
-    kubernetesRoleClusterId.value = grant.cluster_id
-    kubernetesRoleClusterMatch.value = grant.cluster_match || 'single'
-    kubernetesRoleClusterPattern.value = grant.cluster_pattern || ''
-    kubernetesRoleKind.value = grant.role_kind
-    kubernetesExistingRoleName.value = grant.role_name
-    kubernetesRoleScope.value = grant.scope
-    kubernetesRoleNamespaces.value = grant.namespaces.join(', ')
-    kubernetesRoleRules.value = grant.rules.map(rule => ({
-      apiGroups: rule.api_groups.join(', '),
-      resources: rule.resources.join(', '),
-      verbs: rule.verbs.join(', '),
-    }))
-  } else {
-    editingKubernetesRoleId.value = null
-    kubernetesRoleName.value = ''
-    kubernetesRoleGroupId.value = kubernetesRoleGroups.value[0]?.id || ''
-    kubernetesRoleClusterId.value = kubernetesLogging.value?.available_clusters[0]
-      || kubernetesLogging.value?.rbac_grants.find(grant => grant.cluster_id)?.cluster_id
-      || ''
-    kubernetesRoleClusterMatch.value = 'single'
-    kubernetesRoleClusterPattern.value = ''
-    kubernetesRoleKind.value = 'view'
-    kubernetesExistingRoleName.value = ''
-    kubernetesRoleScope.value = 'namespaces'
-    kubernetesRoleNamespaces.value = 'default'
-    kubernetesRoleRules.value = [newKubernetesRule()]
-  }
-  showKubernetesRoleForm.value = true
-}
-
-function closeKubernetesRoleForm() {
-  showKubernetesRoleForm.value = false
-  editingKubernetesRoleId.value = null
-  kubernetesLoggingError.value = ''
-}
-
-function addKubernetesRoleRule() {
-  kubernetesRoleRules.value.push(newKubernetesRule())
-}
-
-function removeKubernetesRoleRule(index: number) {
-  if (kubernetesRoleRules.value.length > 1) kubernetesRoleRules.value.splice(index, 1)
-}
-
-function kubernetesRoleInput(): KubernetesRbacGrantInput | null {
-  const name = kubernetesRoleName.value.trim()
-  const groupId = kubernetesRoleGroupId.value.trim()
-  const clusterId = kubernetesRoleClusterId.value.trim()
-  const clusterPattern = kubernetesRoleClusterPattern.value.trim()
-  if (!name || !groupId) {
-    kubernetesLoggingError.value = 'Name and Rush group are required.'
-    return null
-  }
-  if (kubernetesRoleClusterMatch.value === 'single' && !clusterId) {
-    kubernetesLoggingError.value = 'Choose a cluster.'
-    return null
-  }
-  if (kubernetesRoleClusterMatch.value === 'pattern' && !clusterPattern) {
-    kubernetesLoggingError.value = 'Enter a cluster name pattern.'
-    return null
-  }
-  if (kubernetesRoleClusterMatch.value === 'pattern' && !clusterPattern.includes('*') && !clusterPattern.includes('?')) {
-    kubernetesLoggingError.value = 'The cluster pattern needs * or ?.'
-    return null
-  }
-  const namespaces = kubernetesRoleScope.value === 'namespaces'
-    ? splitKubernetesRbacValues(kubernetesRoleNamespaces.value)
-    : []
-  if (kubernetesRoleScope.value === 'namespaces' && namespaces.length === 0) {
-    kubernetesLoggingError.value = 'Add at least one namespace.'
-    return null
-  }
-  const roleName = kubernetesRoleKind.value === 'existing'
-    ? kubernetesExistingRoleName.value.trim()
-    : ''
-  if (kubernetesRoleKind.value === 'existing' && !roleName) {
-    kubernetesLoggingError.value = 'Enter the existing ClusterRole name.'
-    return null
-  }
-  const rules = kubernetesRoleKind.value === 'custom'
-    ? kubernetesRoleRules.value.map(rule => ({
-        api_groups: splitKubernetesRbacValues(rule.apiGroups),
-        resources: splitKubernetesRbacValues(rule.resources),
-        verbs: splitKubernetesRbacValues(rule.verbs),
-      }))
-    : []
-  if (kubernetesRoleKind.value === 'custom' && rules.some(rule => !rule.resources.length || !rule.verbs.length)) {
-    kubernetesLoggingError.value = 'Each custom rule needs at least one resource and verb.'
-    return null
-  }
-  return {
-    group_id: groupId,
-    cluster_id: kubernetesRoleClusterMatch.value === 'single' ? clusterId : '',
-    cluster_match: kubernetesRoleClusterMatch.value,
-    cluster_pattern: kubernetesRoleClusterMatch.value === 'pattern' ? clusterPattern : '',
-    name,
-    role_kind: kubernetesRoleKind.value,
-    role_name: roleName,
-    scope: kubernetesRoleScope.value,
-    namespaces,
-    rules,
-  }
-}
-
-async function saveKubernetesRole() {
-  if (kubernetesRoleSaving.value) return
-  kubernetesLoggingError.value = ''
-  const input = kubernetesRoleInput()
-  if (!input) return
-  kubernetesRoleSaving.value = true
-  try {
-    const saved = editingKubernetesRoleId.value
-      ? await api.updateKubernetesRbacGrant(editingKubernetesRoleId.value, input)
-      : await api.createKubernetesRbacGrant(input)
-    if (kubernetesLogging.value) {
-      const index = kubernetesLogging.value.rbac_grants.findIndex(grant => grant.id === saved.id)
-      if (index >= 0) kubernetesLogging.value.rbac_grants[index] = saved
-      else kubernetesLogging.value.rbac_grants.push(saved)
-    }
-    closeKubernetesRoleForm()
-  } catch (error: any) {
-    kubernetesLoggingError.value = error?.message || 'Unable to save the Kubernetes role.'
-  } finally {
-    kubernetesRoleSaving.value = false
-  }
-}
-
-async function deleteKubernetesRole(id: string) {
-  if (pendingKubernetesRoleDelete.value !== id) {
-    pendingKubernetesRoleDelete.value = id
-    return
-  }
-  kubernetesRoleSaving.value = true
-  kubernetesLoggingError.value = ''
-  try {
-    await api.deleteKubernetesRbacGrant(id)
-    if (kubernetesLogging.value) {
-      kubernetesLogging.value.rbac_grants = kubernetesLogging.value.rbac_grants
-        .filter(grant => grant.id !== id)
-    }
-    pendingKubernetesRoleDelete.value = ''
-  } catch (error: any) {
-    kubernetesLoggingError.value = error?.message || 'Unable to delete the Kubernetes role.'
-  } finally {
-    kubernetesRoleSaving.value = false
-  }
-}
-
-async function loadKubernetesLoggingSettings() {
-  if (kubernetesLoggingLoading.value) return
-  kubernetesLoggingLoading.value = true
-  kubernetesLoggingError.value = ''
-  try {
-    const settings = await api.getKubernetesLoggingSettings()
-    settings.rbac_grants ||= []
-    settings.gateways ||= []
-    settings.available_clusters ||= []
-    kubernetesLogging.value = settings
-    kubernetesSessionMinutes.value = Math.round(settings.max_session_seconds / 60)
-  } catch (error: any) {
-    kubernetesLoggingError.value = error?.message || 'Unable to load Kubernetes logging settings.'
-  } finally {
-    kubernetesLoggingLoading.value = false
-  }
-}
-
-async function saveKubernetesLoggingSettings() {
-  if (kubernetesLoggingSaving.value) return
-  const minutes = Number(kubernetesSessionMinutes.value)
-  if (!Number.isInteger(minutes) || minutes < 5 || minutes > 720) {
-    kubernetesLoggingError.value = 'Maximum session time must be between 5 minutes and 12 hours.'
-    return
-  }
-  kubernetesLoggingSaving.value = true
-  kubernetesLoggingError.value = ''
-  try {
-    kubernetesLogging.value = await api.setKubernetesLoggingSettings(minutes * 60)
-    kubernetesLoggingSaved.value = true
-    setTimeout(() => { kubernetesLoggingSaved.value = false }, 2000)
-  } catch (error: any) {
-    kubernetesLoggingError.value = error?.message || 'Unable to save Kubernetes logging settings.'
-  } finally {
-    kubernetesLoggingSaving.value = false
-  }
-}
-
-function kubernetesClientName(client: KubernetesClientSession): string {
-  return client.hostname || [client.os, client.arch].filter(Boolean).join(' / ') || 'Unknown client'
-}
-
-function formatKubernetesClientTime(value: string): string {
-  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`
-  return formatDate(normalized)
-}
-
-async function revokeKubernetesClient(sessionId: string) {
-  if (pendingKubernetesRevoke.value !== sessionId) {
-    pendingKubernetesRevoke.value = sessionId
-    return
-  }
-  revokingKubernetesClient.value = sessionId
-  kubernetesLoggingError.value = ''
-  try {
-    await api.revokeKubernetesClient(sessionId)
-    if (kubernetesLogging.value) {
-      kubernetesLogging.value.active_clients = kubernetesLogging.value.active_clients
-        .filter(client => client.session_id !== sessionId)
-    }
-    pendingKubernetesRevoke.value = ''
-  } catch (error: any) {
-    kubernetesLoggingError.value = error?.message || 'Unable to de-authenticate this client.'
-  } finally {
-    revokingKubernetesClient.value = ''
-  }
-}
-
-async function revokeAllKubernetesClients() {
-  if (pendingKubernetesRevoke.value !== 'all') {
-    pendingKubernetesRevoke.value = 'all'
-    return
-  }
-  revokingKubernetesClient.value = 'all'
-  kubernetesLoggingError.value = ''
-  try {
-    await api.revokeAllKubernetesClients()
-    if (kubernetesLogging.value) kubernetesLogging.value.active_clients = []
-    pendingKubernetesRevoke.value = ''
-  } catch (error: any) {
-    kubernetesLoggingError.value = error?.message || 'Unable to de-authenticate clients.'
-  } finally {
-    revokingKubernetesClient.value = ''
-  }
-}
-
 // ── Tab navigation ──
 const tabs = SETTINGS_TABS
 const groupedTabs = SETTINGS_TAB_GROUPS
@@ -418,13 +97,12 @@ const groupedTabs = SETTINGS_TAB_GROUPS
 // integration's own page. The rail's "Integrations" item expands into the same
 // list as a second-level menu.
 const integrationsMeta = SETTINGS_INTEGRATIONS
+const configPanels = SETTINGS_CONFIG_PANELS
 // The rail sub-menu reuses the same list (needs key + label).
 const integrationSubItems = integrationsMeta
 const integrationsExpanded = ref(false)
 const activeIntegration = ref<string>('') // '' = overview table
-const license = ref<LicenseStatus | null>(null)
-const licenseLoading = ref(false)
-
+const activeIntegrationMeta = computed(() => integrationsMeta.find(item => item.key === activeIntegration.value))
 interface RuntimeConfigEntry {
   key: string
   value: string | null
@@ -432,26 +110,13 @@ interface RuntimeConfigEntry {
   sensitive: boolean
   source: 'environment' | 'default'
 }
-interface RuntimeIntegration {
-  id: string
-  name: string
-  entitlement: string
-  compiled: boolean
-  licensed: boolean
-  loaded: boolean
-  manager_enabled: boolean
-  configured_targets: number
-}
 interface RuntimeConfig {
   tenant: string
   runtime: RuntimeConfigEntry[]
-  license: LicenseStatus
-  integrations: RuntimeIntegration[]
 }
 const runtimeConfig = ref<RuntimeConfig | null>(null)
 const runtimeConfigLoading = ref(false)
 const runtimeConfigError = ref('')
-const loadedIntegrationCount = computed(() => runtimeConfig.value?.integrations.filter(item => item.loaded).length ?? 0)
 const configuredSecretCount = computed(() => runtimeConfig.value?.runtime.filter(item => item.sensitive && item.configured).length ?? 0)
 
 async function loadRuntimeConfig() {
@@ -473,13 +138,6 @@ function selectIntegration(key: string) {
   integrationsExpanded.value = true
   activeIntegration.value = key
   navHash(`#integrations/${key}`)
-  if (key === 'kubernetes-logging' && isAdmin.value && !kubernetesLogging.value) loadKubernetesLoggingSettings()
-}
-
-// ── License ──
-async function loadLicense() {
-  licenseLoading.value = true
-  try { license.value = await api.getLicense() } catch { /* api.error */ } finally { licenseLoading.value = false }
 }
 
 const activeTab = ref<SettingsTabId>('general')
@@ -590,7 +248,6 @@ function onHashChange() {
       return
     }
     activeIntegration.value = integration.key
-    if (activeIntegration.value === 'kubernetes-logging' && isAdmin.value && !kubernetesLogging.value) loadKubernetesLoggingSettings()
   }
   if (tab === 'agent') activeAgentSubtab.value = validAgentSubtab(sub)
   if (tab === 'config' && !runtimeConfig.value) loadRuntimeConfig()
@@ -1904,9 +1561,6 @@ async function loadGroups() {
   try {
     const res = await api.listGroups()
     groups.value = res.groups
-    if (showKubernetesRoleForm.value && !kubernetesRoleGroupId.value) {
-      kubernetesRoleGroupId.value = kubernetesRoleGroups.value[0]?.id || ''
-    }
   } catch { /* error surfaced via api.error */ }
 }
 
@@ -2946,9 +2600,7 @@ onMounted(async () => {
   if (isAdmin.value) loadSessionTimeout()
   if (isAdmin.value && activeTab.value === 'performance') loadQueryLimits()
   loadFeatures()
-  loadLicense()
   if (activeTab.value === 'config') loadRuntimeConfig()
-  if (isAdmin.value && activeIntegration.value === 'kubernetes-logging') loadKubernetesLoggingSettings()
   // Deep-link directly onto #agent (or #firewall) skips switchTab — load here.
   if (activeTab.value === 'agent') loadAgentBudget()
   if (activeTab.value === 'firewall' && !firewallLoaded.value) loadFirewallRules()
@@ -3095,6 +2747,16 @@ function formatDate(ts: string): string {
         </header>
 
     <!-- ── Panels ── -->
+    <div
+      v-if="activeTabDef.component"
+      :id="`panel-${activeTabDef.id}`"
+      class="section"
+      role="tabpanel"
+      :aria-labelledby="`tab-${activeTabDef.id}`"
+    >
+      <component :is="activeTabDef.component" />
+    </div>
+
     <LogViewsSettings v-if="activeTab === 'log-views'" />
     <!-- API Keys Section -->
     <div
@@ -4047,71 +3709,10 @@ function formatDate(ts: string): string {
       role="tabpanel"
     >
       <!-- ── Per-integration page (deep-linkable: #integrations/<key>) ── -->
-      <div v-if="activeIntegration === 'postgresql'" id="integration-postgresql" class="set-card">
-        <div class="set-card-head">
-          <h2 class="card-title">PostgreSQL</h2>
-          <p class="card-desc">Monitor PostgreSQL health, query workload, schema, connections, and maintenance from the control room.</p>
-        </div>
-        <div v-if="licenseLoading" class="set-row">
-          <div class="set-row-text text-muted">Checking PostgreSQL entitlement…</div>
-        </div>
-        <template v-else-if="license?.valid && (license.entitlements ?? []).includes('postgres')">
-          <div class="set-row">
-            <div class="set-row-text">
-              <div class="set-row-label">PostgreSQL add-on enabled</div>
-              <div class="set-row-desc">The license includes the PostgreSQL collector entitlement.</div>
-            </div>
-            <div class="set-row-control">
-              <span class="lic-badge" style="color: var(--ok); border-color: var(--ok)">Entitled</span>
-            </div>
-          </div>
-          <div class="set-row">
-            <div class="set-row-text">
-              <div class="set-row-label">Open control room</div>
-              <div class="set-row-desc">View collector freshness, database health, queries, locks, schema, indexes, and vacuum signals.</div>
-            </div>
-            <div class="set-row-control">
-              <router-link class="btn btn-primary" to="/integrations/postgresql/overview">Open PostgreSQL</router-link>
-            </div>
-          </div>
-        </template>
-        <div v-else class="set-helm-note">
-          PostgreSQL is not included in the active license. Add the <code>postgres</code> entitlement to <code>RUSH_LICENSE_KEY</code> and restart query-api.
-        </div>
-      </div>
-
-      <div v-else-if="activeIntegration === 'mysql'" id="integration-mysql" class="set-card">
-        <div class="set-card-head">
-          <h2 class="card-title">MySQL</h2>
-          <p class="card-desc">See normalized query workload, wait time, blockers, table and index evidence, replication, and settings findings.</p>
-        </div>
-        <div v-if="licenseLoading" class="set-row">
-          <div class="set-row-text text-muted">Checking MySQL entitlement…</div>
-        </div>
-        <template v-else-if="license?.valid && (license.entitlements ?? []).includes('mysql')">
-          <div class="set-row">
-            <div class="set-row-text">
-              <div class="set-row-label">MySQL add-on enabled</div>
-              <div class="set-row-desc">The license includes the MySQL collector entitlement.</div>
-            </div>
-            <div class="set-row-control">
-              <span class="lic-badge" style="color: var(--ok); border-color: var(--ok)">Entitled</span>
-            </div>
-          </div>
-          <div class="set-row">
-            <div class="set-row-text">
-              <div class="set-row-label">Open control room</div>
-              <div class="set-row-desc">Start with current findings, then move into queries, waits, locks, and access-path evidence.</div>
-            </div>
-            <div class="set-row-control">
-              <router-link class="btn btn-primary" to="/integrations/mysql/overview">Open MySQL</router-link>
-            </div>
-          </div>
-        </template>
-        <div v-else class="set-helm-note">
-          MySQL is not included in the active license. Add the <code>mysql</code> entitlement to <code>RUSH_LICENSE_KEY</code> and restart query-api.
-        </div>
-      </div>
+      <component
+        :is="activeIntegrationMeta.component"
+        v-if="activeIntegrationMeta?.component"
+      />
 
       <div v-else-if="activeIntegration === 'argocd'" id="integration-argocd" class="set-card">
         <div class="set-card-head">
@@ -4215,210 +3816,6 @@ function formatDate(ts: string): string {
         <div v-else class="set-helm-note">
           Disabled in the Helm chart. Set <code>kubernetes.enabled=true</code> (and redeploy) to manage this integration here.
         </div>
-      </div>
-
-      <div v-else-if="activeIntegration === 'kubernetes-logging'" id="integration-kubernetes-logging" class="set-card">
-        <div class="set-card-head klog-card-head">
-          <div>
-            <h2 class="card-title">Kubernetes logging</h2>
-            <p class="card-desc">Control browser-approved kubectl sessions and block new requests from authenticated clients.</p>
-          </div>
-          <router-link class="action-btn" to="/kubernetes-access">View activity</router-link>
-        </div>
-        <div v-if="!featureOn('kubernetes_logging')" class="set-helm-note">
-          Kubernetes logging is unavailable. Enable <code>queryApi.kubernetesAccess.enabled=true</code>, configure the gateway, and add the <code>kubernetes_access</code> license entitlement.
-        </div>
-        <div v-else-if="!isAdmin" class="set-helm-note">
-          An administrator can change the session limit and de-authenticate clients.
-        </div>
-        <template v-else>
-          <div v-if="kubernetesLoggingError" class="klog-error" role="alert">
-            <span class="err-mark">!</span>
-            <span>{{ kubernetesLoggingError }}</span>
-            <button v-if="!kubernetesLogging" class="action-btn" @click="loadKubernetesLoggingSettings">Retry</button>
-          </div>
-          <div v-if="kubernetesLoggingLoading && !kubernetesLogging" class="klog-loading">Loading Kubernetes logging settings…</div>
-          <template v-else-if="kubernetesLogging">
-            <div class="set-row">
-              <div class="set-row-text">
-                <div class="set-row-label">Maximum session time</div>
-                <div class="set-row-desc">How long a browser-approved kubectl credential remains valid. Changes apply to new approvals.</div>
-              </div>
-              <div class="set-row-control klog-duration">
-                <input
-                  v-model.number="kubernetesSessionMinutes"
-                  class="form-input mono"
-                  type="number"
-                  min="5"
-                  max="720"
-                  step="5"
-                  aria-label="Maximum Kubernetes session time in minutes"
-                />
-                <span>minutes</span>
-              </div>
-            </div>
-            <div class="set-save-bar">
-              <span v-if="kubernetesLoggingSaved" class="save-confirmation" aria-live="polite">Saved</span>
-              <button
-                class="btn btn-primary"
-                :disabled="kubernetesLoggingSaving"
-                @click="saveKubernetesLoggingSettings"
-              >{{ kubernetesLoggingSaving ? 'Saving…' : 'Save session limit' }}</button>
-            </div>
-
-            <div class="klog-view-tabs" role="tablist" aria-label="Kubernetes logging views">
-              <button type="button" role="tab" :aria-selected="activeKubernetesLoggingTab === 'roles'" :class="['klog-view-tab', { active: activeKubernetesLoggingTab === 'roles' }]" @click="activeKubernetesLoggingTab = 'roles'">
-                <span>Roles</span><span class="klog-view-count">{{ kubernetesLogging.rbac_grants.length }}</span>
-              </button>
-              <button type="button" role="tab" :aria-selected="activeKubernetesLoggingTab === 'gateways'" :class="['klog-view-tab', { active: activeKubernetesLoggingTab === 'gateways' }]" @click="activeKubernetesLoggingTab = 'gateways'">
-                <span>Clusters &amp; gateways</span><span class="klog-view-count">{{ kubernetesLogging.gateways.length }}</span>
-              </button>
-              <button type="button" role="tab" :aria-selected="activeKubernetesLoggingTab === 'users'" :class="['klog-view-tab', { active: activeKubernetesLoggingTab === 'users' }]" @click="activeKubernetesLoggingTab = 'users'">
-                <span>Authenticated users</span><span class="klog-view-count">{{ kubernetesLogging.active_clients.length }}</span>
-              </button>
-            </div>
-
-            <template v-if="activeKubernetesLoggingTab === 'roles'">
-              <div class="klog-roles-head">
-                <div>
-                  <div class="klog-section-title">Kubernetes roles</div>
-                  <div class="klog-section-desc">Map Rush groups to native Kubernetes RBAC. Changes reach the cluster within about 15 seconds.</div>
-                </div>
-                <button class="btn btn-primary" @click="openKubernetesRoleForm()">Add role</button>
-              </div>
-              <div v-if="kubernetesLogging.rbac_grants.length" class="klog-role-list">
-                <div v-for="grant in kubernetesLogging.rbac_grants" :key="grant.id" class="klog-role-row">
-                  <div class="klog-role-mark" aria-hidden="true">{{ groupNameById(grant.group_id).charAt(0).toUpperCase() }}</div>
-                  <div class="klog-role-main">
-                    <div class="klog-role-name">{{ grant.name }}</div>
-                    <div class="klog-role-meta">
-                      <span>{{ groupNameById(grant.group_id) }}</span>
-                      <span>{{ kubernetesClusterTargetLabel(grant) }}</span>
-                      <code>{{ grant.kubernetes_group }}</code>
-                    </div>
-                  </div>
-                  <div class="klog-role-access">
-                    <span class="klog-role-kind">{{ kubernetesRoleKindLabel(grant) }}</span>
-                    <span :title="kubernetesRoleScopeLabel(grant)">{{ kubernetesRoleScopeLabel(grant) }}</span>
-                  </div>
-                  <div class="klog-client-action">
-                    <template v-if="pendingKubernetesRoleDelete === grant.id">
-                      <button class="action-btn" @click="pendingKubernetesRoleDelete = ''">Cancel</button>
-                      <button class="action-btn action-btn-danger" :disabled="kubernetesRoleSaving" @click="deleteKubernetesRole(grant.id)">
-                        {{ kubernetesRoleSaving ? 'Deleting…' : 'Confirm' }}
-                      </button>
-                    </template>
-                    <template v-else>
-                      <button class="action-btn" @click="openKubernetesRoleForm(grant)">Edit</button>
-                      <button class="action-btn action-btn-danger" @click="deleteKubernetesRole(grant.id)">Delete</button>
-                    </template>
-                  </div>
-                </div>
-              </div>
-              <div v-else class="klog-empty klog-role-empty">
-                <div>No Kubernetes roles</div>
-                <span>Users can sign in, but Kubernetes will deny requests until their Rush group has a role.</span>
-                <button class="action-btn" @click="openKubernetesRoleForm()">Add the first role</button>
-              </div>
-            </template>
-
-            <template v-else-if="activeKubernetesLoggingTab === 'gateways'">
-              <div class="klog-clients-head">
-                <div>
-                  <div class="klog-section-title">Clusters &amp; gateways</div>
-                  <div class="klog-section-desc">Configured gateways and gateways found in {{ activeTenantName }} request history.</div>
-                </div>
-                <span class="klog-count">{{ kubernetesLogging.gateways.length }} total</span>
-              </div>
-              <div class="klog-gateway-note">Status reflects recorded kubectl requests. An idle gateway can still be healthy.</div>
-              <div v-if="kubernetesLogging.gateways.length" class="klog-gateway-list">
-                <div v-for="gateway in kubernetesLogging.gateways" :key="`${gateway.gateway_id}:${gateway.cluster_id}`" class="klog-gateway-row">
-                  <div class="klog-gateway-mark" aria-hidden="true">K</div>
-                  <div class="klog-gateway-main">
-                    <div class="klog-gateway-cluster">{{ gateway.cluster_id }}</div>
-                    <div class="klog-gateway-meta">
-                      <code>{{ gateway.gateway_id }}</code>
-                      <span v-if="gateway.configured">Configured here</span>
-                    </div>
-                  </div>
-                  <div class="klog-gateway-activity">
-                    <span :class="['klog-gateway-status', `is-${kubernetesGatewayStatus(gateway).tone}`]">{{ kubernetesGatewayStatus(gateway).label }}</span>
-                    <span>{{ kubernetesGatewayActivityLabel(gateway) }}</span>
-                  </div>
-                  <div class="klog-gateway-requests">
-                    <strong>{{ gateway.recorded_requests.toLocaleString() }}</strong>
-                    <span>recorded requests</span>
-                  </div>
-                </div>
-              </div>
-              <div v-else class="klog-empty">
-                <div>No gateways found</div>
-                <span>Configure a Kubernetes access gateway or send a kubectl request through one.</span>
-              </div>
-            </template>
-
-            <template v-else>
-              <div class="klog-clients-head">
-                <div>
-                  <div class="klog-section-title">Authenticated users</div>
-                  <div class="klog-section-desc">Users with a live kubectl credential for {{ activeTenantName }}.</div>
-                </div>
-                <div class="klog-clients-actions">
-                  <span class="klog-count">{{ kubernetesLogging.active_clients.length }} active</span>
-                  <template v-if="kubernetesLogging.active_clients.length">
-                    <template v-if="pendingKubernetesRevoke === 'all'">
-                      <button class="action-btn" @click="pendingKubernetesRevoke = ''">Cancel</button>
-                      <button
-                        class="action-btn action-btn-danger"
-                        :disabled="revokingKubernetesClient === 'all'"
-                        @click="revokeAllKubernetesClients"
-                      >{{ revokingKubernetesClient === 'all' ? 'De-authenticating…' : 'Confirm all' }}</button>
-                    </template>
-                    <button v-else class="action-btn action-btn-danger" @click="revokeAllKubernetesClients">De-auth all</button>
-                  </template>
-                </div>
-              </div>
-
-              <div v-if="kubernetesLogging.active_clients.length" class="klog-client-list">
-                <div
-                  v-for="client in kubernetesLogging.active_clients"
-                  :key="client.session_id"
-                  class="klog-client-row"
-                >
-                  <div class="klog-client-mark" aria-hidden="true">{{ (client.username || client.hostname || '?').charAt(0).toUpperCase() }}</div>
-                  <div class="klog-client-main">
-                    <div class="klog-client-name">{{ client.username }}</div>
-                    <div class="klog-client-meta">
-                      <span>{{ kubernetesClientName(client) }}</span>
-                      <span>{{ client.cluster_id }}</span>
-                      <span v-if="client.cli_version">Rush CLI {{ client.cli_version }}</span>
-                      <span v-if="client.os || client.arch">{{ [client.os, client.arch].filter(Boolean).join(' / ') }}</span>
-                    </div>
-                  </div>
-                  <div class="klog-client-time">
-                    <span>Approved {{ formatKubernetesClientTime(client.approved_at) }}</span>
-                    <span>Expires {{ formatKubernetesClientTime(client.expires_at) }}</span>
-                  </div>
-                  <div class="klog-client-action">
-                    <template v-if="pendingKubernetesRevoke === client.session_id">
-                      <button class="action-btn" @click="pendingKubernetesRevoke = ''">Cancel</button>
-                      <button
-                        class="action-btn action-btn-danger"
-                        :disabled="revokingKubernetesClient === client.session_id"
-                        @click="revokeKubernetesClient(client.session_id)"
-                      >{{ revokingKubernetesClient === client.session_id ? 'De-authenticating…' : 'Confirm' }}</button>
-                    </template>
-                    <button v-else class="action-btn action-btn-danger" @click="revokeKubernetesClient(client.session_id)">De-auth</button>
-                  </div>
-                </div>
-              </div>
-              <div v-else class="klog-empty">
-                <div>No authenticated users</div>
-                <span>The next browser-approved kubectl login will appear here.</span>
-              </div>
-            </template>
-          </template>
-        </template>
       </div>
 
       <div v-else-if="activeIntegration === 'cloudwatch'" id="integration-cloudwatch" class="set-card">
@@ -4537,50 +3934,17 @@ function formatDate(ts: string): string {
             <strong class="config-summary-value mono">{{ runtimeConfig.tenant }}</strong>
           </div>
           <div class="config-summary-item">
-            <span class="config-summary-label">Loaded integrations</span>
-            <strong class="config-summary-value">{{ loadedIntegrationCount }}</strong>
-          </div>
-          <div class="config-summary-item">
             <span class="config-summary-label">Secrets</span>
             <strong class="config-summary-value">{{ configuredSecretCount }} configured</strong>
           </div>
-          <div class="config-summary-item">
-            <span class="config-summary-label">License</span>
-            <strong class="config-summary-value config-summary-status" :class="`is-${runtimeConfig.license?.status || 'unknown'}`">
-              {{ runtimeConfig.license?.status || 'unknown' }}
-            </strong>
-          </div>
         </div>
 
-        <div class="set-card config-card">
-          <div class="set-card-head">
-            <h2 class="card-title">Loaded integrations</h2>
-            <p class="card-desc">Build-time availability, license state, and active configuration for this instance.</p>
-          </div>
-          <div class="config-integrations">
-            <div v-for="integration in runtimeConfig.integrations" :key="integration.id" class="config-integration">
-              <div class="config-integration-mark" :class="{ 'is-loaded': integration.loaded }"></div>
-              <div class="config-integration-copy">
-                <div class="config-integration-name">{{ integration.name }}</div>
-                <div class="config-integration-id mono">{{ integration.id }} · requires {{ integration.entitlement }}</div>
-              </div>
-              <div class="config-integration-meta">
-                <span class="config-pill" :class="integration.compiled ? 'is-on' : 'is-off'">
-                  {{ integration.compiled ? 'Included' : 'Not included' }}
-                </span>
-                <span class="config-pill" :class="integration.licensed ? 'is-on' : 'is-off'">
-                  {{ integration.licensed ? 'Licensed' : 'Not licensed' }}
-                </span>
-                <span class="config-pill" :class="integration.manager_enabled ? 'is-on' : 'is-off'">
-                  {{ integration.manager_enabled ? 'Supervisor on' : 'Supervisor off' }}
-                </span>
-                <span v-if="integration.configured_targets" class="config-target-count">
-                  {{ integration.configured_targets }} target{{ integration.configured_targets === 1 ? '' : 's' }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <component
+          :is="panel.component"
+          v-for="panel in configPanels"
+          :key="panel.key"
+          :runtime-config="runtimeConfig"
+        />
 
         <div class="set-card config-card">
           <div class="set-card-head">
@@ -4603,66 +3967,6 @@ function formatDate(ts: string): string {
           </div>
         </div>
       </template>
-    </div>
-
-    <!-- License Section -->
-    <div
-      v-show="activeTab === 'license'"
-      id="panel-license"
-      class="section"
-      role="tabpanel"
-    >
-      <div class="set-card">
-        <div class="set-card-head">
-          <h2 class="card-title">License</h2>
-          <p class="card-desc">
-            Set via the <code>RUSH_LICENSE_KEY</code> environment variable (a Kubernetes Secret in production).
-            The server verifies it offline against an embedded public key.
-          </p>
-        </div>
-
-        <div v-if="licenseLoading" class="set-row"><div class="set-row-text text-muted">Loading…</div></div>
-
-        <template v-else-if="license">
-          <div class="set-row">
-            <div class="set-row-text">
-              <div class="set-row-label">Status</div>
-              <div class="set-row-desc">{{ license.reason || 'License verified and active.' }}</div>
-            </div>
-            <div class="set-row-control">
-              <span class="lic-badge" :style="{
-                color: license.status === 'active' ? 'var(--ok)' : license.status === 'expired' ? 'var(--warning)' : 'var(--text-muted)',
-                borderColor: license.status === 'active' ? 'var(--ok)' : license.status === 'expired' ? 'var(--warning)' : 'var(--border-default)'
-              }">{{ license.status?.toUpperCase() || 'UNKNOWN' }}</span>
-            </div>
-          </div>
-
-          <div class="set-row">
-            <div class="set-row-text"><div class="set-row-label">Customer</div></div>
-            <div class="set-row-control mono">{{ license.customer || '—' }}</div>
-          </div>
-          <div class="set-row">
-            <div class="set-row-text"><div class="set-row-label">Plan</div></div>
-            <div class="set-row-control mono">{{ license.plan || 'Not reported' }}</div>
-          </div>
-          <div class="set-row">
-            <div class="set-row-text"><div class="set-row-label">Expires</div></div>
-            <div class="set-row-control mono">{{ license.expires_at ? new Date(license.expires_at).toLocaleString() : '—' }}</div>
-          </div>
-          <div class="set-row">
-            <div class="set-row-text">
-              <div class="set-row-label">Add-ons</div>
-              <div class="set-row-desc">Paid add-ons unlocked by this license.</div>
-            </div>
-            <div class="set-row-control">
-              <template v-if="(license.entitlements ?? []).length">
-                <span v-for="e in (license.entitlements ?? [])" :key="e" class="lic-chip">{{ e }}</span>
-              </template>
-              <span v-else class="text-muted" style="font-size: 12px">None</span>
-            </div>
-          </div>
-        </template>
-      </div>
     </div>
 
     <!-- General Section -->
@@ -6589,146 +5893,6 @@ function formatDate(ts: string): string {
                 :disabled="!newUserUsername.trim() || !newUserPassword"
               >
                 Create User
-              </button>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
-
-    <!-- ═══ Kubernetes role drawer ═══ -->
-    <Teleport to="body">
-      <Transition name="group-drawer">
-        <div v-if="showKubernetesRoleForm && isAdmin" class="group-drawer-overlay" @click.self="closeKubernetesRoleForm">
-          <div class="group-drawer group-drawer-wide klog-role-drawer" role="dialog" aria-modal="true" aria-label="Kubernetes role">
-            <div class="group-drawer-header">
-              <span class="group-drawer-title">{{ editingKubernetesRoleId ? 'Edit Kubernetes role' : 'Add Kubernetes role' }}</span>
-              <button class="group-drawer-close" @click="closeKubernetesRoleForm" aria-label="Close">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                  <path d="M18 6 6 18M6 6l12 12"/>
-                </svg>
-              </button>
-            </div>
-            <div class="group-drawer-body">
-              <div class="klog-role-drawer-intro">
-                Users receive this access when they sign in with normal kubectl and belong to the selected Rush group.
-              </div>
-              <div class="klog-role-form-grid">
-                <div class="form-group-inline klog-role-form-wide">
-                  <label class="form-label" for="klog-role-name">Name</label>
-                  <input id="klog-role-name" v-model="kubernetesRoleName" class="form-input" placeholder="Production readers" />
-                </div>
-                <div class="form-group-inline klog-role-form-wide">
-                  <label class="form-label" for="klog-role-group">Rush group</label>
-                  <select id="klog-role-group" v-model="kubernetesRoleGroupId" class="form-input">
-                    <option value="" disabled>Select a group…</option>
-                    <option v-for="group in kubernetesRoleGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
-                  </select>
-                </div>
-                <div class="form-group-inline klog-role-form-wide">
-                  <label class="form-label">Clusters</label>
-                  <div class="klog-cluster-target-grid" role="group" aria-label="Clusters covered by this role">
-                    <button type="button" :class="['klog-cluster-target-option', { active: kubernetesRoleClusterMatch === 'single' }]" :aria-pressed="kubernetesRoleClusterMatch === 'single'" @click="kubernetesRoleClusterMatch = 'single'">
-                      <strong>One cluster</strong><span>Choose by name</span>
-                    </button>
-                    <button type="button" :class="['klog-cluster-target-option', { active: kubernetesRoleClusterMatch === 'all' }]" :aria-pressed="kubernetesRoleClusterMatch === 'all'" @click="kubernetesRoleClusterMatch = 'all'">
-                      <strong>All clusters</strong><span>Current and new</span>
-                    </button>
-                    <button type="button" :class="['klog-cluster-target-option', { active: kubernetesRoleClusterMatch === 'pattern' }]" :aria-pressed="kubernetesRoleClusterMatch === 'pattern'" @click="kubernetesRoleClusterMatch = 'pattern'">
-                      <strong>Name pattern</strong><span>For a cluster set</span>
-                    </button>
-                  </div>
-                  <div v-if="kubernetesRoleClusterMatch === 'single'" class="klog-cluster-target-value">
-                    <label class="form-label" for="klog-role-cluster">Cluster name</label>
-                    <input id="klog-role-cluster" v-model="kubernetesRoleClusterId" class="form-input mono" list="kubernetes-cluster-options" placeholder="prod-us-east-1" />
-                    <datalist id="kubernetes-cluster-options">
-                      <option v-for="cluster in kubernetesLogging?.available_clusters || []" :key="cluster" :value="cluster" />
-                    </datalist>
-                  </div>
-                  <div v-else-if="kubernetesRoleClusterMatch === 'pattern'" class="klog-cluster-target-value">
-                    <label class="form-label" for="klog-role-cluster-pattern">Cluster name pattern</label>
-                    <input id="klog-role-cluster-pattern" v-model="kubernetesRoleClusterPattern" class="form-input mono" placeholder="*-production" />
-                    <span class="klog-cluster-target-help">Matches the whole name. <code>*</code> matches any text and <code>?</code> matches one character.</span>
-                  </div>
-                  <div v-else class="klog-cluster-target-help klog-cluster-target-all">This role applies to every cluster connected to this Rush tenant.</div>
-                </div>
-              </div>
-
-              <div class="group-drawer-section">
-                <label class="form-label">Access level</label>
-                <div class="klog-role-kind-grid">
-                  <button type="button" :class="['klog-role-kind-option', { active: kubernetesRoleKind === 'view' }]" @click="kubernetesRoleKind = 'view'">
-                    <strong>View</strong><span>Read most resources</span>
-                  </button>
-                  <button type="button" :class="['klog-role-kind-option', { active: kubernetesRoleKind === 'edit' }]" @click="kubernetesRoleKind = 'edit'">
-                    <strong>Edit</strong><span>Manage workloads</span>
-                  </button>
-                  <button type="button" :class="['klog-role-kind-option', { active: kubernetesRoleKind === 'admin' }]" @click="kubernetesRoleKind = 'admin'">
-                    <strong>Admin</strong><span>Full workload access</span>
-                  </button>
-                  <button type="button" :class="['klog-role-kind-option', { active: kubernetesRoleKind === 'existing' }]" @click="kubernetesRoleKind = 'existing'">
-                    <strong>Existing</strong><span>Use a ClusterRole</span>
-                  </button>
-                  <button type="button" :class="['klog-role-kind-option', { active: kubernetesRoleKind === 'custom' }]" @click="kubernetesRoleKind = 'custom'">
-                    <strong>Custom</strong><span>Include CRDs</span>
-                  </button>
-                </div>
-              </div>
-
-              <div v-if="kubernetesRoleKind === 'existing'" class="group-drawer-section">
-                <label class="form-label" for="klog-existing-role">ClusterRole name</label>
-                <input id="klog-existing-role" v-model="kubernetesExistingRoleName" class="form-input mono klog-role-full-input" placeholder="cluster-admin" />
-                <div v-if="kubernetesExistingRoleName.trim() === 'cluster-admin'" class="klog-rbac-warning">
-                  This grants complete control of the cluster. Use it only for a tightly controlled Rush group.
-                </div>
-              </div>
-
-              <div v-if="kubernetesRoleKind === 'custom'" class="group-drawer-section">
-                <div class="klog-custom-rules-head">
-                  <div>
-                    <label class="form-label">Custom rules</label>
-                    <p>Use the CRD’s API group and plural resource name. Leave API groups blank for core resources.</p>
-                  </div>
-                  <button type="button" class="action-btn" @click="addKubernetesRoleRule">Add rule</button>
-                </div>
-                <div class="klog-custom-rules">
-                  <div v-for="(rule, index) in kubernetesRoleRules" :key="index" class="klog-custom-rule">
-                    <div class="klog-custom-rule-number">Rule {{ index + 1 }}</div>
-                    <button v-if="kubernetesRoleRules.length > 1" type="button" class="group-drawer-close klog-rule-remove" :aria-label="`Remove rule ${index + 1}`" @click="removeKubernetesRoleRule(index)">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
-                    </button>
-                    <label class="form-label">API groups</label>
-                    <input v-model="rule.apiGroups" class="form-input mono" placeholder="argoproj.io" />
-                    <label class="form-label">Resources</label>
-                    <input v-model="rule.resources" class="form-input mono" placeholder="applications, applications/status" />
-                    <label class="form-label">Verbs</label>
-                    <input v-model="rule.verbs" class="form-input mono" placeholder="get, list, watch" />
-                  </div>
-                </div>
-                <div class="klog-rbac-note">Custom rules cannot grant access to Kubernetes RBAC objects. To do that deliberately, choose an existing ClusterRole.</div>
-              </div>
-
-              <div class="group-drawer-section klog-role-scope-grid">
-                <div class="form-group-inline">
-                  <label class="form-label" for="klog-role-scope">Scope</label>
-                  <select id="klog-role-scope" v-model="kubernetesRoleScope" class="form-input">
-                    <option value="namespaces">Selected namespaces</option>
-                    <option value="cluster">Entire cluster</option>
-                  </select>
-                </div>
-                <div v-if="kubernetesRoleScope === 'namespaces'" class="form-group-inline">
-                  <label class="form-label" for="klog-role-namespaces">Namespaces</label>
-                  <input id="klog-role-namespaces" v-model="kubernetesRoleNamespaces" class="form-input mono" placeholder="default, staging" />
-                </div>
-              </div>
-              <div v-if="kubernetesLoggingError" class="klog-error klog-drawer-error" role="alert">
-                <span class="err-mark">!</span><span>{{ kubernetesLoggingError }}</span>
-              </div>
-            </div>
-            <div class="group-drawer-footer">
-              <button class="btn btn-secondary" @click="closeKubernetesRoleForm">Cancel</button>
-              <button class="btn btn-primary" :disabled="kubernetesRoleSaving" @click="saveKubernetesRole">
-                {{ kubernetesRoleSaving ? 'Saving…' : editingKubernetesRoleId ? 'Save role' : 'Add role' }}
               </button>
             </div>
           </div>

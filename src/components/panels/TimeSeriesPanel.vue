@@ -6,6 +6,7 @@ import type { TimeSeriesPanelProps } from './types'
 const props = withDefaults(defineProps<TimeSeriesPanelProps>(), {
   buckets: () => [],
   series: undefined,
+  fill: null,
   deploys: () => [],
   thresholds: () => [],
   showChartWhenEmpty: false,
@@ -51,6 +52,7 @@ const hasData = () => Boolean(
       :buckets="buckets"
       :series="series"
       :display-mode="displayMode"
+      :fill="fill"
       :bucket-seconds="bucketSeconds"
       :time-domain="timeDomain"
       :deploys="deploys"

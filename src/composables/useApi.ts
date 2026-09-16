@@ -42,7 +42,6 @@ import type {
   LatencyHistogram,
   EndpointsResponse,
   ServiceErrorsResponse,
-  LicenseStatus,
   PromVectorResponse,
   PromMatrixResponse,
   ApiKey,
@@ -115,23 +114,11 @@ import type {
   AuditListResponse,
   AuditQueryParams,
   AuditVerifyResponse,
-  KubernetesAccessDetailResponse,
-  KubernetesAccessEvent,
-  KubernetesAccessListResponse,
-  KubernetesAccessQueryParams,
-  KubernetesLoggingSettings,
-  KubernetesRbacGrant,
-  KubernetesRbacGrantInput,
-  KubernetesSessionChunkListResponse,
   ExploreSearchRequest,
   ExploreSearchResponse,
   QueryLimitsConfig,
   QueryLimitsResponse,
 } from '../types'
-import {
-  normalizeAccessDetailResponse,
-  normalizeAccessListResponse,
-} from '../lib/kubernetesAccess'
 
 const API_BASE = '/api/v1'
 
@@ -196,7 +183,7 @@ function requestHeaders(input: HeadersInit | undefined, tenant: string): Record<
   return headers
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+export async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const { activeTenant } = useTenant()
   const tenant = activeTenant.value
   const userId = storageUserId.value || 'anonymous'
@@ -268,6 +255,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     }
   }
 }
+
+const request = apiRequest
 
 export function useApi() {
   const loading = ref(false)
@@ -685,33 +674,6 @@ export function useApi() {
     if (minutes) qs.set('minutes', String(minutes))
     if (mode) qs.set('mode', mode)
     return await request(`/services/errors?${qs.toString()}`)
-  }
-
-  // ── License ──
-  async function getLicense(): Promise<LicenseStatus> {
-    return await request('/license')
-  }
-
-  async function submitExplain(server: string, query: string, db = ''): Promise<{ id: string }> {
-    return await request('/integrations/postgres/explain', {
-      method: 'POST',
-      body: JSON.stringify({ server, db, query }),
-    })
-  }
-
-  async function getExplainJob(id: string): Promise<{ status: string; db: string; plan_json: string; error: string }> {
-    return await request(`/integrations/postgres/explain/${encodePathSegment(id)}`)
-  }
-
-  async function submitMySqlExplain(server: string, query: string, db = ''): Promise<{ id: string }> {
-    return await request('/integrations/mysql/explain', {
-      method: 'POST',
-      body: JSON.stringify({ server, db, query }),
-    })
-  }
-
-  async function getMySqlExplainJob(id: string): Promise<{ status: string; db: string; plan_json: string; error: string }> {
-    return await request(`/integrations/mysql/explain/${encodePathSegment(id)}`)
   }
 
   // ── Deploy API ──
@@ -1721,56 +1683,13 @@ export function useApi() {
 
   // ── Feature flags / app settings ──
 
-  async function getFeatures(): Promise<{ argocd: boolean; sre_agent: boolean; kubernetes_logging: boolean; export_max_rows: number; deploy_markers: boolean; rum: boolean }> {
+  async function getFeatures(): Promise<{ argocd: boolean; sre_agent: boolean; export_max_rows: number; deploy_markers: boolean; rum: boolean }> {
     return await request('/features')
-  }
-
-  async function getKubernetesLoggingSettings(): Promise<KubernetesLoggingSettings> {
-    return await request('/settings/kubernetes-logging')
-  }
-
-  async function setKubernetesLoggingSettings(maxSessionSeconds: number): Promise<KubernetesLoggingSettings> {
-    return await request('/settings/kubernetes-logging', {
-      method: 'PUT',
-      body: JSON.stringify({ max_session_seconds: maxSessionSeconds }),
-    })
-  }
-
-  async function revokeKubernetesClient(sessionId: string): Promise<void> {
-    await request(`/settings/kubernetes-logging/clients/${encodePathSegment(sessionId)}`, {
-      method: 'DELETE',
-    })
-  }
-
-  async function revokeAllKubernetesClients(): Promise<{ revoked: number }> {
-    return await request('/settings/kubernetes-logging', { method: 'DELETE' })
-  }
-
-  async function createKubernetesRbacGrant(input: KubernetesRbacGrantInput): Promise<KubernetesRbacGrant> {
-    return await request('/settings/kubernetes-logging/roles', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    })
-  }
-
-  async function updateKubernetesRbacGrant(id: string, input: KubernetesRbacGrantInput): Promise<KubernetesRbacGrant> {
-    return await request(`/settings/kubernetes-logging/roles/${encodePathSegment(id)}`, {
-      method: 'PUT',
-      body: JSON.stringify(input),
-    })
-  }
-
-  async function deleteKubernetesRbacGrant(id: string): Promise<void> {
-    await request(`/settings/kubernetes-logging/roles/${encodePathSegment(id)}`, {
-      method: 'DELETE',
-    })
   }
 
   async function getRuntimeConfig(): Promise<{
     tenant: string
     runtime: Array<{ key: string; value: string | null; configured: boolean; sensitive: boolean; source: 'environment' | 'default' }>
-    license: LicenseStatus
-    integrations: Array<{ id: string; name: string; entitlement: string; compiled: boolean; licensed: boolean; loaded: boolean; manager_enabled: boolean; configured_targets: number }>
   }> {
     return await request('/settings/config')
   }
@@ -2040,81 +1959,11 @@ export function useApi() {
     return await request('/audit/verify')
   }
 
-  // Kubernetes access recording API. The backend enforces admin access.
-
-  async function getKubernetesAccessEvents(
-    params?: KubernetesAccessQueryParams,
-  ): Promise<KubernetesAccessListResponse> {
-    const qs = new URLSearchParams()
-    if (params?.from) qs.set('from', params.from)
-    if (params?.to) qs.set('to', params.to)
-    if (params?.actor) qs.set('actor', params.actor)
-    if (params?.cluster) qs.set('cluster', params.cluster)
-    if (params?.namespace) qs.set('namespace', params.namespace)
-    if (params?.verb) qs.set('verb', params.verb)
-    if (params?.resource) qs.set('resource', params.resource)
-    if (params?.status) qs.set('status', params.status)
-    if (params?.source_kind) qs.set('source_kind', params.source_kind)
-    if (params?.recording_state) qs.set('recording_state', params.recording_state)
-    if (params?.q) qs.set('q', params.q)
-    if (params?.limit != null) qs.set('limit', String(params.limit))
-    if (params?.offset != null) qs.set('offset', String(params.offset))
-    const query = qs.toString()
-    const response = await request<KubernetesAccessListResponse | KubernetesAccessEvent[]>(
-      `/kubernetes/access-events${query ? '?' + query : ''}`,
-    )
-    return normalizeAccessListResponse(response)
-  }
-
-  async function getKubernetesAccessEvent(id: string): Promise<KubernetesAccessDetailResponse> {
-    const response = await request<KubernetesAccessDetailResponse | KubernetesAccessEvent>(
-      `/kubernetes/access-events/${encodePathSegment(id)}`,
-    )
-    return normalizeAccessDetailResponse(response)
-  }
-
-  async function getKubernetesSessionChunks(
-    sessionId: string,
-    afterSequence = 0,
-    limit = 512,
-  ): Promise<KubernetesSessionChunkListResponse> {
-    const qs = new URLSearchParams({
-      after_sequence: String(afterSequence),
-      limit: String(limit),
-    })
-    return await request<KubernetesSessionChunkListResponse>(
-      `/kubernetes/sessions/${encodePathSegment(sessionId)}/chunks?${qs}`,
-    )
-  }
-
-  async function approveKubernetesLogin(userCode: string): Promise<{
-    status: 'approved'
-    cluster_id: string
-    credential_expires_at: string
-  }> {
-    return await request('/kubernetes/login/approve', {
-      method: 'POST',
-      body: JSON.stringify({ user_code: userCode }),
-    })
-  }
-
-  async function getKubernetesLoginDetails(userCode: string): Promise<{
-    status: string
-    cluster_id: string
-    approval_expires_at: string
-    credential_ttl_seconds: number
-  }> {
-    return await request('/kubernetes/login/details', {
-      method: 'POST',
-      body: JSON.stringify({ user_code: userCode }),
-    })
-  }
-
   return {
     loading, error,
     login, logout, getMe, listAuthSessions, revokeAuthSession, getSessionTimeoutSettings, saveSessionTimeoutSettings,
-    getAuditEvents, verifyAuditChain, getKubernetesAccessEvents, getKubernetesAccessEvent, getKubernetesSessionChunks, approveKubernetesLogin, getKubernetesLoginDetails,
-    getTrace, queryEvents, queryExplore, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceTimeBreakdown, serviceTimeBreakdownTimeseries, serviceLatencyHistogram, serviceEndpoints, serviceErrors, getLicense, submitExplain, getExplainJob, submitMySqlExplain, getMySqlExplainJob, suggestValues, queryGroup,
+    getAuditEvents, verifyAuditChain,
+    getTrace, queryEvents, queryExplore, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceTimeBreakdown, serviceTimeBreakdownTimeseries, serviceLatencyHistogram, serviceEndpoints, serviceErrors, suggestValues, queryGroup,
     queryLogs, getLogDetail, getLogContext, countLogs, groupLogs, getLogHistogram, getLogViews, saveLogViews, suggestLogValues,
     listDashboards, getDashboard, createDashboard, updateDashboard, deleteDashboard,
     exportDashboard, importDashboard, listDashboardTemplates, createFromTemplate,
@@ -2147,7 +1996,7 @@ export function useApi() {
     listInvestigationSessions, getInvestigationSession, deleteInvestigationSession, listInvestigationTemplates,
     bubbleUp,
     listMonitors, getMonitor, createMonitor, updateMonitor, deleteMonitor, listMonitorEvents, previewMonitor, muteMonitor, unmuteMonitor, monitorAutocomplete, monitorSuggest,
-    getFeatures, getRuntimeConfig, getKubernetesLoggingSettings, setKubernetesLoggingSettings, revokeKubernetesClient, revokeAllKubernetesClients, createKubernetesRbacGrant, updateKubernetesRbacGrant, deleteKubernetesRbacGrant, setExportMaxRows, getQueryLimits, setQueryLimits, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, setSreAgentTenantAccess, listLlmProviders, createLlmProvider, updateLlmProvider, deleteLlmProvider, discoverLlmModels, listLlmModels, createLlmModel, updateLlmModel, deleteLlmModel, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
+    getFeatures, getRuntimeConfig, setExportMaxRows, getQueryLimits, setQueryLimits, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, setSreAgentTenantAccess, listLlmProviders, createLlmProvider, updateLlmProvider, deleteLlmProvider, discoverLlmModels, listLlmModels, createLlmModel, updateLlmModel, deleteLlmModel, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
     listMetricFirewall, createMetricFirewall, updateMetricFirewall, deleteMetricFirewall,
   }
 }

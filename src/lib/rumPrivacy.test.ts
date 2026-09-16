@@ -32,7 +32,6 @@ describe('RUM privacy', () => {
     '/setup/sso',
     '/settings',
     '/settings/users',
-    '/kubernetes-access/login/ABC123',
   ])('drops private interaction and error telemetry on %s', pathname => {
     expect(sanitizeRumEvent({ event_type: 'interaction' }, pathname)).toBeNull()
     expect(sanitizeRumEvent({ event_type: 'frustration' }, pathname)).toBeNull()

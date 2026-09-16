@@ -32,20 +32,16 @@ describe('entitledAddons', () => {
     expect(keys).toContain('argocd')
     expect(keys).toContain('fluxcd')
     expect(keys).toContain('kubernetes')
-    expect(keys).not.toContain('postgresql')
   })
 
-  it('does not include private integrations in the open-source edition', () => {
+  it('contains only the four integrations implemented in this edition', () => {
     const keys = catalog.map((a) => a.key)
-    expect(keys).not.toContain('postgresql')
-    expect(keys).not.toContain('mysql')
-    expect(keys).toContain('kubernetes')
-    expect(keys).not.toContain('kubernetes-logging')
+    expect(keys).toEqual(['argocd', 'fluxcd', 'kubernetes', 'cloudwatch'])
   })
 })
 
 describe('availableAddons', () => {
-  const hasEntitlement = (k: string) => k === 'postgres'
+  const hasEntitlement = () => false
 
   it('shows a free add-on only when both feature-enabled AND toggled on', () => {
     const featureOn = (k: string) => k === 'argocd'
@@ -61,11 +57,6 @@ describe('availableAddons', () => {
     const keys = availableAddons(hasEntitlement, featureOn, toggledOn).map((a) => a.key)
     expect(keys).not.toContain('argocd')
     expect(keys).not.toContain('argocd')
-  })
-
-  it('does not manufacture licensed add-ons from an entitlement alone', () => {
-    const keys = availableAddons(hasEntitlement, () => false, () => false).map((a) => a.key)
-    expect(keys).not.toContain('postgresql')
   })
 
   it('does not show an administrator-only add-on to a regular user', () => {
