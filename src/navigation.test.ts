@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NAVIGATION_ITEMS, navigationItemIsActive, visibleNavigationGroups } from './navigation'
+import { NAVIGATION_ITEMS, navigationItemIsActive, navigationItemVisible, visibleNavigationGroups } from './navigation'
 
 const baseContext = {
   isAdmin: false,
@@ -47,5 +47,28 @@ describe('navigationItemIsActive', () => {
     expect(navigationItemIsActive(alerts, 'monitor-create')).toBe(true)
     expect(navigationItemIsActive(services, 'service-detail')).toBe(true)
     expect(navigationItemIsActive(services, 'alerts')).toBe(false)
+  })
+})
+
+describe('paid navigation', () => {
+  const paidItem = {
+    id: 'paid-reports',
+    label: 'Paid reports',
+    path: '/paid-reports',
+    icon: 'R',
+    group: 'control' as const,
+    routeNames: ['paid-reports'],
+    entitlement: 'paid_reports',
+  }
+
+  it('shows a paid destination only for the matching entitlement', () => {
+    expect(navigationItemVisible(paidItem, {
+      ...baseContext,
+      hasEntitlement: entitlement => entitlement === 'paid_reports',
+    })).toBe(true)
+    expect(navigationItemVisible(paidItem, {
+      ...baseContext,
+      hasEntitlement: () => false,
+    })).toBe(false)
   })
 })
