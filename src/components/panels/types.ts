@@ -28,7 +28,7 @@ export interface TimeSeriesPanelSeries {
 }
 
 export interface TimeSeriesPanelProps extends PanelFrameProps {
-  displayMode?: 'lines' | 'stacked-bars'
+  displayMode?: 'lines' | 'stacked-lines' | 'stacked-bars'
   /** Shade the area between each line and the zero baseline. */
   fill?: boolean | null
   /** Width of each bar's time bucket, in seconds. */

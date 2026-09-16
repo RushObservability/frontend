@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from 'vue'
 import type { DeployMarker, WidgetData, WidgetType } from '../../types'
+import type { TimeSeriesPanelProps } from '../panels/types'
 import BarPanel from '../panels/BarPanel.vue'
 import StatPanel from '../panels/StatPanel.vue'
 import TablePanel from '../panels/TablePanel.vue'
@@ -14,6 +15,7 @@ const props = withDefaults(defineProps<{
   sourceLabel?: string
   rangeLabel?: string
   unit?: string
+  displayMode?: TimeSeriesPanelProps['displayMode']
   fill?: boolean | null
   data?: WidgetData
   deploys?: DeployMarker[]
@@ -65,6 +67,7 @@ const panelProps = computed<Record<string, unknown>>(() => {
     timeDomain: props.data?.time_domain,
     deploys: props.deploys || [],
     unit: props.unit || '',
+    displayMode: props.displayMode,
     fill: props.fill,
   }
 })
