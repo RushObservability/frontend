@@ -6,7 +6,7 @@ import StatPanel from '../panels/StatPanel.vue'
 import TablePanel from '../panels/TablePanel.vue'
 import TimeSeriesPanel from '../panels/TimeSeriesPanel.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   title: string
   type: WidgetType
   description?: string
@@ -14,12 +14,13 @@ const props = defineProps<{
   sourceLabel?: string
   rangeLabel?: string
   unit?: string
+  fill?: boolean | null
   data?: WidgetData
   deploys?: DeployMarker[]
   loading?: boolean
   error?: string | null
   editMode?: boolean
-}>()
+}>(), { fill: null })
 
 defineEmits<{
   edit: []
@@ -64,6 +65,7 @@ const panelProps = computed<Record<string, unknown>>(() => {
     timeDomain: props.data?.time_domain,
     deploys: props.deploys || [],
     unit: props.unit || '',
+    fill: props.fill,
   }
 })
 </script>

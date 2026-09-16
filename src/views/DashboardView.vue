@@ -532,6 +532,7 @@ function widgetStyle(widget: Widget) {
           :source-label="panelSourceLabel(widget)"
           :range-label="panelRangeLabel"
           :unit="(widget.display_config?.unit as string) || ''"
+          :fill="widget.display_config?.fill as boolean | undefined"
           :data="widgetDataMap[widget.id]"
           :deploys="deploys"
           :loading="widgetLoadingMap[widget.id]"
