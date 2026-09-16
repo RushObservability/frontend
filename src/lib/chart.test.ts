@@ -4,6 +4,7 @@ import {
   smoothAreaPath,
   straightLinePath,
   straightAreaPath,
+  straightBandPath,
   niceMax,
   fmtAxis,
   resolveTimeDomain,
@@ -58,6 +59,18 @@ describe('straightAreaPath', () => {
 
   it('returns empty for no points', () => {
     expect(straightAreaPath([], 100)).toBe('')
+  })
+})
+
+describe('straightBandPath', () => {
+  it('fills only the space between two lines', () => {
+    expect(straightBandPath([[0, 10], [20, 4]], [[0, 30], [20, 24]]))
+      .toBe('M0,10 L20,4 L20,24 L0,30 Z')
+  })
+
+  it('skips incomplete bands', () => {
+    expect(straightBandPath([], [])).toBe('')
+    expect(straightBandPath([[0, 10]], [])).toBe('')
   })
 })
 

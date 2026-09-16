@@ -15,6 +15,7 @@
   width: 100%;
   height: 100%;
 }
+.ts-stacked-area { fill-opacity: .22; }
 
 .ts-no-samples {
   position: absolute;
