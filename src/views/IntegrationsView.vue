@@ -7,6 +7,11 @@ import { useFeatures } from '../composables/useFeatures'
 import { useAuth } from '../composables/useAuth'
 import { getAddon, availableAddons, hasAddonEntitlement } from '../integrations/catalog'
 import { isAddonEnabled } from '../composables/useIntegrationEnabled'
+import {
+  preferredDatabaseScope,
+  sortDatabaseScopes,
+  type IntegrationDatabaseScope,
+} from '../lib/integrationDatabaseScope'
 import '../styles/views/IntegrationsView.css'
 
 const route = useRoute()
@@ -40,10 +45,11 @@ const activePage = computed(() => {
   if (!a) return undefined
   return a.pages.find((p) => p.key === pageKey.value) ?? a.pages[0]
 })
-const expandedNavigation = computed(() => addon.value?.key === 'postgresql')
+const presentation = computed(() => addon.value?.presentation)
+const expandedNavigation = computed(() => presentation.value?.navigation === 'grouped')
 const expandedGroups = computed(() => {
   if (!addon.value || !expandedNavigation.value) return []
-  const preferredOrder = ['Core', 'Workload', 'Storage', 'Operations', 'Posture']
+  const preferredOrder = presentation.value?.groupOrder ?? []
   const groups = new Map<string, typeof addon.value.pages>()
   for (const page of addon.value.pages) {
     const group = page.group || 'More'
@@ -88,7 +94,7 @@ function closeMoreViews(event: MouseEvent) {
   (event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')
 }
 
-// ── Server discovery (e.g. which Postgres instances are reporting) ──
+// ── Server discovery for integrations that report multiple instances ──
 const servers = ref<string[]>([])
 const serversLoaded = ref(false)
 const selectedServer = computed(() => (route.query.server as string) || servers.value[0] || '')
@@ -120,12 +126,13 @@ function selectServer(name: string) {
 
 // ── Database scope (within the selected instance) ──
 // A database is identified by host + db (same name can exist on different hosts).
-const dbs = ref<Array<{ host: string; db: string }>>([])
+const dbs = ref<IntegrationDatabaseScope[]>([])
 const selectedHost = computed(() => (route.query.host as string) || '')
-const selectedDb = computed(() => (route.query.db as string) || '') // '' = All
+const selectedDb = computed(() => (route.query.db as string) || '')
 const selectedPair = computed(() =>
   selectedHost.value || selectedDb.value ? `${selectedHost.value}\t${selectedDb.value}` : '',
 )
+const requiresDatabaseSelection = computed(() => addon.value?.databaseSelection === 'required')
 
 async function loadDbs() {
   dbs.value = []
@@ -134,7 +141,7 @@ async function loadDbs() {
   try {
     const res = await api.promQuery(`${metric}{service_name="${selectedServer.value}"}`)
     const seen = new Set<string>()
-    const pairs: Array<{ host: string; db: string }> = []
+    const pairs: IntegrationDatabaseScope[] = []
     for (const s of res.result) {
       const host = s.metric.host || ''
       const db = s.metric.db || ''
@@ -142,14 +149,24 @@ async function loadDbs() {
       const k = `${host}\t${db}`
       if (!seen.has(k)) { seen.add(k); pairs.push({ host, db }) }
     }
-    dbs.value = pairs.sort((a, b) => (a.host + a.db).localeCompare(b.host + b.db))
+    dbs.value = sortDatabaseScopes(pairs)
+    if (requiresDatabaseSelection.value) {
+      const selected = preferredDatabaseScope(
+        dbs.value,
+        selectedHost.value,
+        selectedDb.value,
+      )
+      if (selected && (selected.host !== selectedHost.value || selected.db !== selectedDb.value)) {
+        await selectDb(`${selected.host}\t${selected.db}`)
+      }
+    }
   } catch { /* leave empty → no db selector */ }
 }
 
-// Value is "host\tdb"; empty clears both (All databases).
-function selectDb(value: string) {
+// Value is "host\tdb"; integrations that support aggregate scope may clear both.
+async function selectDb(value: string) {
   const [host, db] = value ? value.split('\t') : ['', '']
-  router.replace({ params: route.params, query: { ...route.query, host: host || undefined, db: db || undefined } })
+  await router.replace({ params: route.params, query: { ...route.query, host: host || undefined, db: db || undefined } })
 }
 
 // ── Default routing: land on the first entitled add-on / first page ──
@@ -179,14 +196,14 @@ watch(loaded, ensureRoute)
 </script>
 
 <template>
-  <div :class="['integrations-shell', { 'integration-postgresql': addonKey === 'postgresql' }]">
+  <div :class="['integrations-shell', presentation?.shellClass]">
     <section class="integrations-main">
       <template v-if="addon && available">
         <header class="integrations-head">
           <div class="head-left">
-            <div v-if="expandedNavigation" class="integration-kicker">Database intelligence</div>
+            <div v-if="presentation?.kicker" class="integration-kicker">{{ presentation.kicker }}</div>
             <h1 class="content-title">{{ addon.label }}</h1>
-            <p v-if="expandedNavigation" class="integration-scope">Workload, storage, and operational posture</p>
+            <p v-if="presentation?.subtitle" class="integration-scope">{{ presentation.subtitle }}</p>
           </div>
           <div class="head-selects">
             <div v-if="servers.length > 1" class="server-select">
@@ -198,14 +215,14 @@ watch(loaded, ensureRoute)
             <div v-if="dbs.length" class="server-select">
               <label>Database</label>
               <select :value="selectedPair" @change="selectDb(($event.target as HTMLSelectElement).value)">
-                <option value="">All databases</option>
+                <option v-if="!requiresDatabaseSelection" value="">All databases</option>
                 <option v-for="d in dbs" :key="d.host + d.db" :value="`${d.host}\t${d.db}`">{{ d.host }} / {{ d.db }}</option>
               </select>
             </div>
           </div>
         </header>
 
-        <!-- PostgreSQL has enough horizontal room to expose its complete diagnostic catalog. -->
+        <!-- Editions can expose a complete diagnostic catalog as grouped navigation. -->
         <nav v-if="expandedNavigation" class="page-tab-groups" :aria-label="addon.label + ' views'">
           <section
             v-for="group in expandedGroups"
@@ -278,7 +295,7 @@ watch(loaded, ensureRoute)
 
       <div v-else-if="loaded" class="integrations-empty">
         <h2>Integration not available</h2>
-        <p>This add-on isn’t part of your license, or doesn’t exist.</p>
+        <p>This integration is unavailable in this build or account.</p>
       </div>
     </section>
   </div>
