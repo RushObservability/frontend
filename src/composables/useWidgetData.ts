@@ -1,5 +1,6 @@
 import { useApi } from './useApi'
 import { applyVarsToFilters, substitute } from './useVarSubst'
+import { parseUtcTimestamp } from '../lib/utcTimestamp'
 import type { CountBucket, Filter, GroupedTimeseriesBucket, TimeseriesBucket, Widget, WidgetData, WidgetPanelQuery, WidgetQueryConfig, WidgetType } from '../types'
 
 export function useWidgetData() {
@@ -28,9 +29,9 @@ export function useWidgetData() {
 
     // Time-series panels are the multi-source surface: each query is executed
     // independently, then normalized into a common [unixSec, value] series model.
-    if (widget.widget_type === 'timeseries' && qc.queries?.length) {
+    if ((widget.widget_type === 'timeseries' || widget.widget_type === 'heatmap') && qc.queries?.length) {
       const settled = await Promise.allSettled(
-        visibleQueries.map(query => fetchQueryData('timeseries', query, varValues, timeRange, signal)),
+        visibleQueries.map(query => fetchQueryData(widget.widget_type, query, varValues, timeRange, signal)),
       )
       const series: NonNullable<WidgetData['series']> = []
       const queryErrors: NonNullable<WidgetData['query_errors']> = []
@@ -69,13 +70,16 @@ export function useWidgetData() {
       if (!series.length && queryErrors.length) {
         throw new Error(queryErrors.map(error => `${error.ref_id}: ${error.message}`).join(' · '))
       }
-      return { type: 'timeseries', series, query_errors: queryErrors, time_domain: timeDomain }
+      return { type: widget.widget_type, series, query_errors: queryErrors, time_domain: timeDomain }
     }
 
     // Stat/bar/table panels use the first visible query for now. The editor
     // communicates that multiple overlaid queries are a time-series feature.
     const data = await fetchQueryData(widget.widget_type, visibleQueries[0]!, varValues, timeRange, signal)
-    return widget.widget_type === 'timeseries' ? { ...data, time_domain: timeDomain } : data
+    if (widget.widget_type === 'heatmap' && data.buckets) {
+      return { type: 'heatmap', series: [bucketsToSeries(data.buckets, visibleQueries[0]!)], time_domain: timeDomain }
+    }
+    return widget.widget_type === 'timeseries' || widget.widget_type === 'heatmap' ? { ...data, time_domain: timeDomain } : data
   }
 
   async function fetchQueryData(
@@ -110,9 +114,10 @@ export function useWidgetData() {
     if (query.source === 'logs') {
       const filters: Filter[] = applyVarsToFilters(query.filters || [], varValues)
       switch (widgetType) {
-        case 'timeseries': {
+        case 'timeseries':
+        case 'heatmap': {
           const buckets = await api.countLogs({ time_range: timeRange, filters, interval: query.interval || '1m' }, 'dashboard', signal)
-          return { type: 'timeseries', buckets }
+          return { type: widgetType, buckets }
         }
         case 'counter': {
           const buckets = await api.countLogs({ time_range: timeRange, filters, interval: query.interval || '1h' }, 'dashboard', signal)
@@ -132,7 +137,8 @@ export function useWidgetData() {
 
     const filters: Filter[] = applyVarsToFilters(query.filters || [], varValues)
     switch (widgetType) {
-      case 'timeseries': {
+      case 'timeseries':
+      case 'heatmap': {
         const groupBy = query.group_by?.[0] ? substitute(query.group_by[0], varValues) : undefined
         const response = await api.queryTimeseries({
           time_range: timeRange,
@@ -141,7 +147,7 @@ export function useWidgetData() {
           group_by: groupBy,
         }, 'dashboard', signal)
         return {
-          type: 'timeseries',
+          type: widgetType,
           series: apmTimeseriesToSeries(response.buckets, query, response.grouped),
         }
       }
@@ -198,7 +204,7 @@ function apmTimeseriesToSeries(
     color: grouped ? undefined : query.color,
     axis: query.axis || 'left',
     points: items.flatMap((bucket) => {
-      const timestamp = new Date(bucket.bucket).getTime() / 1000
+      const timestamp = parseUtcTimestamp(bucket.bucket) / 1000
       if (!Number.isFinite(timestamp)) return []
       return [[timestamp, apmBucketValue(bucket, aggregation)] as [number, number]]
     }),
@@ -248,7 +254,7 @@ function bucketsToSeries(buckets: CountBucket[], query: WidgetPanelQuery) {
     color: query.color,
     axis: query.axis || 'left',
     points: buckets.flatMap((bucket) => {
-      const timestamp = new Date(bucket.bucket).getTime() / 1000
+      const timestamp = parseUtcTimestamp(bucket.bucket) / 1000
       return Number.isFinite(timestamp) ? [[timestamp, bucket.count] as [number, number]] : []
     }),
   }

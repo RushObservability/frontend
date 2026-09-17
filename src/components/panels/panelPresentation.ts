@@ -28,5 +28,6 @@ export function defaultPanelCaption(type: WidgetType): string {
   if (type === 'counter') return 'Current value for the selected dashboard window.'
   if (type === 'bar') return 'Top groups ranked by volume for the selected window.'
   if (type === 'table') return 'Latest matching records for the selected window.'
+  if (type === 'heatmap') return 'Value by series and time across the selected window.'
   return 'Trend across the selected dashboard window.'
 }

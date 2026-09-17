@@ -6,6 +6,7 @@ import BarPanel from '../panels/BarPanel.vue'
 import StatPanel from '../panels/StatPanel.vue'
 import TablePanel from '../panels/TablePanel.vue'
 import TimeSeriesPanel from '../panels/TimeSeriesPanel.vue'
+import HeatmapPanel from '../panels/HeatmapPanel.vue'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -36,6 +37,7 @@ const panelComponent = computed<Component>(() => {
   if (props.type === 'counter') return StatPanel
   if (props.type === 'bar') return BarPanel
   if (props.type === 'table') return TablePanel
+  if (props.type === 'heatmap') return HeatmapPanel
   return TimeSeriesPanel
 })
 
@@ -60,6 +62,7 @@ const panelProps = computed<Record<string, unknown>>(() => {
   }
   if (props.type === 'bar') return { ...base, groups: props.data?.groups || [] }
   if (props.type === 'table') return { ...base, rows: props.data?.rows || [] }
+  if (props.type === 'heatmap') return { ...base, series: props.data?.series || [], timeDomain: props.data?.time_domain, unit: props.unit || '' }
   return {
     ...base,
     buckets: props.data?.buckets || [],

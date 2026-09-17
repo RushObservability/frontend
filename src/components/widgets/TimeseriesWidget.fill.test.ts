@@ -29,6 +29,14 @@ describe('time-series area fill', () => {
     expect(await render({ buckets, fill: false })).not.toContain('class="ch-area"')
   })
 
+  it('places timezone-free UTC buckets inside the requested window', async () => {
+    const html = await render({
+      buckets: [{ bucket: '2026-09-17 00:30:00', count: 1 }],
+      timeDomain: { from: Date.parse('2026-09-17T00:00:00Z') / 1000, to: Date.parse('2026-09-17T01:00:00Z') / 1000 },
+    })
+    expect(html).toContain('d="M299,12')
+  })
+
   it('does not draw area fill over stacked bars', async () => {
     const html = await render({ series, displayMode: 'stacked-bars', fill: true })
     expect(html).toContain('class="ts-stacked-bar"')

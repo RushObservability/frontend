@@ -44,6 +44,12 @@ export interface TimeSeriesPanelProps extends PanelFrameProps {
   seriesName?: string
 }
 
+export interface HeatmapPanelProps extends PanelFrameProps {
+  series?: TimeSeriesPanelSeries[]
+  timeDomain?: TimeDomain
+  unit?: string
+}
+
 export interface StatPanelProps extends PanelFrameProps {
   value: number
   label?: string

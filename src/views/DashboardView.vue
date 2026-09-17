@@ -40,6 +40,8 @@ if (initT > 0) applyTimeRangeOverride(initT)
 const showAddWidget = ref(false)
 const showVarEditor = ref(false)
 const editingWidget = ref<Widget | null>(null)
+const savingWidget = ref(false)
+const widgetSaveError = ref<string | null>(null)
 const deploys = ref<DeployMarker[]>([])
 const lastRefreshedAt = ref<Date | null>(null)
 
@@ -334,7 +336,9 @@ function setRefresh(secs: number) {
 }
 
 async function handleSaveWidget(data: any) {
-  if (!dashboard.value) return
+  if (!dashboard.value || savingWidget.value) return
+  savingWidget.value = true
+  widgetSaveError.value = null
   try {
     if (editingWidget.value) {
       const updated = await api.updateWidget(props.id, editingWidget.value.id, data)
@@ -349,11 +353,13 @@ async function handleSaveWidget(data: any) {
       dashboard.value.widgets.push(widget)
       loadSingleWidget(widget)
     }
-  } catch {
-    // error in api.error
+    showAddWidget.value = false
+    editingWidget.value = null
+  } catch (error) {
+    widgetSaveError.value = error instanceof Error ? error.message : 'Could not save the panel. Try again.'
+  } finally {
+    savingWidget.value = false
   }
-  showAddWidget.value = false
-  editingWidget.value = null
 }
 
 async function removeWidget(wid: string) {
@@ -401,11 +407,13 @@ async function saveVariables(vars: DashboardVariable[]) {
 }
 
 function editWidget(widget: Widget) {
+  widgetSaveError.value = null
   editingWidget.value = widget
   showAddWidget.value = true
 }
 
 function openAddWidget() {
+  widgetSaveError.value = null
   editingWidget.value = null
   showAddWidget.value = true
 }
@@ -567,6 +575,8 @@ function widgetStyle(widget: Widget) {
       :dashboard-id="id"
       :variables="variables"
       :var-values="varValues"
+      :saving="savingWidget"
+      :save-error="widgetSaveError"
       @save="handleSaveWidget"
       @cancel="showAddWidget = false; editingWidget = null"
     />

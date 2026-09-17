@@ -12,6 +12,7 @@ import { useChartHover } from '../../composables/useChartHover'
 import EmptyState from '../EmptyState.vue'
 import { stackTimeSeries } from '../../lib/stackedTimeBars'
 import { stackTimeLines } from '../../lib/stackedTimeLines'
+import { parseUtcTimestamp } from '../../lib/utcTimestamp'
 
 const props = withDefaults(defineProps<{
   displayMode?: 'lines' | 'stacked-lines' | 'stacked-bars'
@@ -75,7 +76,7 @@ const maxCount = computed(() =>
 )
 
 const bucketSamples = computed(() => props.buckets.flatMap((bucket) => {
-  const time = new Date(bucket.bucket).getTime() / 1000
+  const time = parseUtcTimestamp(bucket.bucket) / 1000
   return Number.isFinite(time) ? [[time, bucket.count] as [number, number]] : []
 }))
 
@@ -346,7 +347,7 @@ const hoverModel = computed<{ minT: number; maxT: number; series: HSeries[] }>((
   }
   const pts: [number, number][] = []
   for (const b of props.buckets) {
-    const t = new Date(b.bucket).getTime() / 1000
+    const t = parseUtcTimestamp(b.bucket) / 1000
     if (!isNaN(t)) pts.push([t, b.count])
   }
   const domain = resolveTimeDomain(

@@ -24,6 +24,7 @@
 .we-title-row h2 { margin-right: 4px; font-size: 17px; font-weight: 650; letter-spacing: -.025em; }
 .we-context-chip { padding: 2px 6px; color: var(--text-secondary); background: var(--bg-raised); border: 1px solid var(--border-default); border-radius: var(--r-pill); font: 8px var(--font-mono); text-transform: uppercase; }
 .we-header-actions { display: flex; gap: var(--sp-2); }
+.we-save-error { margin: 0; padding: 10px var(--sp-5); color: var(--error); background: var(--error-dim); border-bottom: 1px solid var(--error); font-size: 12px; }
 
 .we-body { display: grid; grid-template-columns: minmax(0, 1fr) 410px; flex: 1; min-height: 0; }
 .we-preview { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--bg-void); }
