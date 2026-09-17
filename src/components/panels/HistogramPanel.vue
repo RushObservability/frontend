@@ -5,6 +5,7 @@ import type { HistogramPanelProps } from './types'
 
 withDefaults(defineProps<HistogramPanelProps>(), {
   bins: () => [],
+  sampleCount: 0,
   markers: () => [],
   description: '',
   caption: '',
@@ -36,7 +37,7 @@ withDefaults(defineProps<HistogramPanelProps>(), {
     variant="bar"
   >
     <template v-if="$slots.actions" #actions><slot name="actions" /></template>
-    <template v-if="$slots.summary" #summary><slot name="summary" /></template>
+    <template v-if="$slots.summary || sampleCount" #summary><slot name="summary">{{ sampleCount.toLocaleString() }} samples</slot></template>
     <HistogramWidget
       :bins="bins"
       :markers="markers"

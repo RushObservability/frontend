@@ -27,7 +27,7 @@
 .histogram-axis {
   fill: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 6px;
+  font-size: 10px;
 }
 
 .histogram-tooltip {

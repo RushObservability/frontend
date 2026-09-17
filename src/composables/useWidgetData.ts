@@ -29,7 +29,7 @@ export function useWidgetData() {
 
     // Time-series panels are the multi-source surface: each query is executed
     // independently, then normalized into a common [unixSec, value] series model.
-    if ((widget.widget_type === 'timeseries' || widget.widget_type === 'heatmap') && qc.queries?.length) {
+    if ((widget.widget_type === 'timeseries' || widget.widget_type === 'heatmap' || widget.widget_type === 'histogram') && qc.queries?.length) {
       const settled = await Promise.allSettled(
         visibleQueries.map(query => fetchQueryData(widget.widget_type, query, varValues, timeRange, signal)),
       )
@@ -76,10 +76,10 @@ export function useWidgetData() {
     // Stat/bar/table panels use the first visible query for now. The editor
     // communicates that multiple overlaid queries are a time-series feature.
     const data = await fetchQueryData(widget.widget_type, visibleQueries[0]!, varValues, timeRange, signal)
-    if (widget.widget_type === 'heatmap' && data.buckets) {
-      return { type: 'heatmap', series: [bucketsToSeries(data.buckets, visibleQueries[0]!)], time_domain: timeDomain }
+    if ((widget.widget_type === 'heatmap' || widget.widget_type === 'histogram') && data.buckets) {
+      return { type: widget.widget_type, series: [bucketsToSeries(data.buckets, visibleQueries[0]!)], time_domain: timeDomain }
     }
-    return widget.widget_type === 'timeseries' || widget.widget_type === 'heatmap' ? { ...data, time_domain: timeDomain } : data
+    return widget.widget_type === 'timeseries' || widget.widget_type === 'heatmap' || widget.widget_type === 'histogram' ? { ...data, time_domain: timeDomain } : data
   }
 
   async function fetchQueryData(
@@ -115,7 +115,8 @@ export function useWidgetData() {
       const filters: Filter[] = applyVarsToFilters(query.filters || [], varValues)
       switch (widgetType) {
         case 'timeseries':
-        case 'heatmap': {
+        case 'heatmap':
+        case 'histogram': {
           const buckets = await api.countLogs({ time_range: timeRange, filters, interval: query.interval || '1m' }, 'dashboard', signal)
           return { type: widgetType, buckets }
         }
@@ -138,7 +139,8 @@ export function useWidgetData() {
     const filters: Filter[] = applyVarsToFilters(query.filters || [], varValues)
     switch (widgetType) {
       case 'timeseries':
-      case 'heatmap': {
+      case 'heatmap':
+      case 'histogram': {
         const groupBy = query.group_by?.[0] ? substitute(query.group_by[0], varValues) : undefined
         const response = await api.queryTimeseries({
           time_range: timeRange,

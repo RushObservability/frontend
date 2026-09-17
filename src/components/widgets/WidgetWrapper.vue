@@ -7,6 +7,8 @@ import StatPanel from '../panels/StatPanel.vue'
 import TablePanel from '../panels/TablePanel.vue'
 import TimeSeriesPanel from '../panels/TimeSeriesPanel.vue'
 import HeatmapPanel from '../panels/HeatmapPanel.vue'
+import HistogramPanel from '../panels/HistogramPanel.vue'
+import { buildHistogram } from '../../lib/histogram'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -16,6 +18,7 @@ const props = withDefaults(defineProps<{
   sourceLabel?: string
   rangeLabel?: string
   unit?: string
+  histogramBucketCount?: number
   displayMode?: TimeSeriesPanelProps['displayMode']
   fill?: boolean | null
   data?: WidgetData
@@ -38,6 +41,7 @@ const panelComponent = computed<Component>(() => {
   if (props.type === 'bar') return BarPanel
   if (props.type === 'table') return TablePanel
   if (props.type === 'heatmap') return HeatmapPanel
+  if (props.type === 'histogram') return HistogramPanel
   return TimeSeriesPanel
 })
 
@@ -63,6 +67,19 @@ const panelProps = computed<Record<string, unknown>>(() => {
   if (props.type === 'bar') return { ...base, groups: props.data?.groups || [] }
   if (props.type === 'table') return { ...base, rows: props.data?.rows || [] }
   if (props.type === 'heatmap') return { ...base, series: props.data?.series || [], timeDomain: props.data?.time_domain, unit: props.unit || '' }
+  if (props.type === 'histogram') {
+    const distribution = buildHistogram(props.data?.series || [], props.histogramBucketCount)
+    return {
+      ...base,
+      bins: distribution.bins.map(bin => ({ ...bin, key: `${bin.key}${props.unit ? ` ${props.unit}` : ''}` })),
+      sampleCount: distribution.sampleCount,
+      minLabel: `${distribution.minLabel}${props.unit ? ` ${props.unit}` : ''}`,
+      maxLabel: `${distribution.maxLabel}${props.unit ? ` ${props.unit}` : ''}`,
+      color: 'var(--blue, #3b82f6)',
+      unit: 'samples',
+      emptyMessage: 'No numeric samples were returned for this query and time range.',
+    }
+  }
   return {
     ...base,
     buckets: props.data?.buckets || [],

@@ -9,6 +9,8 @@ import BarWidget from './BarWidget.vue'
 import TableWidget from './TableWidget.vue'
 import TimeseriesWidget from './TimeseriesWidget.vue'
 import HeatmapWidget from './HeatmapWidget.vue'
+import HistogramWidget from './HistogramWidget.vue'
+import { buildHistogram } from '../../lib/histogram'
 
 const props = defineProps<{
   widget?: Widget | null
@@ -43,6 +45,7 @@ const rowSpan = ref(2)
 const description = ref('')
 const unit = ref('')
 const fill = ref(false)
+const histogramBucketCount = ref(20)
 const displayMode = ref<'lines' | 'stacked-lines'>('lines')
 const activeEditorTab = ref<'query' | 'panel'>('query')
 
@@ -114,6 +117,7 @@ const builderFilters = computed({
 const VIZ = [
   { type: 'timeseries' as WidgetType, label: 'Time series', glyph: '∿', note: 'Trend values over time' },
   { type: 'heatmap' as WidgetType, label: 'Heatmap', glyph: '▦', note: 'Compare values by group and time' },
+  { type: 'histogram' as WidgetType, label: 'Histogram', glyph: '▥', note: 'Count values in numeric ranges' },
   { type: 'counter' as WidgetType, label: 'Stat', glyph: '#', note: 'One prominent value' },
   { type: 'bar' as WidgetType, label: 'Bar chart', glyph: '▊', note: 'Compare grouped values' },
   { type: 'table' as WidgetType, label: 'Table', glyph: '☰', note: 'Inspect detailed rows' },
@@ -161,11 +165,12 @@ function isApmPresetActive(preset: typeof APM_PRESETS[number]): boolean {
 }
 
 // Metrics source only makes sense for timeseries/counter.
-const metricsOk = computed(() => widgetType.value === 'timeseries' || widgetType.value === 'heatmap' || widgetType.value === 'counter')
+const metricsOk = computed(() => widgetType.value === 'timeseries' || widgetType.value === 'heatmap' || widgetType.value === 'histogram' || widgetType.value === 'counter')
 
 watch(() => props.widget, (widget) => {
   if (!widget) {
     fill.value = false
+    histogramBucketCount.value = 20
     displayMode.value = 'lines'
     queries.value = [makeQuery({ ref_id: 'A' })]
     activeQueryId.value = 'A'
@@ -178,6 +183,7 @@ watch(() => props.widget, (widget) => {
   rowSpan.value = widget.position.row_span || 2
   description.value = (widget.display_config?.description as string) || ''
   unit.value = (widget.display_config?.unit as string) || ''
+  histogramBucketCount.value = Number(widget.display_config?.histogram_bucket_count) || 20
   displayMode.value = widget.display_config?.display_mode === 'stacked-lines' ? 'stacked-lines' : 'lines'
   fill.value = typeof widget.display_config?.fill === 'boolean'
     ? widget.display_config.fill
@@ -218,14 +224,14 @@ watch([widgetType], () => {
 })
 
 function addQuery() {
-  if ((widgetType.value !== 'timeseries' && widgetType.value !== 'heatmap') || queries.value.length >= 8) return
+  if ((widgetType.value !== 'timeseries' && widgetType.value !== 'heatmap' && widgetType.value !== 'histogram') || queries.value.length >= 8) return
   const query = makeQuery({ source: source.value })
   queries.value.push(query)
   activeQueryId.value = query.ref_id
 }
 
 function duplicateQuery(query: EditorQuery) {
-  if ((widgetType.value !== 'timeseries' && widgetType.value !== 'heatmap') || queries.value.length >= 8) return
+  if ((widgetType.value !== 'timeseries' && widgetType.value !== 'heatmap' && widgetType.value !== 'histogram') || queries.value.length >= 8) return
   const copy = makeQuery({
     ...query,
     ref_id: nextRefId(),
@@ -288,6 +294,7 @@ function buildQueryConfig(): WidgetQueryConfig {
 
 // ── Live preview (debounced) ──
 const previewData = ref<WidgetData | null>(null)
+const previewHistogram = computed(() => buildHistogram(previewData.value?.series || [], histogramBucketCount.value))
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
 let previewTimer: ReturnType<typeof setTimeout> | undefined
@@ -362,6 +369,8 @@ function save() {
     delete displayConfig.fill
     delete displayConfig.display_mode
   }
+  if (widgetType.value === 'histogram') displayConfig.histogram_bucket_count = Math.max(2, Math.min(50, Math.round(histogramBucketCount.value) || 20))
+  else delete displayConfig.histogram_bucket_count
   emit('save', {
     title: title.value || 'Untitled',
     widget_type: widgetType.value,
@@ -419,6 +428,7 @@ function save() {
                 <TableWidget v-else-if="widgetType === 'table'" :rows="(previewData.rows || []) as Record<string, unknown>[]" />
                 <TimeseriesWidget v-else-if="widgetType === 'timeseries'" :buckets="previewData.buckets || []" :series="previewData.series" :unit="unit" :display-mode="displayMode" :fill="fill" />
                 <HeatmapWidget v-else-if="widgetType === 'heatmap'" :series="previewData.series || []" :time-domain="previewData.time_domain" :unit="unit" />
+                <HistogramWidget v-else-if="widgetType === 'histogram'" :bins="previewHistogram.bins.map(bin => ({ ...bin, key: `${bin.key}${unit ? ` ${unit}` : ''}` }))" :min-label="`${previewHistogram.minLabel}${unit ? ` ${unit}` : ''}`" :max-label="`${previewHistogram.maxLabel}${unit ? ` ${unit}` : ''}`" color="var(--blue, #3b82f6)" unit="samples" />
               </template>
               <div v-else class="we-preview-msg"><strong>No preview yet</strong><span>Configure a query in the panel editor.</span></div>
             </div>
@@ -447,7 +457,7 @@ function save() {
           <section class="we-query-stack-section">
             <div class="we-query-stack-header">
               <div><strong>Queries</strong><span>{{ queries.filter(query => !query.hidden).length }} running · {{ queries.length }}/8</span></div>
-              <button class="we-add-query" :disabled="(widgetType !== 'timeseries' && widgetType !== 'heatmap') || queries.length >= 8" :title="widgetType === 'timeseries' || widgetType === 'heatmap' ? 'Add another query' : 'Multiple queries are available for Time series and Heatmap panels'" @click="addQuery">+ Add query</button>
+              <button class="we-add-query" :disabled="(widgetType !== 'timeseries' && widgetType !== 'heatmap' && widgetType !== 'histogram') || queries.length >= 8" :title="widgetType === 'timeseries' || widgetType === 'heatmap' || widgetType === 'histogram' ? 'Add another query' : 'Multiple queries are available for Time series, Heatmap, and Histogram panels'" @click="addQuery">+ Add query</button>
             </div>
             <div class="we-query-stack">
               <div
@@ -468,12 +478,12 @@ function save() {
                 </span>
                 <span class="we-query-actions">
                   <button :title="query.hidden ? 'Show query' : 'Hide query'" :aria-label="query.hidden ? `Show query ${query.ref_id}` : `Hide query ${query.ref_id}`" @click.stop="query.hidden = !query.hidden">{{ query.hidden ? '○' : '●' }}</button>
-                  <button title="Duplicate query" :aria-label="`Duplicate query ${query.ref_id}`" :disabled="(widgetType !== 'timeseries' && widgetType !== 'heatmap') || queries.length >= 8" @click.stop="duplicateQuery(query)">⧉</button>
+                  <button title="Duplicate query" :aria-label="`Duplicate query ${query.ref_id}`" :disabled="(widgetType !== 'timeseries' && widgetType !== 'heatmap' && widgetType !== 'histogram') || queries.length >= 8" @click.stop="duplicateQuery(query)">⧉</button>
                   <button title="Remove query" :aria-label="`Remove query ${query.ref_id}`" :disabled="queries.length === 1" @click.stop="removeQuery(query)">×</button>
                 </span>
               </div>
             </div>
-            <div v-if="widgetType !== 'timeseries' && widgetType !== 'heatmap'" class="we-query-note">Multiple queries are available on Time series and Heatmap panels. This visualization uses query {{ queries[0]?.ref_id }}.</div>
+            <div v-if="widgetType !== 'timeseries' && widgetType !== 'heatmap' && widgetType !== 'histogram'" class="we-query-note">Multiple queries are available on Time series, Heatmap, and Histogram panels. This visualization uses query {{ queries[0]?.ref_id }}.</div>
           </section>
 
           <section class="we-config-section">
@@ -481,7 +491,7 @@ function save() {
             <div class="we-source-toggle">
               <button class="we-seg" :class="{ active: source === 'spans' }" @click="source = 'spans'">APM</button>
               <button class="we-seg" :class="{ active: source === 'logs' }" @click="source = 'logs'">Logs</button>
-              <button class="we-seg" :class="{ active: source === 'metrics' }" :disabled="!metricsOk" :title="metricsOk ? '' : 'Metrics supports Time series and Stat panels'" @click="metricsOk && (source = 'metrics')">Metrics</button>
+              <button class="we-seg" :class="{ active: source === 'metrics' }" :disabled="!metricsOk" :title="metricsOk ? '' : 'Metrics supports Time series, Heatmap, Histogram, and Stat panels'" @click="metricsOk && (source = 'metrics')">Metrics</button>
             </div>
             <div class="we-query-identity">
               <div class="we-field">
@@ -519,7 +529,7 @@ function save() {
             </template>
             <template v-else-if="source === 'spans'">
               <div class="we-apm-builder">
-                <div v-if="widgetType === 'timeseries' || widgetType === 'heatmap'" class="we-apm-block">
+                <div v-if="widgetType === 'timeseries' || widgetType === 'heatmap' || widgetType === 'histogram'" class="we-apm-block">
                   <div class="we-subheading"><div><strong>APM signal</strong><small>Choose the request behavior this series measures</small></div><span>RED</span></div>
                   <div class="we-apm-metrics" role="radiogroup" aria-label="APM signal">
                     <button
@@ -585,7 +595,7 @@ function save() {
                   <option :value="360">6h</option><option :value="1440">24h</option><option :value="10080">7d</option>
                 </select>
               </div>
-              <div v-if="source !== 'metrics' && (widgetType === 'timeseries' || widgetType === 'heatmap' || widgetType === 'counter')" class="we-field">
+              <div v-if="source !== 'metrics' && (widgetType === 'timeseries' || widgetType === 'heatmap' || widgetType === 'histogram' || widgetType === 'counter')" class="we-field">
                 <label class="we-label">Interval</label>
                 <select v-model="interval" class="we-input mono">
                   <option value="1s">1s</option><option value="10s">10s</option><option value="1m">1m</option>
@@ -621,6 +631,11 @@ function save() {
             <div class="we-field">
               <label class="we-label">Unit</label>
               <input v-model="unit" class="we-input mono" placeholder="req/s, ms, %, B/s" />
+            </div>
+            <div v-if="widgetType === 'histogram'" class="we-field">
+              <label class="we-label" for="we-histogram-buckets">Value buckets</label>
+              <input id="we-histogram-buckets" v-model.number="histogramBucketCount" class="we-input mono" type="number" min="2" max="50" step="1" />
+              <small class="we-field-help">Counts returned query samples in each value range. For APM, these are interval aggregates, not individual spans. All visible series are combined.</small>
             </div>
             <div v-if="widgetType === 'timeseries'" class="we-field">
               <label class="we-label" for="we-line-layout">Line layout</label>

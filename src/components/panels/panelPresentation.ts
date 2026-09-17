@@ -29,5 +29,6 @@ export function defaultPanelCaption(type: WidgetType): string {
   if (type === 'bar') return 'Top groups ranked by volume for the selected window.'
   if (type === 'table') return 'Latest matching records for the selected window.'
   if (type === 'heatmap') return 'Value by series and time across the selected window.'
+  if (type === 'histogram') return 'Distribution of returned query samples, not individual events.'
   return 'Trend across the selected dashboard window.'
 }

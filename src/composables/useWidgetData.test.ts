@@ -45,4 +45,17 @@ describe('dashboard bucket times', () => {
     const data = await useWidgetData().fetchWidgetData(panel)
     expect(data.series?.[0]?.points).toEqual([[Date.parse('2026-09-17T00:30:00Z') / 1000, 5]])
   })
+
+  it('passes histogram queries through the numeric time-series data path', async () => {
+    api.queryTimeseries.mockResolvedValue({
+      grouped: false,
+      buckets: [{ bucket: '2026-09-17 00:30:00', count: 4, error_count: 0 }],
+    })
+    const panel = widget('spans')
+    panel.widget_type = 'histogram'
+    panel.query_config.queries = [{ ref_id: 'A', source: 'spans', filters: [] }]
+    const data = await useWidgetData().fetchWidgetData(panel)
+    expect(data.type).toBe('histogram')
+    expect(data.series?.[0]?.points).toEqual([[Date.parse('2026-09-17T00:30:00Z') / 1000, 4]])
+  })
 })

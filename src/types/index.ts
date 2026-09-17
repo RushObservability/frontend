@@ -314,7 +314,7 @@ export interface PromMatrixResponse { resultType: 'matrix'; result: PromMatrixRe
 
 // ── Dashboard types ──
 
-export type WidgetType = 'timeseries' | 'heatmap' | 'bar' | 'table' | 'counter'
+export type WidgetType = 'timeseries' | 'heatmap' | 'histogram' | 'bar' | 'table' | 'counter'
 
 export interface WidgetPosition {
   col: number

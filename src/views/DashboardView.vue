@@ -540,6 +540,7 @@ function widgetStyle(widget: Widget) {
           :source-label="panelSourceLabel(widget)"
           :range-label="panelRangeLabel"
           :unit="(widget.display_config?.unit as string) || ''"
+          :histogram-bucket-count="(widget.display_config?.histogram_bucket_count as number) || 20"
           :display-mode="widget.display_config?.display_mode as 'lines' | 'stacked-lines' | undefined"
           :fill="widget.display_config?.fill as boolean | undefined"
           :data="widgetDataMap[widget.id]"
