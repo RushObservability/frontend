@@ -392,7 +392,13 @@ export interface Widget {
   updated_at: string
 }
 
+export interface DashboardDefaults {
+  time_range_minutes: number
+  refresh_interval_secs: number
+}
+
 export interface Dashboard {
+  defaults?: DashboardDefaults
   id: string
   name: string
   description: string
@@ -424,6 +430,7 @@ export interface DashboardExport {
   format_version: string
   exported_at: string
   dashboard: {
+    defaults?: DashboardDefaults
     name: string
     description: string
     visibility: string

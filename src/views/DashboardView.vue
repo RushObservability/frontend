@@ -15,12 +15,14 @@ import TimePicker from '../components/TimePicker.vue'
 import { usePollingTask } from '../composables/usePollingTask'
 import { defaultPanelCaption, formatPanelRange, formatPanelSource } from '../components/panels/panelPresentation'
 import type { PieStyle, PieCalculation, PieSort } from '../lib/pie'
-import { applyTimeRangeOverride, useTimeRangePreference } from '../composables/useTimeRangePreference'
+import { useTimeRangePreference } from '../composables/useTimeRangePreference'
+import { dashboardRefreshOptions, dashboardViewDefaults } from '../lib/dashboardDefaults'
 import { useDashboardTv } from '../composables/useDashboardTv'
 
 const props = defineProps<{ id: string }>()
 
 const api = useApi()
+const defaultsApi = useApi()
 const { canWrite } = useAuth()
 const router = useRouter()
 const route = useRoute()
@@ -36,10 +38,12 @@ const widgetDataMap = ref<Record<string, WidgetData>>({})
 const widgetLoadingMap = ref<Record<string, boolean>>({})
 const widgetErrorMap = ref<Record<string, string | null>>({})
 const editMode = ref(false)
-// Dashboard-level time range (drives every widget); seeded from ?t= or 1h.
-const initT = Number(route.query.t)
+// URL overrides win over saved dashboard defaults, which win over the user preference.
 const dashMinutes = useTimeRangePreference()
-if (initT > 0) applyTimeRangeOverride(initT)
+const loadingDashboard = ref(true)
+let disposed = false
+const savingDefaults = ref(false)
+const defaultsSaved = ref(false)
 const showAddWidget = ref(false)
 const showVarEditor = ref(false)
 const editingWidget = ref<Widget | null>(null)
@@ -110,9 +114,11 @@ async function loadVarOptions() {
 
 // Dashboard time range → reload every widget, and reflect in the URL.
 watch(dashMinutes, (m) => {
-  router.replace({ query: { ...route.query, t: String(m) } })
+  if (loadingDashboard.value) return
+  defaultsSaved.value = false
+  router.replace({ query: { ...route.query, t: String(m) }, hash: route.hash })
   loadAllWidgetData()
-})
+}, { flush: 'sync' })
 
 function onVarChange(name: string, value: string) {
   varValues.value = { ...varValues.value, [name]: value }
@@ -122,12 +128,7 @@ function onVarChange(name: string, value: string) {
   loadAllWidgetData()
 }
 
-const refreshOptions = [
-  { label: 'Off', value: 0 },
-  { label: '30s', value: 30 },
-  { label: '1m', value: 60 },
-  { label: '5m', value: 300 },
-]
+const refreshOptions = dashboardRefreshOptions
 const refreshInterval = ref(0)
 const refreshLoop = usePollingTask({ category: 'dashboard', intervalMs: 1_000, run: ({ signal }) => refreshAllWidgetData(true, signal) })
 let widgetRefreshRequest: Promise<void> | null = null
@@ -148,9 +149,11 @@ function visibilityLabel(value: string): string {
 const shareCopied = ref(false)
 
 async function shareLink() {
-  const url = window.location.href
+  const url = new URL(window.location.href)
+  url.searchParams.set('t', String(dashMinutes.value))
+  url.searchParams.set('refresh', String(refreshInterval.value))
   try {
-    await navigator.clipboard.writeText(url)
+    await navigator.clipboard.writeText(url.toString())
     shareCopied.value = true
     setTimeout(() => { shareCopied.value = false }, 2000)
   } catch { /* fallback: ignore */ }
@@ -282,18 +285,27 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
   refreshLoop.stop()
 })
 
 async function loadDashboard() {
+  loadingDashboard.value = true
+  refreshLoop.stop()
   try {
     dashboard.value = await api.getDashboard(props.id)
+    const defaults = dashboardViewDefaults(dashboard.value.defaults, route.query, dashMinutes.value)
+    dashMinutes.value = defaults.time_range_minutes
+    refreshInterval.value = defaults.refresh_interval_secs
     await loadVarOptions()
     initVarValues()
     await loadAllWidgetData()
     await loadDeploys()
+    if (!disposed) setRefresh(refreshInterval.value, false)
   } catch {
     // error in api.error
+  } finally {
+    loadingDashboard.value = false
   }
 }
 
@@ -339,12 +351,42 @@ async function loadSingleWidget(widget: Widget, rethrow = false, signal?: AbortS
   }
 }
 
-function setRefresh(secs: number) {
+function setRefresh(secs: number, updateUrl = true) {
   refreshInterval.value = secs
+  if (updateUrl) {
+    defaultsSaved.value = false
+    router.replace({ query: { ...route.query, refresh: String(secs) }, hash: route.hash })
+  }
   refreshLoop.stop()
   if (secs > 0) {
     refreshLoop.setIntervalMs(secs * 1000)
     refreshLoop.start()
+  }
+}
+
+const defaultsChanged = computed(() => !dashboard.value?.defaults
+  || dashboard.value.defaults.time_range_minutes !== dashMinutes.value
+  || dashboard.value.defaults.refresh_interval_secs !== refreshInterval.value)
+
+async function saveDefaults() {
+  const current = dashboard.value
+  if (!current || savingDefaults.value) return
+  savingDefaults.value = true
+  defaultsSaved.value = false
+  defaultsApi.error.value = null
+  try {
+    const defaults = { time_range_minutes: dashMinutes.value, refresh_interval_secs: refreshInterval.value }
+    const updated = await defaultsApi.updateDashboard(props.id, {
+      name: current.name, description: current.description, visibility: current.visibility,
+      tags: current.tags, variables: current.variables, defaults,
+    })
+    if (!updated.defaults) throw new Error('The API does not support dashboard defaults yet. Update and restart query-api, then try again.')
+    current.defaults = updated.defaults
+    defaultsSaved.value = true
+  } catch (error) {
+    defaultsApi.error.value = error instanceof Error ? error.message : 'Could not save dashboard defaults. Try again.'
+  } finally {
+    savingDefaults.value = false
   }
 }
 
@@ -499,6 +541,18 @@ function widgetStyle(widget: Widget) {
         {{ isAutoRefreshing ? `Live · ${refreshLabel}` : refreshLabel }}
       </div>
     </section>
+
+    <div v-if="editMode && canWrite && !tvMode" class="dashboard-defaults">
+      <div class="dashboard-defaults-copy">
+        <strong>Default view</strong>
+        <span>Save the current time range and refresh interval for everyone opening this dashboard.</span>
+        <span v-if="defaultsApi.error.value" class="defaults-error" role="alert">{{ defaultsApi.error.value }}</span>
+        <span v-else-if="defaultsSaved" class="defaults-success" role="status">Dashboard defaults saved.</span>
+      </div>
+      <button class="share-btn" type="button" :disabled="loadingDashboard || savingDefaults || !defaultsChanged" @click="saveDefaults">
+        {{ savingDefaults ? 'Saving…' : 'Save as defaults' }}
+      </button>
+    </div>
 
     <div v-if="editMode" class="edit-mode-bar">
       <div class="edit-mode-copy">
