@@ -122,7 +122,6 @@
 .we-fill-option strong { font-size: 11px; font-weight: 600; }
 .we-fill-option small { margin-top: 2px; color: var(--text-muted); font-size: 10px; line-height: 1.35; }
 .we-title-input { font-size: 12px; font-weight: 600; }
-.we-promql { resize: vertical; font-family: var(--font-mono); font-size: 10px; line-height: 1.5; }
 
 .we-source-toggle { display: grid; grid-template-columns: repeat(3, 1fr); padding: 3px; background: var(--bg-raised); border: 1px solid var(--border-default); border-radius: var(--r-sm); }
 .we-seg { min-height: 29px; color: var(--text-muted); background: transparent; border: 0; border-radius: 2px; font-size: 10px; cursor: pointer; }

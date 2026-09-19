@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { Widget, WidgetType, WidgetPosition, WidgetQueryConfig, WidgetPanelQuery, Filter, QueryFilter, DashboardVariable, WidgetData } from '../../types'
 import QueryBuilder from '../QueryBuilder.vue'
+import PromqlEditor from '../PromqlEditor.vue'
 import { useWidgetData } from '../../composables/useWidgetData'
 import { authenticatedFetch } from '../../composables/authSession'
 import CounterWidget from './CounterWidget.vue'
@@ -521,7 +522,7 @@ function save() {
               <button v-for="t in availableVars" :key="t" class="we-var-chip" :title="source === 'metrics' ? 'Insert into query' : 'Use in a filter value'" @click="insertVar(t)">{{ t }}</button>
             </div>
             <template v-if="source === 'metrics'">
-              <textarea v-model="promql" class="we-input we-promql mono" rows="5" placeholder='sum(rate(http_requests_total{service_name="$service"}[5m]))'></textarea>
+              <PromqlEditor :key="activeQueryId" v-model="promql" :rows="5" placeholder='sum(rate(http_requests_total{service_name="$service"}[5m]))' />
               <div class="we-nl">
                 <input v-model="nlText" class="we-input" placeholder="Describe the metric you want" @keyup.enter="applyNl" />
                 <button class="we-nl-btn" :disabled="nlBusy" @click="applyNl">{{ nlBusy ? 'Working…' : 'Generate' }}</button>

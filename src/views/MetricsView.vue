@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useTenant } from '../composables/useTenant'
 import MetricsExplore from '../components/MetricsExplore.vue'
+import PromqlEditor from '../components/PromqlEditor.vue'
 import TimePicker from '../components/TimePicker.vue'
 import type { PromVectorResult, PromMatrixResult } from '../types'
 import QueryHistory from '../components/QueryHistory.vue'
@@ -39,213 +40,14 @@ const query = ref('')
 const activeTab = ref<'graph' | 'table'>('graph')
 const executing = ref(false)
 const errorMsg = ref('')
-const queryTextarea = ref<HTMLTextAreaElement | null>(null)
-
-// ═══ Autocomplete ═══
-const promqlFunctions = [
-  'abs', 'absent', 'avg', 'avg_over_time', 'ceil', 'changes', 'clamp',
-  'count', 'count_over_time', 'delta', 'deriv', 'exp', 'floor',
-  'histogram_quantile', 'holt_winters', 'idelta', 'increase', 'irate',
-  'label_join', 'label_replace', 'ln', 'log2', 'log10',
-  'max', 'max_over_time', 'min', 'min_over_time', 'minute',
-  'predict_linear', 'quantile', 'quantile_over_time',
-  'rate', 'resets', 'round', 'scalar', 'sort', 'sort_desc',
-  'sqrt', 'stddev', 'stddev_over_time', 'stdvar', 'stdvar_over_time',
-  'sum', 'sum_over_time', 'time', 'timestamp', 'topk', 'bottomk',
-  'vector', 'year',
-]
-const acVisible = ref(false)
-const acItems = ref<Array<{ text: string; kind: 'metric' | 'function' | 'label' | 'value' }>>([])
-const acSelected = ref(0)
-const acWordStart = ref(0)
-const acWordEnd = ref(0)
-
-// ═══ Label autocomplete caches ═══
-const labelCache = new Map<string, string[]>()
-const valueCache = new Map<string, string[]>()
-
-type CursorContext =
-  | { mode: 'default' }
-  | { mode: 'label'; metric: string }
-  | { mode: 'value'; metric: string; label: string }
-
-function parseCursorContext(): CursorContext {
-  const el = queryTextarea.value
-  if (!el) return { mode: 'default' }
-  const pos = el.selectionStart
-  const text = query.value.slice(0, pos)
-
-  // Find last unmatched '{' — scan backward counting braces
-  let braceDepth = 0
-  let bracePos = -1
-  for (let i = text.length - 1; i >= 0; i--) {
-    if (text[i] === '}') braceDepth++
-    else if (text[i] === '{') {
-      if (braceDepth === 0) { bracePos = i; break }
-      braceDepth--
-    }
-  }
-  if (bracePos < 0) return { mode: 'default' }
-
-  // Extract metric name before the '{'
-  let metricEnd = bracePos
-  let metricStart = metricEnd
-  while (metricStart > 0 && /[a-zA-Z0-9_:]/.test(text[metricStart - 1] ?? '')) metricStart--
-  const metric = text.slice(metricStart, metricEnd)
-  if (!metric) return { mode: 'default' }
-
-  // Text inside braces after the last '{' up to cursor
-  const inside = text.slice(bracePos + 1)
-
-  // Find last comma or opening brace — that's the start of the current label matcher
-  let segStart = 0
-  for (let i = inside.length - 1; i >= 0; i--) {
-    if (inside[i] === ',') { segStart = i + 1; break }
-  }
-  const segment = inside.slice(segStart).trimStart()
-
-  // Check if we're after '=' (value position) or before it (label position)
-  const eqIdx = segment.indexOf('=')
-  if (eqIdx < 0) {
-    // No '=' yet — typing a label name
-    return { mode: 'label', metric }
-  }
-
-  // After '=' — typing a value. Extract the label name.
-  const label = segment.slice(0, eqIdx).replace(/[!~]/g, '').trim()
-  return { mode: 'value', metric, label }
-}
-
-function getWordAtCursor(): { word: string; start: number; end: number } {
-  const el = queryTextarea.value
-  if (!el) return { word: '', start: 0, end: 0 }
-  const pos = el.selectionStart
-  const text = query.value
-  const boundary = /[^a-zA-Z0-9_:]/
-  let start = pos
-  while (start > 0 && !boundary.test(text[start - 1] ?? '')) start--
-  let end = pos
-  while (end < text.length && !boundary.test(text[end] ?? '')) end++
-  return { word: text.slice(start, end), start, end }
-}
-
-async function updateAutocomplete() {
-  const ctx = parseCursorContext()
-
-  if (ctx.mode === 'label') {
-    const { word, start, end } = getWordAtCursor()
-    // Fetch labels for this metric (cached)
-    let labels = labelCache.get(ctx.metric)
-    if (!labels) {
-      try {
-        labels = await api.promLabels(ctx.metric)
-        labelCache.set(ctx.metric, labels)
-      } catch { labels = [] }
-    }
-    const lower = (word || '').toLowerCase()
-    const matches: Array<{ text: string; kind: 'label' }> = []
-    for (const l of labels) {
-      if (l === '__name__') continue
-      if (!lower || l.toLowerCase().includes(lower)) matches.push({ text: l, kind: 'label' })
-      if (matches.length >= 16) break
-    }
-    if (!matches.length) { acVisible.value = false; return }
-    acItems.value = matches
-    acSelected.value = 0
-    acWordStart.value = start
-    acWordEnd.value = end
-    acVisible.value = true
-    return
-  }
-
-  if (ctx.mode === 'value') {
-    const { word, start, end } = getWordAtCursor()
-    const cacheKey = `${ctx.metric}:${ctx.label}`
-    let values = valueCache.get(cacheKey)
-    if (!values) {
-      try {
-        values = await api.promLabelValues(ctx.label, ctx.metric)
-        valueCache.set(cacheKey, values)
-      } catch { values = [] }
-    }
-    // Strip leading quote from typed word for matching
-    const raw = (word || '').replace(/^"/, '')
-    const lower = raw.toLowerCase()
-    const matches: Array<{ text: string; kind: 'value' }> = []
-    for (const v of values) {
-      if (!lower || v.toLowerCase().includes(lower)) matches.push({ text: v, kind: 'value' })
-      if (matches.length >= 16) break
-    }
-    if (!matches.length) { acVisible.value = false; return }
-    acItems.value = matches
-    acSelected.value = 0
-    acWordStart.value = start
-    acWordEnd.value = end
-    acVisible.value = true
-    return
-  }
-
-  // Default mode — metric names + functions
-  const { word, start, end } = getWordAtCursor()
-  if (word.length < 1) {
-    acVisible.value = false
-    return
-  }
-  const lower = word.toLowerCase()
-  const matches: Array<{ text: string; kind: 'metric' | 'function' }> = []
-  for (const m of metricNames.value) {
-    if (m.toLowerCase().includes(lower)) matches.push({ text: m, kind: 'metric' })
-    if (matches.length >= 12) break
-  }
-  for (const f of promqlFunctions) {
-    if (f.includes(lower) && !matches.some(i => i.text === f)) {
-      matches.push({ text: f, kind: 'function' })
-    }
-    if (matches.length >= 16) break
-  }
-  if (!matches.length) {
-    acVisible.value = false
-    return
-  }
-  acItems.value = matches
-  acSelected.value = 0
-  acWordStart.value = start
-  acWordEnd.value = end
-  acVisible.value = true
-}
-
-function acceptAutocomplete(item: { text: string; kind: 'metric' | 'function' | 'label' | 'value' }) {
-  let before = query.value.slice(0, acWordStart.value)
-  const after = query.value.slice(acWordEnd.value)
-  let insertion: string
-
-  if (item.kind === 'value') {
-    // Strip any partial quote from before
-    if (before.endsWith('"')) before = before.slice(0, -1)
-    insertion = `"${item.text}"`
-  } else if (item.kind === 'function') {
-    insertion = item.text + '('
-  } else {
-    insertion = item.text
-  }
-
-  query.value = before + insertion + after
-  acVisible.value = false
-  nextTick(() => {
-    const el = queryTextarea.value
-    if (el) {
-      const pos = before.length + insertion.length
-      el.selectionStart = el.selectionEnd = pos
-      el.focus()
-    }
-  })
-}
+const queryTextarea = ref<InstanceType<typeof PromqlEditor> | null>(null)
 
 // ═══ Time range ═══
 const selectedPreset = useTimeRangePreference()
 const customRange = ref<{ from: string; to: string } | null>(null)
 
 // ═══ Smart suggestions ═══
+const labelCache = new Map<string, string[]>()
 const counterSuffixes = ['_total', '_count', '_bucket', '_sum']
 const suggestions = ref<Array<{ label: string; query: string; kind: 'rate' | 'group' }>>([])
 
@@ -304,7 +106,7 @@ function applySuggestion(s: { query: string }) {
   nextTick(() => {
     const el = queryTextarea.value
     if (el) {
-      el.selectionStart = el.selectionEnd = s.query.length
+el.setSelectionRange(s.query.length, s.query.length)
       el.focus()
     }
   })
@@ -472,42 +274,6 @@ function insertMetric(name: string) {
   metricFilter.value = ''
 }
 
-function handleQueryKeydown(e: KeyboardEvent) {
-  if (acVisible.value) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      acSelected.value = (acSelected.value + 1) % acItems.value.length
-      return
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      acSelected.value = (acSelected.value - 1 + acItems.value.length) % acItems.value.length
-      return
-    }
-    if (e.key === 'Tab' || e.key === 'Enter') {
-      e.preventDefault()
-      const item = acItems.value[acSelected.value]
-      if (item) acceptAutocomplete(item)
-      return
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      acVisible.value = false
-      return
-    }
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-    executeQuery()
-  }
-}
-
-function handleQueryInput() {
-  updateAutocomplete()
-}
-
-function handleQueryBlur() {
-  window.setTimeout(() => { acVisible.value = false }, 150)
-}
 
 // ═══ Natural language to PromQL ═══
 const nlMode = ref(false)
@@ -649,19 +415,17 @@ function toggleNlMode() {
   if (nlMode.value) { exitNlMode() } else { enterNlMode() }
 }
 
-function handleUnifiedInput(e: Event) {
-  const val = (e.target as HTMLTextAreaElement).value
+function handleUnifiedInput(val: string) {
   if (nlMode.value) {
     nlInput.value = val
     onNlInput()
   } else {
     query.value = val
-    handleQueryInput()
   }
 }
 
 function handleUnifiedKeydown(e: KeyboardEvent) {
-  if (nlMode.value) { onNlKeydown(e) } else { handleQueryKeydown(e) }
+  if (nlMode.value) onNlKeydown(e)
 }
 
 // ═══ Load helpers ═══
@@ -721,7 +485,6 @@ function restoreFromUrl() {
 
 onMounted(() => {
   labelCache.clear()
-  valueCache.clear()
   restoreFromUrl()
   loadHelpers()
   if (query.value.trim()) executeQuery()
@@ -794,17 +557,17 @@ watch(viewMode, () => {
     <div v-if="metricsEnabled && viewMode === 'query'" class="query-section card">
       <div class="query-row">
         <div class="query-input-wrapper">
-          <textarea
+          <PromqlEditor
             ref="queryTextarea"
-            :value="nlMode ? nlInput : query"
-            class="query-input mono"
-            :class="{ 'nl-active': nlMode }"
+            :model-value="nlMode ? nlInput : query"
+            :completion-enabled="!nlMode"
+            :input-class="nlMode ? 'query-input mono nl-active' : 'query-input mono'"
             :placeholder="nlMode ? 'Describe what you want to query... (Enter to apply, Esc to cancel)' : 'Enter a PromQL expression...'"
-            rows="2"
-            @input="handleUnifiedInput"
+            :rows="2"
+            @update:model-value="handleUnifiedInput"
             @keydown="handleUnifiedKeydown"
-            @blur="handleQueryBlur"
-          ></textarea>
+            @execute="executeQuery"
+          />
           <!-- ✦ AI button overlaid inside textarea -->
           <button
             class="nl-inline-btn"
@@ -814,19 +577,6 @@ watch(viewMode, () => {
           >✦</button>
           <!-- NL spinner -->
           <span v-if="nlMode && nlLoading" class="nl-inline-spinner">···</span>
-          <!-- Autocomplete dropdown (PromQL mode only) -->
-          <div v-if="!nlMode && acVisible && acItems.length" class="ac-dropdown">
-            <div
-              v-for="(item, idx) in acItems"
-              :key="item.text"
-              class="ac-item mono"
-              :class="{ selected: idx === acSelected }"
-              @mousedown.prevent="acceptAutocomplete(item)"
-            >
-              <span class="ac-kind" :class="item.kind">{{ { function: 'fn', metric: 'm', label: 'l', value: 'v' }[item.kind] }}</span>
-              <span>{{ item.text }}</span>
-            </div>
-          </div>
         </div>
         <div class="query-actions">
           <button class="btn btn-execute" @click="() => nlMode ? applyNl() : executeQuery()" :disabled="executing || (nlMode ? !nlResult : !query.trim())">
