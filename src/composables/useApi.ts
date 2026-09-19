@@ -23,6 +23,7 @@ import type {
   GroupResponse,
   TimeseriesResponse,
   Dashboard,
+  DashboardDefaults,
   DashboardVariable,
   DashboardWithWidgets,
   DashboardTemplate,
@@ -445,6 +446,7 @@ export function useApi() {
   }
 
   async function createDashboard(data: {
+    defaults?: DashboardDefaults
     name: string; description?: string; visibility?: string; tags?: string[]; variables?: DashboardVariable[]
   }): Promise<Dashboard> {
     return await request('/dashboards', {
@@ -454,6 +456,7 @@ export function useApi() {
   }
 
   async function updateDashboard(id: string, data: {
+    defaults?: DashboardDefaults
     name: string; description?: string; visibility?: string; tags?: string[]; variables?: DashboardVariable[]
   }): Promise<Dashboard> {
     return await request(`/dashboards/${encodePathSegment(id)}`, {
