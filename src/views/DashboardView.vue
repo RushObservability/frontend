@@ -16,6 +16,7 @@ import { usePollingTask } from '../composables/usePollingTask'
 import { defaultPanelCaption, formatPanelRange, formatPanelSource } from '../components/panels/panelPresentation'
 import type { PieStyle, PieCalculation, PieSort } from '../lib/pie'
 import { applyTimeRangeOverride, useTimeRangePreference } from '../composables/useTimeRangePreference'
+import { useDashboardTv } from '../composables/useDashboardTv'
 
 const props = defineProps<{ id: string }>()
 
@@ -23,6 +24,7 @@ const api = useApi()
 const { canWrite } = useAuth()
 const router = useRouter()
 const route = useRoute()
+const { active: tvMode, fullscreen, enter: enterTv, exit: exitTv, requestFullscreen } = useDashboardTv()
 const { fetchWidgetData } = useWidgetData()
 
 // Share a single crosshair time across every widget on this dashboard, so
@@ -45,6 +47,16 @@ const savingWidget = ref(false)
 const widgetSaveError = ref<string | null>(null)
 const deploys = ref<DeployMarker[]>([])
 const lastRefreshedAt = ref<Date | null>(null)
+const tvGridRows = computed(() => Math.max(1, ...(dashboard.value?.widgets || []).map(widget =>
+  widget.position.row + widget.position.row_span - 1,
+)))
+
+watch(tvMode, enabled => {
+  if (!enabled) return
+  editMode.value = false
+  showAddWidget.value = false
+  showVarEditor.value = false
+})
 
 // ── Template variables ──
 const variables = computed<DashboardVariable[]>(() => dashboard.value?.variables || [])
@@ -429,8 +441,14 @@ function widgetStyle(widget: Widget) {
 </script>
 
 <template>
-  <div class="dashboard-page">
-    <header class="dashboard-header">
+  <div class="dashboard-page" :class="{ 'dashboard-page--tv': tvMode }" :style="{ '--tv-grid-rows': tvGridRows }">
+    <div v-if="tvMode" class="dashboard-tv-controls" role="group" aria-label="TV mode controls">
+      <button v-if="!fullscreen" class="share-btn" type="button" @click="requestFullscreen">Full screen</button>
+      <button ref="tvExitButton" class="share-btn" type="button" @click="exitTv" title="Exit TV mode (Escape)">
+        Exit TV mode <kbd aria-hidden="true">Esc</kbd>
+      </button>
+    </div>
+    <header v-if="!tvMode" class="dashboard-header">
       <div class="dashboard-heading">
         <router-link to="/dashboards" class="back-link"><span aria-hidden="true">←</span> All dashboards</router-link>
         <div class="dashboard-title-row">
@@ -443,6 +461,10 @@ function widgetStyle(widget: Widget) {
         <p v-if="dashboard?.description" class="page-desc">{{ dashboard.description }}</p>
       </div>
       <div class="dashboard-primary-actions">
+        <button ref="tvEnterButton" class="share-btn tv-mode-btn" type="button" @click="enterTv" title="Show only the dashboard in full screen">
+          <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2" y="3" width="16" height="11" rx="2"/><path d="M7 17h6M10 14v3"/></svg>
+          TV mode
+        </button>
         <button class="share-btn" @click="shareLink" :title="shareCopied ? 'Copied!' : 'Copy a link with the current time and variables'">
           {{ shareCopied ? '✓ Link copied' : 'Share view' }}
         </button>
@@ -452,7 +474,7 @@ function widgetStyle(widget: Widget) {
       </div>
     </header>
 
-    <section class="dashboard-control-deck" aria-label="Dashboard time and refresh controls">
+    <section v-if="!tvMode" class="dashboard-control-deck" aria-label="Dashboard time and refresh controls">
       <div class="control-cluster time-control">
         <span class="control-label">TIME RANGE</span>
         <TimePicker v-model="dashMinutes" />
@@ -490,7 +512,7 @@ function widgetStyle(widget: Widget) {
     </div>
 
     <!-- ── Template variable bar ── -->
-    <div v-if="variables.length" class="dash-var-bar">
+    <div v-if="variables.length && !tvMode" class="dash-var-bar">
       <span class="control-label variable-heading">FILTERS</span>
       <div v-for="v in variables" :key="v.name" class="dash-var">
         <label class="dash-var-label">{{ varLabel(v) }}</label>
@@ -522,7 +544,7 @@ function widgetStyle(widget: Widget) {
       <div class="empty-state-icon">+</div>
       <strong>This dashboard is ready for its first signal</strong>
       <div class="text-secondary" style="font-size: 11px">Add a time series, stat, bar chart, or table to start answering an operational question.</div>
-      <button v-if="canWrite" class="btn-add empty-add" @click="editMode = true; openAddWidget()">Add first panel</button>
+      <button v-if="canWrite && !tvMode" class="btn-add empty-add" @click="editMode = true; openAddWidget()">Add first panel</button>
     </div>
 
     <div v-else ref="gridRef" class="widget-grid">
