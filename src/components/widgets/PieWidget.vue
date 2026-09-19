@@ -24,6 +24,7 @@ const segments = computed(() => {
     return { ...slice, path }
   })
 })
+const sliceCount = computed(() => `${segments.value.length} ${segments.value.length === 1 ? 'slice' : 'slices'}`)
 const value = (n: number) => formatPieValue(n, props.unit)
 const percent = (n: number) => `${n < 0.1 ? '<0.1' : n.toFixed(1)}%`
 function toggle(id: string) { pinned.value = pinned.value === id ? null : id }
@@ -34,7 +35,7 @@ function toggle(id: string) { pinned.value = pinned.value === id ? null : id }
     <EmptyState v-if="!segments.length" title="No positive values" message="Pie charts need positive values to compare. Try another query or time range." />
     <template v-else>
       <div class="pie-plot">
-        <svg class="pie-svg" viewBox="0 0 200 200" role="img" :aria-label="`${pieStyle === 'donut' ? 'Donut' : 'Pie'} chart: ${segments.length} slices, total ${value(distribution.total)}`" @pointerleave="hovered = null">
+        <svg class="pie-svg" viewBox="0 0 200 200" role="img" :aria-label="`${pieStyle === 'donut' ? 'Donut' : 'Pie'} chart: ${sliceCount}, total ${value(distribution.total)}`" @pointerleave="hovered = null">
           <path v-for="slice in segments" :key="slice.id" class="pie-slice"
             :d="slice.path" :fill="slice.color" :class="{ 'pie-slice--muted': active && active.id !== slice.id, 'pie-slice--active': active?.id === slice.id }"
             @pointerenter="hovered = slice.id" @click="toggle(slice.id)">
@@ -44,7 +45,7 @@ function toggle(id: string) { pinned.value = pinned.value === id ? null : id }
         <div v-if="pieStyle === 'donut'" class="pie-center" :title="active?.name || 'Total'">
           <span class="pie-center-label">{{ active?.name || 'Total' }}</span>
           <strong>{{ formatPieValue(active?.value ?? distribution.total) }}</strong>
-          <span class="pie-center-unit">{{ active ? percent(active.percent) : (unit || `${segments.length} slices`) }}</span>
+          <span class="pie-center-unit">{{ active ? percent(active.percent) : (unit || sliceCount) }}</span>
         </div>
       </div>
       <div class="pie-legend" aria-label="Chart legend">

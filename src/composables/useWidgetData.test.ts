@@ -5,6 +5,9 @@ import { useWidgetData } from './useWidgetData'
 const api = vi.hoisted(() => ({
   queryTimeseries: vi.fn(),
   countLogs: vi.fn(),
+  groupLogs: vi.fn(),
+  queryGroup: vi.fn(),
+  promQueryRange: vi.fn(),
 }))
 vi.mock('./useApi', () => ({ useApi: () => api }))
 
@@ -57,5 +60,20 @@ describe('dashboard bucket times', () => {
     const data = await useWidgetData().fetchWidgetData(panel)
     expect(data.type).toBe('histogram')
     expect(data.series?.[0]?.points).toEqual([[Date.parse('2026-09-17T00:30:00Z') / 1000, 4]])
+  })
+
+  it('uses grouped counts for log and span pies and preserves metric series', async () => {
+    api.groupLogs.mockResolvedValue({ groups: [{ key: 'ERROR', count: 4 }] })
+    api.queryGroup.mockResolvedValue({ groups: [{ key: 'payments', count: 7 }] })
+    const logPanel = widget('logs')
+    logPanel.widget_type = 'pie'
+    const spanPanel = widget('spans')
+    spanPanel.widget_type = 'pie'
+    expect((await useWidgetData().fetchWidgetData(logPanel)).groups).toEqual([{ key: 'ERROR', count: 4 }])
+    expect((await useWidgetData().fetchWidgetData(spanPanel)).groups).toEqual([{ key: 'payments', count: 7 }])
+    api.promQueryRange.mockResolvedValue({ result: [{ metric: { service: 'payments' }, values: [[1, '10'], [2, '25']] }] })
+    spanPanel.query_config.source = 'metrics'
+    spanPanel.query_config.promql = 'sum(rate(requests_total[5m])) by (service)'
+    expect((await useWidgetData().fetchWidgetData(spanPanel)).series?.[0]?.points).toEqual([[1, 10], [2, 25]])
   })
 })
