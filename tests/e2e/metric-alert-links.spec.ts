@@ -35,12 +35,39 @@ async function stubMetricAlertApi(page: Page, series = metric) {
 }
 
 async function openMetricQuery(page: Page, expression: string) {
-  // /metrics is also the dev proxy's scrape endpoint; reach the UI through its router.
-  await page.goto('/alerts/new')
-  await page.getByRole('link', { name: 'Metrics', exact: true }).click()
+  await page.goto('/metrics-browser')
   await page.getByPlaceholder('Enter a PromQL expression...', { exact: true }).fill(expression)
   await page.getByRole('button', { name: 'Execute', exact: true }).click()
 }
+
+test('metric browser deep links survive a full reload and shared links use the UI route', async ({ page }) => {
+  await stubMetricAlertApi(page)
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async (text: string) => { (window as any).__sharedUrl = text },
+    } })
+  })
+  const expression = 'sum(rate(http_requests_total{service_name="payments"}[5m]))'
+  const params = new URLSearchParams({ q: expression, t: '180', tab: 'table' })
+  const response = await page.goto(`/metrics-browser?${params}`)
+  expect(response?.headers()['content-type']).toContain('text/html')
+  const editor = page.getByRole('combobox', { name: 'Query expression' })
+  await expect(editor).toHaveValue(expression)
+  await expect(page.getByRole('link', { name: 'Metrics', exact: true })).toHaveAttribute('href', '/metrics-browser')
+  const reload = await page.reload()
+  expect(reload?.headers()['content-type']).toContain('text/html')
+  await expect(editor).toHaveValue(expression)
+  expect(new URL(page.url()).pathname).toBe('/metrics-browser')
+  expect(new URL(page.url()).searchParams.get('t')).toBe('180')
+  expect(new URL(page.url()).searchParams.get('tab')).toBe('table')
+  await page.getByTitle('Copy shareable link', { exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__sharedUrl)).toBeTruthy()
+  const shared = new URL(await page.evaluate(() => (window as any).__sharedUrl))
+  expect(shared.pathname).toBe('/metrics-browser')
+  expect(shared.searchParams.get('q')).toBe(expression)
+  expect(shared.searchParams.get('t')).toBe('180')
+  expect(shared.searchParams.get('tab')).toBe('table')
+})
 
 test('Alert from series opens the metric alert form with the exact series selector', async ({ page }, testInfo) => {
   const state = await stubMetricAlertApi(page)

@@ -58,7 +58,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     keywords: ['charts', 'graphs'],
   },
   {
-    id: 'metrics', label: 'Metrics', path: '/metrics', icon: '≋', group: 'observe',
+    id: 'metrics', label: 'Metrics', path: '/metrics-browser', icon: '≋', group: 'observe',
     routeNames: ['metrics', 'metric-detail'], keywords: ['prometheus', 'timeseries'],
   },
   {
