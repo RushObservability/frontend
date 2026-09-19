@@ -453,8 +453,8 @@ function buildShareUrl(): string {
   if (activeTab.value !== 'graph') params.set('tab', activeTab.value)
   if (selectedPreset.value !== 60) params.set('t', String(selectedPreset.value))
   if (viewMode.value !== 'query') params.set('mode', viewMode.value)
-  const qs = params.toString()
-  return `${window.location.origin}/metrics${qs ? '?' + qs : ''}`
+  const href = router.resolve({ name: 'metrics', query: Object.fromEntries(params) }).href
+  return new URL(href, window.location.origin).href
 }
 
 function syncUrlState() {
@@ -463,7 +463,7 @@ function syncUrlState() {
   if (activeTab.value !== 'graph') params.tab = activeTab.value
   if (selectedPreset.value !== 60) params.t = String(selectedPreset.value)
   if (viewMode.value !== 'query') params.mode = viewMode.value
-  router.replace({ path: '/metrics', query: Object.keys(params).length ? params : undefined })
+  router.replace({ name: 'metrics', query: Object.keys(params).length ? params : undefined })
 }
 
 async function shareLink() {

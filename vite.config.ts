@@ -96,7 +96,8 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
-      '/metrics': {
+      // Scrape endpoint only. A prefix match would also swallow /metrics-browser.
+      '^/metrics(?:\\?|$)': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },

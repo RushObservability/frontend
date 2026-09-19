@@ -40,6 +40,12 @@ describe('visibleNavigationGroups', () => {
 })
 
 describe('navigationItemIsActive', () => {
+  it('links Metrics to the browser instead of the Prometheus scrape endpoint', () => {
+    const metrics = NAVIGATION_ITEMS.find(item => item.id === 'metrics')!
+    expect(metrics.path).toBe('/metrics-browser')
+    expect(navigationItemIsActive(metrics, 'metrics')).toBe(true)
+  })
+
   it('keeps detail and create routes attached to their parent destination', () => {
     const alerts = NAVIGATION_ITEMS.find(item => item.id === 'alerts')!
     const services = NAVIGATION_ITEMS.find(item => item.id === 'services')!

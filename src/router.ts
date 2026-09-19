@@ -49,7 +49,7 @@ const router = createRouter({
       redirect: '/?mode=traces',
     },
     {
-      path: '/metrics',
+      path: '/metrics-browser',
       name: 'metrics',
       component: () => import('./views/MetricsView.vue'),
     },
