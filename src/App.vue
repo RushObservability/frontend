@@ -15,6 +15,7 @@ import ApiUnavailableDialog from './components/ApiUnavailableDialog.vue'
 import { createApiAvailabilityMonitor } from './composables/apiAvailability'
 import { visibleNavigationGroups } from './navigation'
 import { defaultTheme } from './config'
+import { isDashboardTv } from './composables/useDashboardTv'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,6 +35,7 @@ const {
 } = useAuth()
 const { tenants, activeTenantName, showSwitcher, loadTenants, setTenant, activeTenant } = useTenant()
 const usesBareLayout = computed(() => route.name === 'login' || route.meta.bareLayout === true)
+const dashboardTv = computed(() => isDashboardTv(route))
 
 // A saved preference always wins; otherwise fall back to the deploy default
 // (DEFAULT_THEME env var, defaults to light when unset).
@@ -226,9 +228,9 @@ watch(isAuthenticated, async (authed) => {
 </script>
 
 <template>
-  <div class="app">
+  <div class="app" :class="{ 'app--dashboard-tv': dashboardTv }">
     <a v-if="!usesBareLayout" class="skip-link" href="#main-content">Skip to main content</a>
-    <header v-if="!usesBareLayout" class="topbar">
+    <header v-if="!usesBareLayout && !dashboardTv" class="topbar">
       <router-link to="/" class="logo" aria-label="Rush Observability home">
         <span class="logo-icon" aria-hidden="true">R</span>
         <span class="logo-text">Rush Observability</span>
@@ -289,7 +291,7 @@ watch(isAuthenticated, async (authed) => {
       </div>
     </header>
     <div v-if="!usesBareLayout" class="app-frame">
-      <AppNavigation :groups="navigationGroups" :integrations="integrationNavigation" />
+      <AppNavigation v-if="!dashboardTv" :groups="navigationGroups" :integrations="integrationNavigation" />
       <main id="main-content" class="main" tabindex="-1">
         <router-view />
       </main>
@@ -1167,4 +1169,6 @@ button {
   .topbar-right { gap: 6px; }
   .global-search kbd { display: none; }
 }
+.app--dashboard-tv .app-frame { min-height: 100dvh; }
+.app--dashboard-tv .main { padding: 0; }
 </style>
