@@ -1,5 +1,6 @@
 import type { CountBucket, DeployMarker, TimeDomain, WidgetQueryConfig } from '../../types'
 import type { TableWidgetColumn } from '../widgets/table'
+import type { PieData, PieStyle, PieCalculation, PieSort } from '../../lib/pie'
 
 export type PanelVariant = 'chart' | 'stat' | 'bar' | 'table'
 export type PanelTone = 'default' | 'positive' | 'warning' | 'danger'
@@ -60,6 +61,15 @@ export interface StatPanelProps extends PanelFrameProps {
 
 export interface BarPanelProps extends PanelFrameProps {
   groups?: Array<{ key: string; count: number }>
+}
+
+export interface PiePanelProps extends PanelFrameProps {
+  data?: PieData
+  pieStyle?: PieStyle
+  calculation?: PieCalculation
+  sort?: PieSort
+  legendPosition?: 'right' | 'bottom'
+  unit?: string
 }
 
 export interface HistogramPanelProps extends PanelFrameProps {

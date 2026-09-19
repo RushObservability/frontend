@@ -23,7 +23,9 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Dependency audit
-        run: npm audit --audit-level=high
+        run: |
+          npm test -- scripts/audit-dependencies.test.mjs
+          node scripts/audit-dependencies.mjs
 
       - name: Security regression checks
         run: npm run security:check

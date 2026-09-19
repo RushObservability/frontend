@@ -30,5 +30,6 @@ export function defaultPanelCaption(type: WidgetType): string {
   if (type === 'table') return 'Latest matching records for the selected window.'
   if (type === 'heatmap') return 'Value by series and time across the selected window.'
   if (type === 'histogram') return 'Distribution of returned query samples, not individual events.'
+  if (type === 'pie') return 'Share of returned values. Zero values are not drawn.'
   return 'Trend across the selected dashboard window.'
 }

@@ -1,5 +1,9 @@
 import { test, expect, type Page } from '@playwright/test'
 
+test.beforeEach(({ page }) => {
+  page.on('pageerror', error => { throw error })
+})
+
 async function stubUsers(page: Page, count = 86, failGroups = false) {
   const state = {
     users: Array.from({ length: count }, (_, i) => ({
@@ -12,7 +16,7 @@ async function stubUsers(page: Page, count = 86, failGroups = false) {
   await page.route('**/api/v1/**', async route => {
     const path = new URL(route.request().url()).pathname
     const method = route.request().method()
-    let body: unknown = { keys: [], groups: [], users: [], links: [], channels: [], skills: [], values: [], providers: [], mappings: [], sessions: [] }
+    let body: unknown = { keys: [], groups: [], users: [], links: [], channels: [], skills: [], values: [], providers: [], mappings: [], sessions: [], routes: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: '0', username: 'admin@example.com', role: 'admin' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
     if (path === '/api/v1/users') body = { users: state.users }
