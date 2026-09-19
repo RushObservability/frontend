@@ -63,11 +63,12 @@ export interface BarPanelProps extends PanelFrameProps {
 }
 
 export interface HistogramPanelProps extends PanelFrameProps {
-  bins?: Array<{ key: string; count: number }>
+  bins?: Array<{ key: string; count: number; lower?: number; upper?: number }>
   sampleCount?: number
   markers?: Array<{ position: number; label: string; value?: string; color?: string }>
   minLabel?: string
   maxLabel?: string
+  axisUnit?: string
   color?: string
   unit?: string
 }

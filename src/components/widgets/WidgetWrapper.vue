@@ -73,6 +73,7 @@ const panelProps = computed<Record<string, unknown>>(() => {
       ...base,
       bins: distribution.bins.map(bin => ({ ...bin, key: `${bin.key}${props.unit ? ` ${props.unit}` : ''}` })),
       sampleCount: distribution.sampleCount,
+      axisUnit: props.unit || '',
       minLabel: `${distribution.minLabel}${props.unit ? ` ${props.unit}` : ''}`,
       maxLabel: `${distribution.maxLabel}${props.unit ? ` ${props.unit}` : ''}`,
       color: 'var(--blue, #3b82f6)',
