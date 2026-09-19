@@ -14,6 +14,7 @@ import VariableEditor from '../components/widgets/VariableEditor.vue'
 import TimePicker from '../components/TimePicker.vue'
 import { usePollingTask } from '../composables/usePollingTask'
 import { defaultPanelCaption, formatPanelRange, formatPanelSource } from '../components/panels/panelPresentation'
+import type { PieStyle, PieCalculation, PieSort } from '../lib/pie'
 import { applyTimeRangeOverride, useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const props = defineProps<{ id: string }>()
@@ -541,6 +542,10 @@ function widgetStyle(widget: Widget) {
           :range-label="panelRangeLabel"
           :unit="(widget.display_config?.unit as string) || ''"
           :histogram-bucket-count="(widget.display_config?.histogram_bucket_count as number) || 20"
+          :pie-style="widget.display_config?.pie_style as PieStyle | undefined"
+          :pie-calculation="widget.display_config?.pie_calculation as PieCalculation | undefined"
+          :pie-sort="widget.display_config?.pie_sort as PieSort | undefined"
+          :pie-legend-position="widget.display_config?.pie_legend_position as 'right' | 'bottom' | undefined"
           :display-mode="widget.display_config?.display_mode as 'lines' | 'stacked-lines' | undefined"
           :fill="widget.display_config?.fill as boolean | undefined"
           :data="widgetDataMap[widget.id]"
@@ -567,7 +572,7 @@ function widgetStyle(widget: Widget) {
         <strong>Add visualization</strong>
         <small>Build a panel from spans, logs, or metrics</small>
       </span>
-      <span class="add-panel-types mono">TIME SERIES · STAT · BAR · TABLE</span>
+      <span class="add-panel-types mono">TIME SERIES · STAT · BAR · PIE · TABLE</span>
     </button>
 
     <WidgetEditor

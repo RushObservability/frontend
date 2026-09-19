@@ -8,6 +8,8 @@ import TablePanel from '../panels/TablePanel.vue'
 import TimeSeriesPanel from '../panels/TimeSeriesPanel.vue'
 import HeatmapPanel from '../panels/HeatmapPanel.vue'
 import HistogramPanel from '../panels/HistogramPanel.vue'
+import PiePanel from '../panels/PiePanel.vue'
+import type { PieStyle, PieCalculation, PieSort } from '../../lib/pie'
 import { buildHistogram } from '../../lib/histogram'
 
 const props = withDefaults(defineProps<{
@@ -19,6 +21,10 @@ const props = withDefaults(defineProps<{
   rangeLabel?: string
   unit?: string
   histogramBucketCount?: number
+  pieStyle?: PieStyle
+  pieCalculation?: PieCalculation
+  pieSort?: PieSort
+  pieLegendPosition?: 'right' | 'bottom'
   displayMode?: TimeSeriesPanelProps['displayMode']
   fill?: boolean | null
   data?: WidgetData
@@ -42,6 +48,7 @@ const panelComponent = computed<Component>(() => {
   if (props.type === 'table') return TablePanel
   if (props.type === 'heatmap') return HeatmapPanel
   if (props.type === 'histogram') return HistogramPanel
+  if (props.type === 'pie') return PiePanel
   return TimeSeriesPanel
 })
 
@@ -65,6 +72,7 @@ const panelProps = computed<Record<string, unknown>>(() => {
     }
   }
   if (props.type === 'bar') return { ...base, groups: props.data?.groups || [] }
+  if (props.type === 'pie') return { ...base, data: props.data || {}, pieStyle: props.pieStyle, calculation: props.pieCalculation, sort: props.pieSort, legendPosition: props.pieLegendPosition, unit: props.unit || '' }
   if (props.type === 'table') return { ...base, rows: props.data?.rows || [] }
   if (props.type === 'heatmap') return { ...base, series: props.data?.series || [], timeDomain: props.data?.time_domain, unit: props.unit || '' }
   if (props.type === 'histogram') {

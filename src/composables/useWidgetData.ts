@@ -124,10 +124,11 @@ export function useWidgetData() {
           const buckets = await api.countLogs({ time_range: timeRange, filters, interval: query.interval || '1h' }, 'dashboard', signal)
           return { type: 'counter', count: buckets.reduce((sum, bucket) => sum + bucket.count, 0) }
         }
+        case 'pie':
         case 'bar': {
           const groupBy = (query.group_by || ['severity_text']).map(value => substitute(value, varValues))
           const res = await api.groupLogs({ time_range: timeRange, filters, group_by: groupBy, limit: query.limit || 10 }, 'dashboard', signal)
-          return { type: 'bar', groups: (res.groups || []).map(group => ({ key: group.key || 'unknown', count: group.count })) }
+          return { type: widgetType, groups: (res.groups || []).map(group => ({ key: group.key || 'unknown', count: group.count })) }
         }
         case 'table': {
           const res = await api.queryLogs({ time_range: timeRange, filters, limit: query.limit || 20 }, 'dashboard', signal)
@@ -153,6 +154,7 @@ export function useWidgetData() {
           series: apmTimeseriesToSeries(response.buckets, query, response.grouped),
         }
       }
+      case 'pie':
       case 'bar': {
         const configuredGroups = query.group_by?.length ? query.group_by : ['service_name']
         const groupBy = configuredGroups.map(value => substitute(value, varValues))
@@ -163,7 +165,7 @@ export function useWidgetData() {
           limit: query.limit || 10,
         }, 'dashboard', signal)
         return {
-          type: 'bar',
+          type: widgetType,
           groups: (res.groups || []).map(group => ({ key: group.key || 'unknown', count: group.count })),
         }
       }

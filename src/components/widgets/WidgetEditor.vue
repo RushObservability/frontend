@@ -11,6 +11,8 @@ import TableWidget from './TableWidget.vue'
 import TimeseriesWidget from './TimeseriesWidget.vue'
 import HeatmapWidget from './HeatmapWidget.vue'
 import HistogramWidget from './HistogramWidget.vue'
+import PieWidget from './PieWidget.vue'
+import type { PieStyle, PieCalculation, PieSort } from '../../lib/pie'
 import { buildHistogram } from '../../lib/histogram'
 
 const props = defineProps<{
@@ -47,6 +49,10 @@ const description = ref('')
 const unit = ref('')
 const fill = ref(false)
 const histogramBucketCount = ref(20)
+const pieStyle = ref<PieStyle>('donut')
+const pieCalculation = ref<PieCalculation>('last')
+const pieSort = ref<PieSort>('descending')
+const pieLegendPosition = ref<'right' | 'bottom'>('right')
 const displayMode = ref<'lines' | 'stacked-lines'>('lines')
 const activeEditorTab = ref<'query' | 'panel'>('query')
 
@@ -119,6 +125,7 @@ const VIZ = [
   { type: 'timeseries' as WidgetType, label: 'Time series', glyph: '∿', note: 'Trend values over time' },
   { type: 'heatmap' as WidgetType, label: 'Heatmap', glyph: '▦', note: 'Compare values by group and time' },
   { type: 'histogram' as WidgetType, label: 'Histogram', glyph: '▥', note: 'Count values in numeric ranges' },
+  { type: 'pie' as WidgetType, label: 'Pie chart', glyph: '◔', note: 'Compare shares as a pie or donut' },
   { type: 'counter' as WidgetType, label: 'Stat', glyph: '#', note: 'One prominent value' },
   { type: 'bar' as WidgetType, label: 'Bar chart', glyph: '▊', note: 'Compare grouped values' },
   { type: 'table' as WidgetType, label: 'Table', glyph: '☰', note: 'Inspect detailed rows' },
@@ -165,13 +172,16 @@ function isApmPresetActive(preset: typeof APM_PRESETS[number]): boolean {
   )
 }
 
-// Metrics source only makes sense for timeseries/counter.
-const metricsOk = computed(() => widgetType.value === 'timeseries' || widgetType.value === 'heatmap' || widgetType.value === 'histogram' || widgetType.value === 'counter')
+const metricsOk = computed(() => ['timeseries', 'heatmap', 'histogram', 'pie', 'counter'].includes(widgetType.value))
 
 watch(() => props.widget, (widget) => {
   if (!widget) {
     fill.value = false
     histogramBucketCount.value = 20
+    pieStyle.value = 'donut'
+    pieCalculation.value = 'last'
+    pieSort.value = 'descending'
+    pieLegendPosition.value = 'right'
     displayMode.value = 'lines'
     queries.value = [makeQuery({ ref_id: 'A' })]
     activeQueryId.value = 'A'
@@ -185,6 +195,10 @@ watch(() => props.widget, (widget) => {
   description.value = (widget.display_config?.description as string) || ''
   unit.value = (widget.display_config?.unit as string) || ''
   histogramBucketCount.value = Number(widget.display_config?.histogram_bucket_count) || 20
+  pieStyle.value = widget.display_config?.pie_style === 'pie' ? 'pie' : 'donut'
+  pieCalculation.value = widget.display_config?.pie_calculation === 'sum' ? 'sum' : widget.display_config?.pie_calculation === 'mean' ? 'mean' : 'last'
+  pieSort.value = widget.display_config?.pie_sort === 'none' ? 'none' : widget.display_config?.pie_sort === 'ascending' ? 'ascending' : 'descending'
+  pieLegendPosition.value = widget.display_config?.pie_legend_position === 'bottom' ? 'bottom' : 'right'
   displayMode.value = widget.display_config?.display_mode === 'stacked-lines' ? 'stacked-lines' : 'lines'
   fill.value = typeof widget.display_config?.fill === 'boolean'
     ? widget.display_config.fill
@@ -372,6 +386,14 @@ function save() {
   }
   if (widgetType.value === 'histogram') displayConfig.histogram_bucket_count = Math.max(2, Math.min(50, Math.round(histogramBucketCount.value) || 20))
   else delete displayConfig.histogram_bucket_count
+  if (widgetType.value === 'pie') {
+    displayConfig.pie_style = pieStyle.value
+    displayConfig.pie_calculation = pieCalculation.value
+    displayConfig.pie_sort = pieSort.value
+    displayConfig.pie_legend_position = pieLegendPosition.value
+  } else {
+    for (const key of ['pie_style', 'pie_calculation', 'pie_sort', 'pie_legend_position']) delete displayConfig[key]
+  }
   emit('save', {
     title: title.value || 'Untitled',
     widget_type: widgetType.value,
@@ -426,6 +448,7 @@ function save() {
               <template v-else-if="previewData">
                 <CounterWidget v-if="widgetType === 'counter'" :value="previewData.count || 0" :label="title || 'Stat'" />
                 <BarWidget v-else-if="widgetType === 'bar'" :groups="previewData.groups || []" />
+                <PieWidget v-else-if="widgetType === 'pie'" :data="previewData" :pie-style="pieStyle" :calculation="pieCalculation" :sort="pieSort" :legend-position="pieLegendPosition" :unit="unit" />
                 <TableWidget v-else-if="widgetType === 'table'" :rows="(previewData.rows || []) as Record<string, unknown>[]" />
                 <TimeseriesWidget v-else-if="widgetType === 'timeseries'" :buckets="previewData.buckets || []" :series="previewData.series" :unit="unit" :display-mode="displayMode" :fill="fill" />
                 <HeatmapWidget v-else-if="widgetType === 'heatmap'" :series="previewData.series || []" :time-domain="previewData.time_domain" :unit="unit" />
@@ -571,7 +594,7 @@ function save() {
                   <div class="we-subheading"><div><strong>Span filters</strong><small>Filter by service, endpoint, method, exact status code, duration, or attributes</small></div></div>
                   <QueryBuilder v-model:filters="builderFilters" />
                 </div>
-                <div v-if="widgetType === 'bar'" class="we-field">
+                <div v-if="widgetType === 'bar' || widgetType === 'pie'" class="we-field">
                   <label class="we-label">Group by</label>
                   <input v-model="groupBy" class="we-input mono" placeholder="service_name" />
                 </div>
@@ -579,7 +602,7 @@ function save() {
             </template>
             <template v-else>
               <QueryBuilder v-model:filters="builderFilters" />
-              <div v-if="widgetType === 'bar'" class="we-field">
+              <div v-if="widgetType === 'bar' || widgetType === 'pie'" class="we-field">
                 <label class="we-label">Group by</label>
                 <input v-model="groupBy" class="we-input mono" placeholder="service_name" />
               </div>
@@ -603,7 +626,7 @@ function save() {
                   <option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option>
                 </select>
               </div>
-              <div v-if="widgetType === 'bar' || widgetType === 'table'" class="we-field">
+              <div v-if="widgetType === 'bar' || widgetType === 'pie' || widgetType === 'table'" class="we-field">
                 <label class="we-label">Result limit</label>
                 <input v-model.number="limit" type="number" min="1" max="100" class="we-input mono" />
               </div>
@@ -634,6 +657,26 @@ function save() {
               <input id="we-value-unit" v-model="unit" class="we-input mono" :placeholder="widgetType === 'histogram' ? 'events/s, ms, bytes' : 'req/s, ms, %, B/s'" :aria-describedby="widgetType === 'histogram' ? 'we-value-unit-help' : undefined" />
               <small v-if="widgetType === 'histogram'" id="we-value-unit-help" class="we-field-help">Custom unit for bucket values and tooltips. The y-axis counts samples. This labels the values without converting them; leave blank for numbers only.</small>
             </div>
+            <template v-if="widgetType === 'pie'">
+              <div class="we-field">
+                <label class="we-label" for="we-pie-style">Pie style</label>
+                <select id="we-pie-style" v-model="pieStyle" class="we-input"><option value="donut">Donut · total in the center</option><option value="pie">Pie · full circle</option></select>
+              </div>
+              <div v-if="source === 'metrics'" class="we-field">
+                <label class="we-label" for="we-pie-calculation">Value per series</label>
+                <select id="we-pie-calculation" v-model="pieCalculation" class="we-input"><option value="last">Last non-null value</option><option value="mean">Mean</option><option value="sum">Sum of samples</option></select>
+                <small class="we-field-help">One slice per returned series. Use a grouped query to compare services or categories. Sum adds samples; it does not calculate a counter increase.</small>
+              </div>
+              <div class="we-field">
+                <label class="we-label" for="we-pie-sort">Slice order</label>
+                <select id="we-pie-sort" v-model="pieSort" class="we-input"><option value="descending">Largest first</option><option value="ascending">Smallest first</option><option value="none">Query order</option></select>
+              </div>
+              <div class="we-field">
+                <label class="we-label" for="we-pie-legend">Legend position</label>
+                <select id="we-pie-legend" v-model="pieLegendPosition" class="we-input"><option value="right">Right</option><option value="bottom">Bottom</option></select>
+                <small class="we-field-help">Shows names, values, and percentages. Highlight a slice with the legend; press Escape to clear. Narrow panels place the legend below the chart.</small>
+              </div>
+            </template>
             <div v-if="widgetType === 'histogram'" class="we-field">
               <label class="we-label" for="we-histogram-buckets">Value buckets</label>
               <input id="we-histogram-buckets" v-model.number="histogramBucketCount" class="we-input mono" type="number" min="2" max="50" step="1" />
