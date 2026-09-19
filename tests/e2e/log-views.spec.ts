@@ -5,7 +5,7 @@ let pageErrors: string[] = []
 
 test.beforeEach(({ page }) => {
   pageErrors = []
-  page.on('pageerror', error => pageErrors.push(error.message))
+  page.on('pageerror', error => pageErrors.push(error.stack || error.message))
 })
 
 test.afterEach(() => {
@@ -19,7 +19,7 @@ async function stubLogApi(page: Page, initialViews: LogView[] = [], role = 'admi
   await page.route('**/api/v1/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
-    let body: unknown = { keys: [], groups: [], users: [], links: [], channels: [], skills: [], values: [], providers: [], mappings: [] }
+    let body: unknown = { keys: [], groups: [], users: [], links: [], channels: [], skills: [], values: [], providers: [], mappings: [], rules: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: state.userId, username: 'tester', role, display_name: 'Tester' } }
     if (path === '/api/v1/auth/admin/sessions') body = { sessions: [] }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }, { id: 'other', name: 'other', enabled: true }] }
