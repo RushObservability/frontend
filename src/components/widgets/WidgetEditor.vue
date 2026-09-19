@@ -429,7 +429,7 @@ function save() {
                 <TableWidget v-else-if="widgetType === 'table'" :rows="(previewData.rows || []) as Record<string, unknown>[]" />
                 <TimeseriesWidget v-else-if="widgetType === 'timeseries'" :buckets="previewData.buckets || []" :series="previewData.series" :unit="unit" :display-mode="displayMode" :fill="fill" />
                 <HeatmapWidget v-else-if="widgetType === 'heatmap'" :series="previewData.series || []" :time-domain="previewData.time_domain" :unit="unit" />
-                <HistogramWidget v-else-if="widgetType === 'histogram'" :bins="previewHistogram.bins.map(bin => ({ ...bin, key: `${bin.key}${unit ? ` ${unit}` : ''}` }))" :min-label="`${previewHistogram.minLabel}${unit ? ` ${unit}` : ''}`" :max-label="`${previewHistogram.maxLabel}${unit ? ` ${unit}` : ''}`" color="var(--blue, #3b82f6)" unit="samples" />
+                <HistogramWidget v-else-if="widgetType === 'histogram'" :bins="previewHistogram.bins.map(bin => ({ ...bin, key: `${bin.key}${unit ? ` ${unit}` : ''}` }))" :min-label="`${previewHistogram.minLabel}${unit ? ` ${unit}` : ''}`" :max-label="`${previewHistogram.maxLabel}${unit ? ` ${unit}` : ''}`" :axis-unit="unit" color="var(--blue, #3b82f6)" unit="samples" />
               </template>
               <div v-else class="we-preview-msg"><strong>No preview yet</strong><span>Configure a query in the panel editor.</span></div>
             </div>
@@ -630,8 +630,9 @@ function save() {
               <textarea v-model="description" class="we-input" rows="3" placeholder="Explain what this panel shows and why it matters"></textarea>
             </div>
             <div class="we-field">
-              <label class="we-label">Unit</label>
-              <input v-model="unit" class="we-input mono" placeholder="req/s, ms, %, B/s" />
+              <label class="we-label" for="we-value-unit">{{ widgetType === 'histogram' ? 'X-axis unit' : 'Unit' }}</label>
+              <input id="we-value-unit" v-model="unit" class="we-input mono" :placeholder="widgetType === 'histogram' ? 'events/s, ms, bytes' : 'req/s, ms, %, B/s'" :aria-describedby="widgetType === 'histogram' ? 'we-value-unit-help' : undefined" />
+              <small v-if="widgetType === 'histogram'" id="we-value-unit-help" class="we-field-help">Custom unit for bucket values and tooltips. The y-axis counts samples. This labels the values without converting them; leave blank for numbers only.</small>
             </div>
             <div v-if="widgetType === 'histogram'" class="we-field">
               <label class="we-label" for="we-histogram-buckets">Value buckets</label>

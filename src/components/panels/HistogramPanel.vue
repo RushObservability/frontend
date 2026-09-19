@@ -45,6 +45,7 @@ withDefaults(defineProps<HistogramPanelProps>(), {
       :max-label="maxLabel"
       :color="color"
       :unit="unit"
+      :axis-unit="axisUnit"
     />
     <template v-if="$slots.footer" #footer><slot name="footer" /></template>
   </PanelCard>

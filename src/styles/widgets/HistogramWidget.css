@@ -12,6 +12,7 @@
 }
 
 .histogram-svg {
+  display: block;
   width: 100%;
   height: 100%;
   cursor: crosshair;
@@ -24,11 +25,26 @@
   vector-effect: non-scaling-stroke;
 }
 
-.histogram-axis {
-  fill: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
+.histogram-grid--vertical { stroke-dasharray: none; opacity: .5; }
+
+.histogram-axis-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
+.histogram-axis {
+  position: absolute;
+  color: var(--text-muted);
+  font: 500 var(--panel-chart-axis-size, .5625rem) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.025em;
+  white-space: nowrap;
+}
+.histogram-axis--left { transform: translate(-100%, -50%); }
+.histogram-axis--bottom { bottom: 2px; transform: translateX(-50%); }
+.histogram-axis--start { transform: none; }
+.histogram-axis--end { transform: translateX(-100%); }
 
 .histogram-tooltip {
   position: absolute;
