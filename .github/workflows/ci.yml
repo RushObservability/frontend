@@ -24,19 +24,8 @@ jobs:
 
       - name: Dependency audit
         run: |
-          # Registry maintenance can make the bulk audit endpoint return 503.
-          # Retry transient failures without changing the vulnerability gate.
-          for attempt in 1 2 3; do
-            if npm audit --audit-level=high; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "Audit attempt $attempt failed; retrying in 10 seconds."
-              sleep 10
-            fi
-          done
-          echo "::error::Dependency audit did not pass after three attempts. Check the output for findings or a registry outage."
-          exit 1
+          npm test -- scripts/audit-dependencies.test.mjs
+          node scripts/audit-dependencies.mjs
 
       - name: Security regression checks
         run: npm run security:check
