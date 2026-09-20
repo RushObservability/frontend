@@ -609,7 +609,7 @@ function channelTypeLabel(type: string): string {
     alertmanager: 'Alertmanager',
     email: 'Email',
     pagerduty: 'PagerDuty',
-    opsgenie: 'OpsGenie',
+    rootly: 'Rootly',
   }
   return labels[type] ?? type
 }
@@ -623,7 +623,7 @@ function channelTypeIcon(type: string): string {
     alertmanager: 'AM',
     email: '@',
     pagerduty: 'PD',
-    opsgenie: 'OG',
+    rootly: 'R',
   }
   return icons[type] ?? '🔔'
 }
@@ -643,6 +643,7 @@ const ssoProvider = ref<Partial<SsoProvider>>({
   last_name_claim: 'last_name',
   jit_provisioning: true,
   default_group_id: '',
+  admission_policy: 'global_viewer',
   saml_idp_metadata_url: '',
   saml_idp_sso_url: '',
   saml_idp_cert: '',
@@ -662,7 +663,11 @@ async function loadSsoConfig() {
     const { providers } = await api.listSsoProviders()
     if (providers.length > 0) {
       const p = providers[0]
-      ssoProvider.value = { ...p }
+      ssoProvider.value = {
+        ...p,
+        admission_policy: p.admission_policy
+          || (!p.jit_provisioning ? 'deny' : p.default_group_id ? 'group' : 'global_viewer'),
+      }
     }
     const { mappings } = await api.listIdpGroupMappings()
     ssoMappings.value = mappings
@@ -680,6 +685,7 @@ async function saveSsoConfig() {
     if (!ssoProvider.value.id) {
       ssoProvider.value.id = res.id
     }
+    await loadSsoConfig()
     ssoSaved.value = true
     setTimeout(() => { ssoSaved.value = false }, 2000)
   } catch (e: any) {
@@ -973,6 +979,7 @@ async function wizardSave() {
       protocol,
       enabled: true,
       jit_provisioning: true,
+      admission_policy: 'global_viewer',
       groups_claim: wizardGroupsClaim.value || 'groups',
       email_claim: wizardEmailClaim.value || 'email',
       first_name_claim: wizardFirstNameClaim.value || 'first_name',
@@ -1770,6 +1777,7 @@ const newUserUsername = ref('')
 const newUserPassword = ref('')
 const newUserDisplayName = ref('')
 const newUserGroupIds = ref<string[]>([])
+const newUserAccountType = ref<'local' | 'sso'>('local')
 const userGroupDropdownOpen = ref(false)
 
 const userGroupSelectionLabel = computed(() => {
@@ -1896,20 +1904,25 @@ function authMethodLabel(session: AuthSession): string {
 }
 
 async function createNewUser() {
-  if (!newUserUsername.value.trim() || !newUserPassword.value) return
+  if (!newUserUsername.value.trim()) return
+  if (newUserAccountType.value === 'local' && !newUserPassword.value) return
+  if (newUserAccountType.value === 'sso' && newUserGroupIds.value.length === 0) return
   try {
-    const user = await api.createUser({
+    await api.createUser({
       username: newUserUsername.value.trim(),
-      password: newUserPassword.value,
+      password: newUserAccountType.value === 'local' ? newUserPassword.value : undefined,
       display_name: newUserDisplayName.value.trim() || undefined,
+      auth_provider: newUserAccountType.value === 'sso'
+        ? (ssoProvider.value.protocol === 'saml' ? 'saml' : 'oidc')
+        : 'local',
+      sso_provider_id: newUserAccountType.value === 'sso' ? ssoProvider.value.id : undefined,
+      group_ids: newUserGroupIds.value.length > 0 ? newUserGroupIds.value : undefined,
     })
-    if (newUserGroupIds.value.length > 0) {
-      await api.setUserGroups(user.id, newUserGroupIds.value)
-    }
     newUserUsername.value = ''
     newUserPassword.value = ''
     newUserDisplayName.value = ''
     newUserGroupIds.value = []
+    newUserAccountType.value = 'local'
     userGroupDropdownOpen.value = false
     showUserForm.value = false
     await loadUsers()
@@ -2990,6 +3003,49 @@ function formatDate(ts: string): string {
                   <span class="toggle-slider"></span>
                 </span>
               </label>
+            </div>
+          </div>
+
+          <div class="auth-section-block">
+            <div class="auth-section-label">New user access</div>
+            <p class="auth-mappings-hint">
+              Choose what happens when someone signs in through this provider for the first time.
+            </p>
+            <div class="key-form-grid">
+              <div class="form-group-inline">
+                <label class="form-label" for="sso-admission-policy">Default access</label>
+                <select id="sso-admission-policy" v-model="ssoProvider.admission_policy" class="form-input">
+                  <option value="global_viewer">Allow as global viewer</option>
+                  <option value="group">Allow and assign a group</option>
+                  <option value="deny">Deny unless pre-provisioned</option>
+                </select>
+              </div>
+              <div v-if="ssoProvider.admission_policy === 'group'" class="form-group-inline">
+                <label class="form-label" for="sso-default-group">Rush group</label>
+                <select id="sso-default-group" v-model="ssoProvider.default_group_id" class="form-input">
+                  <option value="" disabled>Select a group</option>
+                  <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+                </select>
+              </div>
+              <div class="key-form-note key-form-wide">
+                <template v-if="ssoProvider.admission_policy === 'global_viewer'">
+                  Any identity accepted by this provider can sign in. Unmapped users join the built-in Viewers group.
+                </template>
+                <template v-else-if="ssoProvider.admission_policy === 'group'">
+                  Any identity accepted by this provider can sign in. Unmapped users join the selected group.
+                </template>
+                <template v-else>
+                  First-time sign-in is blocked. Create an SSO user under Users and assign at least one group before they sign in.
+                </template>
+              </div>
+              <div class="form-actions-inline key-form-actions">
+                <button
+                  class="btn btn-primary"
+                  @click="saveSsoConfig"
+                  :disabled="ssoProvider.admission_policy === 'group' && !ssoProvider.default_group_id"
+                >Save access policy</button>
+                <span v-if="ssoSaved" class="text-secondary fs-11">Saved</span>
+              </div>
             </div>
           </div>
 
@@ -5836,17 +5892,27 @@ function formatDate(ts: string): string {
               </button>
             </div>
             <div class="group-drawer-body">
+              <div v-if="ssoProvider.enabled" class="form-group-inline">
+                <label class="form-label">Account type</label>
+                <select v-model="newUserAccountType" class="form-input">
+                  <option value="local">Local password</option>
+                  <option value="sso">{{ (ssoProvider.protocol || 'oidc').toUpperCase() }} SSO</option>
+                </select>
+                <span v-if="newUserAccountType === 'sso'" class="text-muted fs-11">
+                  Enter the exact email or Name ID this provider sends. The account stays bound to this provider.
+                </span>
+              </div>
               <div class="form-group-inline">
-                <label class="form-label">Username</label>
+                <label class="form-label">{{ newUserAccountType === 'sso' ? 'SSO email or Name ID' : 'Username' }}</label>
                 <input
                   v-model="newUserUsername"
                   class="form-input mono"
                   maxlength="100"
-                  placeholder="e.g. jdoe"
+                  :placeholder="newUserAccountType === 'sso' ? 'jane@example.com' : 'e.g. jdoe'"
                   @keyup.enter="createNewUser"
                 />
               </div>
-              <div class="form-group-inline mt-3">
+              <div v-if="newUserAccountType === 'local'" class="form-group-inline mt-3">
                 <label class="form-label">Password</label>
                 <input
                   v-model="newUserPassword"
@@ -5866,7 +5932,7 @@ function formatDate(ts: string): string {
                 />
               </div>
               <div class="group-drawer-section">
-                <label class="form-label">Groups</label>
+                <label class="form-label">Groups{{ newUserAccountType === 'sso' ? ' (required)' : '' }}</label>
                 <div class="tenant-multiselect" @click.stop>
                   <button type="button" class="tenant-multiselect-trigger" @click="userGroupDropdownOpen = !userGroupDropdownOpen">
                     <span :class="newUserGroupIds.length === 0 ? 'text-muted' : ''">{{ userGroupSelectionLabel }}</span>
@@ -5890,7 +5956,7 @@ function formatDate(ts: string): string {
               <button
                 class="btn btn-primary"
                 @click="createNewUser"
-                :disabled="!newUserUsername.trim() || !newUserPassword"
+                :disabled="!newUserUsername.trim() || (newUserAccountType === 'local' ? !newUserPassword : newUserGroupIds.length === 0)"
               >
                 Create User
               </button>

@@ -755,7 +755,7 @@ function channelIcon(type: string): string {
     email: '@',
     webhook: '{}',
     pagerduty: 'PD',
-    opsgenie: 'OG',
+    rootly: 'R',
   }
   return icons[type] || type[0]?.toUpperCase() || '?'
 }

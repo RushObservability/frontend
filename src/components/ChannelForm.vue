@@ -37,13 +37,9 @@ const webhookHeaders = ref(
 // PagerDuty config
 const pdRoutingKey = ref(props.channel?.config?.routing_key || '')
 
-// OpsGenie config
-const ogApiKey = ref(props.channel?.config?.api_key || '')
-const ogResponders = ref(
-  props.channel?.config?.responders
-    ? JSON.stringify(props.channel.config.responders, null, 2)
-    : ''
-)
+// Rootly Generic Webhook Alert Source, authenticated with its source secret.
+const rootlyUrl = ref(props.channel?.config?.url || (props.channel ? '' : 'https://webhooks.rootly.com/webhooks/incoming/generic_webhooks'))
+const rootlyToken = ref(props.channel?.config?.token || '')
 
 // Discord config
 const discordWebhookUrl = ref(props.channel?.config?.webhook_url || '')
@@ -63,7 +59,8 @@ const slackWebhookConfigured = !!(props.channel?.config?.webhook_url_configured 
 const slackAppTokenConfigured = !!props.channel?.config?.token_configured
 const webhookUrlConfigured = !!props.channel?.config?.url_configured
 const pdRoutingKeyConfigured = !!props.channel?.config?.routing_key_configured
-const ogApiKeyConfigured = !!props.channel?.config?.api_key_configured
+const rootlyUrlConfigured = props.channel?.channel_type === 'rootly' && !!props.channel.config?.url_configured
+const rootlyTokenConfigured = props.channel?.channel_type === 'rootly' && !!props.channel.config?.token_configured
 const discordWebhookConfigured = !!props.channel?.config?.webhook_url_configured
 const alertmanagerUrlConfigured = !!props.channel?.config?.url_configured
 
@@ -75,7 +72,7 @@ const channelTypes = [
   { value: 'alertmanager', label: 'Alertmanager',  icon: 'AM', desc: 'Push to Prometheus Alertmanager API' },
   { value: 'email',        label: 'Email',         icon: '@',  desc: 'Send emails via SMTP', comingSoon: true },
   { value: 'pagerduty',    label: 'PagerDuty',     icon: 'PD', desc: 'Create incidents via Events API v2', comingSoon: true },
-  { value: 'opsgenie',     label: 'OpsGenie',      icon: 'OG', desc: 'Create alerts via OpsGenie API', comingSoon: true },
+  { value: 'rootly',       label: 'Rootly',        icon: 'R', desc: 'Send alerts and recoveries to Rootly On-Call' },
 ]
 
 function selectChannelType(type: ChannelType) {
@@ -97,7 +94,7 @@ const isValid = computed(() => {
     case 'alertmanager': return !!alertmanagerUrl.value.trim() || alertmanagerUrlConfigured
     case 'email':        return !!emailRecipients.value.trim()
     case 'pagerduty':    return !!pdRoutingKey.value.trim() || pdRoutingKeyConfigured
-    case 'opsgenie':     return !!ogApiKey.value.trim() || ogApiKeyConfigured
+    case 'rootly':       return (!!rootlyUrl.value.trim() || rootlyUrlConfigured) && (!!rootlyToken.value.trim() || rootlyTokenConfigured)
     default: return false
   }
 })
@@ -113,7 +110,7 @@ const validationHint = computed(() => {
     case 'alertmanager': return 'Enter the Alertmanager URL.'
     case 'email':        return 'Enter at least one recipient.'
     case 'pagerduty':    return 'Enter the routing key.'
-    case 'opsgenie':     return 'Enter the API key.'
+    case 'rootly':       return !rootlyUrl.value.trim() && !rootlyUrlConfigured ? 'Enter the Rootly webhook URL.' : 'Enter the Rootly bearer secret.'
     default:             return 'Select a channel type.'
   }
 })
@@ -157,15 +154,8 @@ function buildConfig(): Record<string, any> {
     }
     case 'pagerduty':
       return { routing_key: pdRoutingKey.value.trim() }
-    case 'opsgenie': {
-      const config: Record<string, any> = { api_key: ogApiKey.value.trim() }
-      if (ogResponders.value.trim()) {
-        try {
-          config.responders = JSON.parse(ogResponders.value)
-        } catch { /* ignore invalid JSON */ }
-      }
-      return config
-    }
+    case 'rootly':
+      return { url: rootlyUrl.value.trim(), token: rootlyToken.value.trim() }
     default:
       return {}
   }
@@ -199,7 +189,7 @@ function save() {
             :key="ct.value"
             class="channel-type-card"
             :class="{ selected: channelType === ct.value, 'coming-soon': ct.comingSoon }"
-            :disabled="ct.comingSoon"
+            :disabled="ct.comingSoon || (!!channel && channelType !== ct.value)"
             @click="ct.comingSoon || selectChannelType(ct.value as ChannelType)"
             type="button"
           >
@@ -297,15 +287,31 @@ function save() {
         </div>
       </template>
 
-      <!-- OpsGenie config -->
-      <template v-if="channelType === 'opsgenie'">
+      <!-- Rootly config -->
+      <template v-if="channelType === 'rootly'">
         <div class="form-group">
-          <label class="form-label">API Key</label>
-          <input v-model="ogApiKey" class="form-input mono" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <label class="form-label" for="rootly-webhook-url">Rootly webhook URL</label>
+          <input id="rootly-webhook-url" v-model="rootlyUrl" class="form-input mono" type="url" :placeholder="rootlyUrlConfigured ? 'Configured. Leave blank to keep the saved URL.' : 'https://webhooks.rootly.com/webhooks/incoming/generic_webhooks'" aria-describedby="rootly-url-help" />
+          <span id="rootly-url-help" class="form-hint text-muted">Use the URL from your Generic Webhook source. Remove any ?secret= query parameter and enter the secret below.</span>
         </div>
         <div class="form-group">
-          <label class="form-label">Responders (JSON array, optional)</label>
-          <textarea v-model="ogResponders" class="form-input mono form-textarea" placeholder='[{"type": "team", "name": "platform-oncall"}]' rows="3"></textarea>
+          <label class="form-label" for="rootly-bearer-secret">Bearer secret</label>
+          <input id="rootly-bearer-secret" v-model="rootlyToken" class="form-input mono" type="password" autocomplete="new-password" :placeholder="rootlyTokenConfigured ? 'Configured. Leave blank to keep the saved secret.' : 'Secret from the Rootly alert source'" aria-describedby="rootly-secret-help" />
+          <span id="rootly-secret-help" class="form-hint text-muted">The source's bearer secret, not an account API key. Sent in the Authorization header.</span>
+        </div>
+        <div class="rootly-setup">
+          <strong>Set up the Rootly source</strong>
+          <p>Create a Generic Webhook Alert Source in Rootly, then configure these payload mappings:</p>
+          <dl class="rootly-mappings">
+            <div><dt>Title</dt><dd><code>$.title</code></dd></div>
+            <div><dt>Description</dt><dd><code>$.description</code></dd></div>
+            <div><dt>External identifier / deduplication key</dt><dd><code>$.external_id</code></dd></div>
+            <div><dt>State</dt><dd><code>$.state</code></dd></div>
+          </dl>
+          <p>Enable deduplication and auto-resolution with <code>resolved</code> as the recovery value. Active alerts use <code>triggered</code>.</p>
+          <p>Route this source using Rootly Alert Routes, or paste its fixed-target <code>/notify/&lt;type&gt;/&lt;id&gt;</code> URL above.</p>
+          <p>Save, then use Test on the channel row. This sends a real test alert and may page responders.</p>
+          <a href="https://docs.rootly.com/integrations/generic-webhook-alert-source/generic-webhook-alert-source" target="_blank" rel="noopener noreferrer">Rootly setup documentation ↗</a>
         </div>
       </template>
     </div>
