@@ -35,8 +35,8 @@ if (packageLock.lockfileVersion !== 3) {
   fail(`package-lock.json must use lockfileVersion 3 (found ${packageLock.lockfileVersion})`)
 }
 const packageJson = JSON.parse(read('package.json'))
-const pinnedNodeVersion = '22.13.1'
-const pinnedNpmVersion = '10.9.2'
+const pinnedNodeVersion = '22.23.2'
+const pinnedNpmVersion = '10.9.8'
 if (packageJson.engines?.node !== pinnedNodeVersion || packageJson.engines?.npm !== pinnedNpmVersion) {
   fail(`package.json must pin Node ${pinnedNodeVersion} and npm ${pinnedNpmVersion}`)
 }

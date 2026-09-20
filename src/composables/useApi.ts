@@ -3,7 +3,7 @@ import type { ProfileQuery, ProfileResult, ProfileSeries } from '../lib/profiles
 import type { LogView } from '../lib/logViews'
 import { useTenant } from './useTenant'
 import { encodePathSegment } from '../lib/url'
-import { authenticatedFetch } from './authSession'
+import { authenticatedFetch, assertCurrentSession, getSessionGeneration, onSessionChanged } from './authSession'
 import { storageUserId } from './storageScope'
 import { safeApiErrorMessage } from '../lib/apiError'
 import {
@@ -143,6 +143,10 @@ export interface SessionTimeoutSettings {
 // for the active tenant so those callers consume one response body and one
 // backend request. Mutations and caller-cancelable reads stay independent.
 const inFlightReads = new Map<string, Promise<string>>()
+onSessionChanged(() => {
+  inFlightReads.clear()
+  invalidateAnalyticsRequests()
+})
 
 function parseResponseBody<T>(body: string): T {
   return (body ? JSON.parse(body) : null) as T
@@ -185,15 +189,20 @@ function requestHeaders(input: HeadersInit | undefined, tenant: string): Record<
 }
 
 export async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const generation = getSessionGeneration()
   const { activeTenant } = useTenant()
   const tenant = activeTenant.value
   const userId = storageUserId.value || 'anonymous'
   const method = (options?.method || 'GET').toUpperCase()
   const analytics = isIdempotentAnalyticsPost(path, method)
   const canDeduplicate = method === 'GET' && !options?.signal
-  const requestKey = canDeduplicate ? `${userId}:${tenant}:${path}` : undefined
+  const requestKey = canDeduplicate ? `${generation}:${userId}:${tenant}:${path}` : undefined
   const existing = requestKey ? inFlightReads.get(requestKey) : undefined
-  if (existing) return parseResponseBody<T>(await existing)
+  if (existing) {
+    const body = await existing
+    assertCurrentSession(generation)
+    return parseResponseBody<T>(body)
+  }
 
   const headers = requestHeaders(options?.headers, tenant)
   const workload = new Headers(headers).get('X-Rush-Workload') || 'interactive'
@@ -217,7 +226,9 @@ export async function apiRequest<T>(path: string, options?: RequestInit): Promis
       throw responseError(res)
     }
     // Tolerate empty bodies (e.g. 204 No Content from DELETE endpoints).
-    return await res.text()
+    const body = await res.text()
+    assertCurrentSession(generation)
+    return body
   }
 
   if (analytics) {
@@ -239,6 +250,7 @@ export async function apiRequest<T>(path: string, options?: RequestInit): Promis
       ttlMs: workload === 'dashboard' ? 2_000 : 1_500,
       staleMs: workload === 'dashboard' ? 8_000 : 0,
     })
+    assertCurrentSession(generation)
     return parseResponseBody<T>(body)
   }
 
@@ -246,6 +258,7 @@ export async function apiRequest<T>(path: string, options?: RequestInit): Promis
   if (requestKey) inFlightReads.set(requestKey, operation)
   try {
     const body = await operation
+    assertCurrentSession(generation)
     // State mutations can affect more than their own resource, so clear every
     // analytics entry for this user after the server confirms success.
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) invalidateAnalyticsRequests({ userId })

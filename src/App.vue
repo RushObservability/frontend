@@ -223,6 +223,7 @@ watch(isAuthenticated, async (authed) => {
     // tenant-aware feature flags after that resolution so SRE entry points do
     // not briefly reflect the wrong tenant policy.
     await loadFeatures()
+    await loadLicense()
   }
 }, { immediate: true })
 </script>

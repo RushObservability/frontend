@@ -1,7 +1,7 @@
 import { ref, computed, readonly } from 'vue'
 import type { AuthUser } from '../types'
 import { useApi } from './useApi'
-import { markSessionActive, onSessionExpired } from './authSession'
+import { advanceSessionGeneration, assertCurrentSession, getSessionGeneration, markSessionActive, onSessionExpired, reportSessionExpired } from './authSession'
 import { clearAllScopedStorage, setStorageUserId, storageUserId } from './storageScope'
 import { invalidateAnalyticsRequests } from '../lib/analyticsRequestCache'
 import { pausePollingTasks, resumePollingTasks, stopPollingTasks } from './usePollingTask'
@@ -13,6 +13,8 @@ const sessionActivityIntervalMs = ref(5 * 60 * 1_000)
 const sessionIdleDeadlineMs = ref<number | null>(null)
 let supportsActivityEndpoint = false
 let refreshPromise: Promise<void> | null = null
+let checkPromise: Promise<void> | null = null
+let loggingOut = false
 
 const isAuthenticated = computed(() => !!user.value)
 const isAdmin = computed(() => user.value?.role === 'admin')
@@ -48,30 +50,49 @@ onSessionExpired(() => {
 
 async function checkSession(): Promise<void> {
   if (checked.value) return
+  if (checkPromise) return checkPromise
+  const generation = getSessionGeneration()
   loading.value = true
   const requestedAt = Date.now()
-  try {
-    const response = await getMe()
-    user.value = response.user
-    applySessionPolicy(response.session, requestedAt)
-    setStorageUserId(user.value.id)
-    markSessionActive()
-  } catch {
-    user.value = null
-    sessionIdleDeadlineMs.value = null
-    setStorageUserId(null)
-    clearAllScopedStorage()
-  } finally {
-    checked.value = true
-    loading.value = false
-  }
+  const operation = (async () => {
+    try {
+      const response = await getMe()
+      if (generation !== getSessionGeneration()) return
+      user.value = response.user
+      applySessionPolicy(response.session, requestedAt)
+      setStorageUserId(user.value.id)
+      markSessionActive()
+    } catch {
+      if (generation !== getSessionGeneration()) return
+      user.value = null
+      sessionIdleDeadlineMs.value = null
+      setStorageUserId(null)
+      clearAllScopedStorage()
+    } finally {
+      if (generation === getSessionGeneration()) {
+        checked.value = true
+        loading.value = false
+      }
+    }
+  })()
+  checkPromise = operation
+  try { await operation } finally { if (checkPromise === operation) checkPromise = null }
 }
 
 async function login(username: string, password: string): Promise<void> {
+  const generation = advanceSessionGeneration()
+  checkPromise = null
+  refreshPromise = null
+  user.value = null
+  sessionIdleDeadlineMs.value = null
+  setStorageUserId(null)
+  clearAllScopedStorage()
+  checked.value = true
+  loading.value = false
   const requestedAt = Date.now()
   const res = await apiLogin(username, password)
+  assertCurrentSession(generation)
   invalidateAnalyticsRequests()
-  if (storageUserId.value && storageUserId.value !== res.user.id) clearAllScopedStorage()
   user.value = res.user
   applySessionPolicy(res.session, requestedAt)
   setStorageUserId(res.user.id)
@@ -80,27 +101,37 @@ async function login(username: string, password: string): Promise<void> {
 }
 
 async function refreshSession(activity = true): Promise<void> {
-  if (!user.value) return
+  if (!user.value || loggingOut) return
   if (refreshPromise) return refreshPromise
   const expectedUserId = user.value.id
+  const generation = getSessionGeneration()
 
-  refreshPromise = (async () => {
-    const requestedAt = Date.now()
-    const response = await getMe(activity && supportsActivityEndpoint)
-    // Do not restore identity if logout or session expiration won the race
-    // while this activity refresh was in flight.
-    if (user.value?.id !== expectedUserId) return
-    if (!response.user?.id) throw new Error('Invalid session response')
-    user.value = response.user
-    applySessionPolicy(response.session, requestedAt)
-    setStorageUserId(response.user.id)
-    markSessionActive()
+  const operation = (async () => {
+    try {
+      const requestedAt = Date.now()
+      const response = await getMe(activity && supportsActivityEndpoint)
+      if (generation !== getSessionGeneration() || user.value?.id !== expectedUserId) return
+      if (!response.user?.id) throw new Error('Invalid session response')
+      // A different tab may have replaced the shared cookie. Do not reuse the
+      // mounted page or caches under a different identity.
+      if (response.user.id !== expectedUserId) {
+        reportSessionExpired()
+        return
+      }
+      user.value = response.user
+      applySessionPolicy(response.session, requestedAt)
+      setStorageUserId(response.user.id)
+      markSessionActive()
+    } catch (error) {
+      if (generation === getSessionGeneration()) throw error
+    }
   })()
+  refreshPromise = operation
 
   try {
-    await refreshPromise
+    await operation
   } finally {
-    refreshPromise = null
+    if (refreshPromise === operation) refreshPromise = null
   }
 }
 
@@ -108,12 +139,21 @@ async function logout(): Promise<void> {
   // Keep the local identity when server-side revocation fails so the UI does
   // not claim the user is logged out while the session bearer remains valid.
   pausePollingTasks()
+  loggingOut = true
+  const generation = getSessionGeneration()
   try {
     await apiLogout()
   } catch (error) {
+    if (generation !== getSessionGeneration()) return
     resumePollingTasks()
     throw error
+  } finally {
+    loggingOut = false
   }
+  if (generation !== getSessionGeneration()) return
+  advanceSessionGeneration()
+  checkPromise = null
+  refreshPromise = null
   stopPollingTasks()
   invalidateAnalyticsRequests({ userId: user.value?.id || storageUserId.value || undefined })
   user.value = null

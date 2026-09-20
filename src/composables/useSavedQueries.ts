@@ -45,9 +45,11 @@ function loadFrom(key: string): SavedQuery[] {
   try {
     const raw = localStorage.getItem(key)
     const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed)
+    const safe = Array.isArray(parsed)
       ? parsed.filter((entry): entry is SavedQuery => !containsSensitiveMaterial(entry)).slice(0, MAX_QUERIES)
       : []
+    localStorage.setItem(key, JSON.stringify(safe))
+    return safe
   } catch {
     return []
   }
