@@ -36,6 +36,8 @@ const webhookHeaders = ref(
 
 // PagerDuty config
 const pdRoutingKey = ref(props.channel?.config?.routing_key || '')
+const pdRegion = ref(props.channel?.config?.region || 'us')
+const pdSeverity = ref(props.channel?.config?.severity || props.channel?.config?.severity_mapping?.critical || 'critical')
 
 // Rootly Generic Webhook Alert Source, authenticated with its source secret.
 const rootlyUrl = ref(props.channel?.config?.url || (props.channel ? '' : 'https://webhooks.rootly.com/webhooks/incoming/generic_webhooks'))
@@ -71,7 +73,7 @@ const channelTypes = [
   { value: 'webhook',      label: 'Webhook',       icon: '{}', desc: 'POST JSON to any HTTPS endpoint' },
   { value: 'alertmanager', label: 'Alertmanager',  icon: 'AM', desc: 'Push to Prometheus Alertmanager API' },
   { value: 'email',        label: 'Email',         icon: '@',  desc: 'Send emails via SMTP', comingSoon: true },
-  { value: 'pagerduty',    label: 'PagerDuty',     icon: 'PD', desc: 'Create incidents via Events API v2', comingSoon: true },
+  { value: 'pagerduty',    label: 'PagerDuty',     icon: 'PD', desc: 'Send alerts and recoveries via Events API v2' },
   { value: 'rootly',       label: 'Rootly',        icon: 'R', desc: 'Send alerts and recoveries to Rootly On-Call' },
 ]
 
@@ -153,7 +155,7 @@ function buildConfig(): Record<string, any> {
       return config
     }
     case 'pagerduty':
-      return { routing_key: pdRoutingKey.value.trim() }
+      return { routing_key: pdRoutingKey.value.trim(), region: pdRegion.value, severity: pdSeverity.value }
     case 'rootly':
       return { url: rootlyUrl.value.trim(), token: rootlyToken.value.trim() }
     default:
@@ -281,9 +283,34 @@ function save() {
       <!-- PagerDuty config -->
       <template v-if="channelType === 'pagerduty'">
         <div class="form-group">
-          <label class="form-label">Routing Key</label>
-          <input v-model="pdRoutingKey" class="form-input mono" placeholder="R0xxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
-          <span class="form-hint text-muted">Integration key from PagerDuty Events API v2</span>
+          <label class="form-label" for="pd-routing-key">Integration key</label>
+          <input id="pd-routing-key" v-model="pdRoutingKey" class="form-input mono" type="password" autocomplete="new-password" :placeholder="pdRoutingKeyConfigured ? 'Configured. Leave blank to keep the saved key.' : 'Events API v2 integration key'" aria-describedby="pd-key-help" />
+          <span id="pd-key-help" class="form-hint text-muted">Use the integration's routing key, not a PagerDuty REST API token.</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="pd-region">Account region</label>
+          <select id="pd-region" v-model="pdRegion" class="form-input" aria-describedby="pd-region-help">
+            <option value="us">United States</option>
+            <option value="eu">Europe</option>
+          </select>
+          <span id="pd-region-help" class="form-hint text-muted">Choose Europe if your PagerDuty address contains .eu.pagerduty.com.</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="pd-severity">Alert severity</label>
+          <select id="pd-severity" v-model="pdSeverity" class="form-input" aria-describedby="pd-severity-help">
+            <option value="critical">Critical</option>
+            <option value="error">Error</option>
+            <option value="warning">Warning</option>
+            <option value="info">Info</option>
+          </select>
+          <span id="pd-severity-help" class="form-hint text-muted">Applied to alerts sent through this channel. PagerDuty's service settings control notification urgency.</span>
+        </div>
+        <div class="channel-setup">
+          <strong>Connect a PagerDuty service</strong>
+          <p>In PagerDuty, open Services → Service Directory → your service → Integrations. Add an Events API V2 integration and copy its Integration Key above.</p>
+          <p>Rush sends trigger events when a rule fires and resolve events when it recovers. Repeated alerts use the same deduplication key, with separate keys for each monitor group.</p>
+          <p>Save, then use Test on the channel row. This sends a real test alert and may page responders. Resolve the test alert in PagerDuty when finished.</p>
+          <a href="https://support.pagerduty.com/main/docs/services-and-integrations" target="_blank" rel="noopener noreferrer">PagerDuty setup documentation ↗</a>
         </div>
       </template>
 
@@ -299,7 +326,7 @@ function save() {
           <input id="rootly-bearer-secret" v-model="rootlyToken" class="form-input mono" type="password" autocomplete="new-password" :placeholder="rootlyTokenConfigured ? 'Configured. Leave blank to keep the saved secret.' : 'Secret from the Rootly alert source'" aria-describedby="rootly-secret-help" />
           <span id="rootly-secret-help" class="form-hint text-muted">The source's bearer secret, not an account API key. Sent in the Authorization header.</span>
         </div>
-        <div class="rootly-setup">
+        <div class="channel-setup">
           <strong>Set up the Rootly source</strong>
           <p>Create a Generic Webhook Alert Source in Rootly, then configure these payload mappings:</p>
           <dl class="rootly-mappings">
