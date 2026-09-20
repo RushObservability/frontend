@@ -1368,8 +1368,11 @@ export function useApi() {
 
   async function createUser(data: {
     username: string
-    password: string
+    password?: string
     display_name?: string
+    auth_provider?: 'local' | 'oidc' | 'saml'
+    sso_provider_id?: string
+    group_ids?: string[]
   }): Promise<User> {
     return await request('/users', {
       method: 'POST',

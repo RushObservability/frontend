@@ -461,7 +461,7 @@ export interface WidgetData {
 
 // ── Alert types ──
 
-export type ChannelType = 'slack' | 'slack_app' | 'email' | 'webhook' | 'pagerduty' | 'opsgenie' | 'discord' | 'alertmanager'
+export type ChannelType = 'slack' | 'slack_app' | 'email' | 'webhook' | 'pagerduty' | 'rootly' | 'discord' | 'alertmanager'
 
 export interface NotificationChannel {
   id: string
@@ -1340,6 +1340,7 @@ export interface SsoProvider {
   last_name_claim: string
   jit_provisioning: boolean
   default_group_id: string
+  admission_policy: 'global_viewer' | 'group' | 'deny'
   // SAML-specific fields
   saml_idp_metadata_url: string
   saml_idp_sso_url: string
