@@ -36,6 +36,17 @@ describe('development file boundary', () => {
 
 describe('release promotion', () => {
   const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+  it('dispatches licensed releases with shared org secrets and a target-scoped token', () => {
+    const job = workflow.split('  dispatch-licensed-build:')[1]
+    expect(job).toContain('needs: build-and-push')
+    expect(job).toContain("if: github.ref == 'refs/heads/main'")
+    expect(job).toContain('secrets.LICENSE_BUILDER_APP_CLIENT_ID')
+    expect(job).toContain('secrets.LICENSE_BUILDER_APP_PRIVATE_KEY')
+    expect(job).toContain('repositories: frontend-license')
+    expect(job).toContain('permission-actions: write')
+    expect(job).not.toContain('FRONTEND_LICENSE_APP_')
+    expect(job).toContain('/repos/RushObservability/frontend-license/actions/workflows/release.yml/dispatches')
+  })
   it('skips a push release when only package metadata changes', () => {
     expect(workflow).toContain('if: needs.release-plan.outputs.needed == \'true\'')
     expect(workflow).toContain('[[ "$previous" == "$current" ]]')
