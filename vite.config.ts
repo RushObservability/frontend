@@ -64,16 +64,16 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // Allow tunneling through ngrok (and similar) for HTTPS-only IdP testing.
-    allowedHosts: ['.ngrok-free.app', '.ngrok.app', '.ngrok.io'],
+    // For an SSO tunnel, opt into its exact hostname through Vite's
+    // __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS environment variable.
+    allowedHosts: [],
     fs: {
       allow: [
-        // Allow serving files from the SDK directory
-        path.resolve(import.meta.dirname, '..'),
+        path.resolve(import.meta.dirname),
         // A composed edition may reuse this checkout's dependencies from a
         // sibling working directory during local development.
         ...(process.env.VITE_ADDITIONAL_FS_ROOT
-          ? [path.resolve(process.env.VITE_ADDITIONAL_FS_ROOT)]
+          ? [path.resolve(process.env.VITE_ADDITIONAL_FS_ROOT, 'node_modules')]
           : []),
       ],
     },

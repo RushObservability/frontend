@@ -16,9 +16,11 @@ function load<T>(key: string, maxEntries: number): HistoryEntry<T>[] {
   try {
     const raw = localStorage.getItem(key)
     const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed)
+    const safe = Array.isArray(parsed)
       ? parsed.filter((entry): entry is HistoryEntry<T> => !containsSensitiveMaterial(entry)).slice(0, maxEntries)
       : []
+    localStorage.setItem(key, JSON.stringify(safe))
+    return safe
   } catch {
     return []
   }

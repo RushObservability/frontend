@@ -19,6 +19,30 @@ const latestRequests = new Map<string, AbortController>()
 
 const listeners = new Set<SessionExpiredListener>()
 let expirationReported = false
+let sessionGeneration = 0
+let sessionController = new AbortController()
+const sessionChangeListeners = new Set<() => void>()
+
+export function getSessionGeneration(): number { return sessionGeneration }
+
+export function onSessionChanged(listener: () => void): () => void {
+  sessionChangeListeners.add(listener)
+  return () => sessionChangeListeners.delete(listener)
+}
+
+/** Invalidate work belonging to the previous browser identity, even on re-login. */
+export function advanceSessionGeneration(): number {
+  sessionGeneration++
+  const previous = sessionController
+  sessionController = new AbortController()
+  previous.abort(abortError())
+  for (const listener of sessionChangeListeners) listener()
+  return sessionGeneration
+}
+
+export function assertCurrentSession(generation: number): void {
+  if (generation !== sessionGeneration) throw abortError()
+}
 
 /**
  * Subscribe to the single global session-expired signal. The signal is
@@ -35,6 +59,7 @@ export function reportSessionExpired(): void {
   // fail after the same cookie expires.
   if (expirationReported) return
   expirationReported = true
+  advanceSessionGeneration()
   for (const listener of listeners) listener()
 }
 
@@ -86,6 +111,8 @@ export async function authenticatedFetch(
   init?: RequestInit,
   options?: AuthenticatedFetchOptions,
 ): Promise<Response> {
+  const generation = getSessionGeneration()
+  const sessionSignal = sessionController.signal
   // All browser API calls use the session cookie boundary deliberately. Keep
   // this default centralized so one-off fetch callers cannot silently omit
   // credentials or allow sensitive responses to enter the HTTP cache.
@@ -105,11 +132,14 @@ export async function authenticatedFetch(
 
   try {
     for (let attempt = 0; ; attempt++) {
+      assertCurrentSession(generation)
       const controller = new AbortController()
       let timedOut = false
       let timer: ReturnType<typeof setTimeout> | undefined
       const onParentAbort = () => controller.abort(parentSignal?.reason)
       const onLatestAbort = () => controller.abort(abortError())
+      const onSessionAbort = () => controller.abort(abortError())
+      sessionSignal.addEventListener('abort', onSessionAbort, { once: true })
 
       if (parentSignal?.aborted) controller.abort(parentSignal.reason)
       else parentSignal?.addEventListener('abort', onParentAbort, { once: true })
@@ -134,9 +164,11 @@ export async function authenticatedFetch(
         if (timer) clearTimeout(timer)
         parentSignal?.removeEventListener('abort', onParentAbort)
         latestController?.signal.removeEventListener('abort', onLatestAbort)
+        sessionSignal.removeEventListener('abort', onSessionAbort)
+        assertCurrentSession(generation)
         if (parentSignal?.aborted || latestController?.signal.aborted) throw error
         if ((timedOut || isRetryableError(error)) && attempt < retries) {
-          await waitForRetry(retryDelayMs * (attempt + 1), [parentSignal, latestController?.signal])
+          await waitForRetry(retryDelayMs * (attempt + 1), [parentSignal, latestController?.signal, sessionSignal])
           continue
         }
         if (timedOut) throw timeoutError()
@@ -146,17 +178,18 @@ export async function authenticatedFetch(
       if (timer) clearTimeout(timer)
       parentSignal?.removeEventListener('abort', onParentAbort)
       latestController?.signal.removeEventListener('abort', onLatestAbort)
+      sessionSignal.removeEventListener('abort', onSessionAbort)
 
       // A newer keyed request may have won the race while this response was
       // resolving. Drop the body and do not let the stale response update UI.
-      if (parentSignal?.aborted || latestController?.signal.aborted) {
+      if (sessionSignal.aborted || parentSignal?.aborted || latestController?.signal.aborted) {
         try { await response.body?.cancel() } catch { /* best effort: release the body */ }
         throw parentSignal?.reason ?? abortError()
       }
 
       if (RETRYABLE_STATUSES.has(response.status) && attempt < retries) {
         try { await response.body?.cancel() } catch { /* best effort: release the body */ }
-        await waitForRetry(retryDelayMs * (attempt + 1), [parentSignal, latestController?.signal])
+        await waitForRetry(retryDelayMs * (attempt + 1), [parentSignal, latestController?.signal, sessionSignal])
         continue
       }
 

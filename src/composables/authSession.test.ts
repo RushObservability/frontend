@@ -3,6 +3,7 @@ import {
   authenticatedFetch,
   markSessionActive,
   onSessionExpired,
+  advanceSessionGeneration,
 } from './authSession'
 
 describe('authenticatedFetch', () => {
@@ -14,10 +15,11 @@ describe('authenticatedFetch', () => {
     const listener = vi.fn()
     const stop = onSessionExpired(listener)
 
-    await Promise.all([
+    const outcomes = await Promise.allSettled([
       authenticatedFetch('/api/v1/dashboards'),
       authenticatedFetch('/api/v1/features'),
     ])
+    expect(outcomes.filter(result => result.status === 'rejected')).toHaveLength(1)
 
     expect(listener).toHaveBeenCalledTimes(1)
     stop()
@@ -92,5 +94,19 @@ describe('authenticatedFetch', () => {
     await authenticatedFetch('/api/v1/services', {}, { requestKey: 'services', retries: 0 })
     await expect(first).rejects.toMatchObject({ name: 'AbortError' })
     expect(firstSignal.value?.aborted).toBe(true)
+  })
+
+  it('aborts pending transport and discards stale responses even if fetch ignores cancellation', async () => {
+    let resolve!: (response: Response) => void
+    let signal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn((_input, init) => {
+      signal = init.signal
+      return new Promise<Response>(done => { resolve = done })
+    }))
+    const pending = authenticatedFetch('/api/v1/tenants')
+    advanceSessionGeneration()
+    expect(signal?.aborted).toBe(true)
+    resolve(new Response('{}'))
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   })
 })

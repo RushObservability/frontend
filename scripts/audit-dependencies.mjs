@@ -60,7 +60,7 @@ async function main() {
       // A diagnostic probe only. Its response is never used as an audit result.
       const response = await fetch(bulkUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ npm: ['10.9.2'] }), signal: AbortSignal.timeout(10_000),
+        body: JSON.stringify({ npm: ['10.9.8'] }), signal: AbortSignal.timeout(10_000),
       })
       await response.body?.cancel()
       return response.status

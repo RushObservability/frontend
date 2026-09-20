@@ -1,6 +1,6 @@
 import { ref, computed, watch } from 'vue'
 import type { Tenant } from '../types'
-import { authenticatedFetch } from './authSession'
+import { authenticatedFetch, getSessionGeneration, onSessionChanged } from './authSession'
 import {
   clearTenantScopedStorage,
   storageUserId,
@@ -14,6 +14,11 @@ import { stopPollingTasks } from './usePollingTask'
 const activeTenant = ref<string>('default')
 const tenants = ref<Tenant[]>([])
 const loaded = ref(false)
+function resetTenants(): void {
+  tenants.value = []
+  loaded.value = false
+}
+onSessionChanged(resetTenants)
 
 const activeTenantName = computed(() => {
   const t = tenants.value.find((t) => t.name === activeTenant.value)
@@ -38,15 +43,18 @@ const metricsEnabled = computed(() => {
 })
 
 watch(storageUserId, (userId) => {
+  resetTenants()
   if (!userId) {
     activeTenant.value = 'default'
     return
   }
   const key = userScopedStorageKey('active-tenant', userId)
   try { activeTenant.value = key ? (localStorage.getItem(key) || 'default') : 'default' } catch { activeTenant.value = 'default' }
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 
 async function loadTenants(): Promise<void> {
+  const generation = getSessionGeneration()
+  const userId = storageUserId.value
   try {
     const res = await authenticatedFetch('/api/v1/tenants', {
       headers: { 'Content-Type': 'application/json' },
@@ -54,6 +62,7 @@ async function loadTenants(): Promise<void> {
     })
     if (!res.ok) return
     const data: { tenants: Tenant[] } = await res.json()
+    if (generation !== getSessionGeneration() || userId !== storageUserId.value) return
     tenants.value = data.tenants.filter((t) => t.enabled)
 
     // Validate stored tenant still exists in the list

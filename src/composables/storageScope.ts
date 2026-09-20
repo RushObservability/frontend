@@ -71,7 +71,30 @@ export function clearTenantScopedStorage(tenant: string): void {
 
 /** Avoid persisting values that look like credentials or connection secrets. */
 export function containsSensitiveMaterial(value: unknown): boolean {
-  let serialized: string
-  try { serialized = JSON.stringify(value) } catch { return true }
-  return /(?:password|passwd|token|api[_-]?key|client[_-]?secret|authorization|dsn|secret)\s*[:=]/i.test(serialized)
+  const sensitiveKey = /(?:^|[.\s_-])(?:password|passwd|token|api[_-]?key|client[_-]?secret|authorization|dsn|secret)(?:$|[.\s_-])/i
+  const sensitiveText = /(?:password|passwd|token|api[_-]?key|client[_-]?secret|authorization|dsn|secret)["'\s]*[:=]|\bBearer\s+\S+|:\/\/[^\s/]+:[^\s/]+@|-----BEGIN [A-Z ]*PRIVATE KEY-----/i
+  const seen = new Set<object>()
+  let visited = 0
+  const isSensitiveKey = (key: string) => sensitiveKey.test(key.replace(/([a-z])([A-Z])/g, '$1_$2'))
+  function inspect(item: unknown, depth: number): boolean {
+    if (++visited > 10_000 || depth > 32) return true
+    if (typeof item === 'string') {
+      if (item.length > 100_000 || sensitiveText.test(item)) return true
+      if (/^\s*[\[{]/.test(item)) {
+        try { return inspect(JSON.parse(item), depth + 1) } catch { /* free-form query */ }
+      }
+      return false
+    }
+    if (!item || typeof item !== 'object') return false
+    if (seen.has(item)) return true
+    seen.add(item)
+    try {
+      return Object.entries(item).some(([key, child]) =>
+        isSensitiveKey(key)
+        || ((key === 'field' || key === 'key' || key === 'label') && typeof child === 'string' && isSensitiveKey(child))
+        || inspect(child, depth + 1),
+      )
+    } finally { seen.delete(item) }
+  }
+  try { return inspect(value, 0) } catch { return true }
 }
