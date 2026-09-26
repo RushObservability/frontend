@@ -594,7 +594,7 @@ export function useApi() {
     return await request('/maintenance-windows')
   }
 
-  async function createMaintenanceWindow(data: CreateMaintenanceWindowRequest): Promise<{ id: string; ok: boolean }> {
+  async function createMaintenanceWindow(data: CreateMaintenanceWindowRequest): Promise<MaintenanceWindow> {
     return await request('/maintenance-windows', { method: 'POST', body: JSON.stringify(data) })
   }
 
