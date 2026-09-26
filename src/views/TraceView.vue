@@ -8,6 +8,7 @@ import type { TraceResponse, SpanNode } from '../types'
 import VirtualTable from '../components/VirtualTable.vue'
 import TraceWaterfall from '../components/TraceWaterfall.vue'
 import { serviceColor as traceServiceColor } from '../lib/traceWaterfall'
+import { isErrorSpan, isErrorStatus } from '../lib/spanStatus'
 
 const props = defineProps<{ traceId: string }>()
 const router = useRouter()
@@ -33,7 +34,7 @@ function formatDuration(ns: number): string {
 }
 
 function statusClass(status: string, code: number): string {
-  if (status === 'ERROR' || code >= 500) return 'status-error'
+  if (isErrorStatus(status) || code >= 500) return 'status-error'
   if (code >= 400) return 'status-warning'
   return 'status-ok'
 }
@@ -95,7 +96,7 @@ const traceNarrative = computed(() => {
   }
 
   // Error insights
-  const errorSpans = flatSpans.value.filter(f => f.span.status === 'ERROR' || f.span.http_status_code >= 500)
+  const errorSpans = flatSpans.value.filter(f => isErrorSpan(f.span))
   if (errorSpans.length) {
     const errorSvcs = [...new Set(errorSpans.map(f => f.span.service_name))]
     text += ` Errors occurred in ${errorSvcs.join(', ')}.`
@@ -165,7 +166,7 @@ const traceInsights = computed(() => {
 
   // Error detection
   for (const { span } of flatSpans.value) {
-    if (span.status === 'ERROR' || span.http_status_code >= 500) {
+    if (isErrorSpan(span)) {
       insights.push({ text: `Error in ${span.service_name}: ${span.http_method} ${span.http_path} returned ${span.http_status_code}`, type: 'error' })
     }
   }
@@ -255,7 +256,7 @@ function investigateTrace() {
   const t = trace.value
   if (!t) return
   const root = t.spans[0]
-  const errorSpans = t.spans.filter(s => s.status === 'ERROR' || s.http_status_code >= 500)
+  const errorSpans = t.spans.filter(s => isErrorSpan(s))
   const ctx = [
     `Trace ID: ${props.traceId}`,
     `Root service: ${root?.service_name || 'unknown'}`,
@@ -339,7 +340,7 @@ function investigateTrace() {
           <template v-for="(node, idx) in serviceFlow" :key="node.name">
             <div
               class="flow-node"
-              :class="{ 'flow-error': node.status === 'ERROR' || node.http_status_code >= 500 }"
+              :class="{ 'flow-error': isErrorSpan(node) }"
               :style="{ borderColor: node.color + '30' }"
             >
               <div class="flow-dot" :style="{ background: node.color, boxShadow: `0 0 8px ${node.color}60` }" />

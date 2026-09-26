@@ -4,6 +4,7 @@ import { useApi } from '../composables/useApi'
 import { parseSearchComparison } from '../lib/searchComparison'
 import DataTable, { type DataTableColumn } from './DataTable.vue'
 import type { RushEvent, Filter } from '../types'
+import { isErrorSpan, isErrorStatus } from '../lib/spanStatus'
 
 const props = withDefaults(defineProps<{
   spans: RushEvent[]
@@ -367,7 +368,7 @@ function logRow(row: Record<string, unknown>): LogEntry {
 
 function spanTableRowClass(row: Record<string, unknown>): string {
   const span = spanRow(row)
-  return span.status === 'ERROR' || span.http_status_code >= 500 ? 'slt-error' : ''
+  return isErrorSpan(span) ? 'slt-error' : ''
 }
 
 function logTableRowClass(row: Record<string, unknown>): string {
@@ -403,7 +404,7 @@ function formatDuration(ns: number): string {
 }
 
 function statusClass(status: string, code: number): string {
-  if (status === 'ERROR' || code >= 500) return 'status-error'
+  if (isErrorStatus(status) || code >= 500) return 'status-error'
   if (code >= 400) return 'status-warning'
   return 'status-ok'
 }
