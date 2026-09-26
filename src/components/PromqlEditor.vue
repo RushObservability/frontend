@@ -5,6 +5,7 @@ import { useApi } from '../composables/useApi'
 import { useTenant } from '../composables/useTenant'
 import { completionContext, insertCompletion, matchCompletions } from '../lib/promqlCompletion'
 import type { CompletionContext, PromqlCompletion } from '../lib/promqlCompletion'
+import { metricSelector } from '../lib/promqlNames'
 
 const props = withDefaults(defineProps<{
   modelValue: string
@@ -78,11 +79,12 @@ async function complete(force = false) {
   selected.value = 0
   items.value = matchCompletions(ctx, [])
   const tenant = activeTenant.value
+  const match = ctx.metric ? metricSelector(ctx.metric) : undefined
   const names = ctx.kind === 'expression'
     ? await values(`${tenant}:metrics`, () => api.promLabelValues('__name__'))
     : ctx.kind === 'label'
-      ? await values(`${tenant}:labels:${ctx.metric || ''}`, () => api.promLabels(ctx.metric))
-      : await values(`${tenant}:values:${ctx.metric || ''}:${ctx.label}`, () => api.promLabelValues(ctx.label!, ctx.metric))
+      ? await values(`${tenant}:labels:${ctx.metric || ''}`, () => api.promLabels(match))
+      : await values(`${tenant}:values:${ctx.metric || ''}:${ctx.label}`, () => api.promLabelValues(ctx.label!, match))
   if (request !== generation || !focused.value || tenant !== activeTenant.value || el.value !== query || el.selectionStart !== cursor) return
   items.value = matchCompletions(ctx, names)
 }

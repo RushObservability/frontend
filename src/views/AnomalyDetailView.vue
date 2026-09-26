@@ -6,6 +6,7 @@ import InvestigationPanel from '../components/InvestigationPanel.vue'
 import { PanelCard, TablePanel, TimeSeriesPanel } from '../components/panels'
 import type { TimeSeriesPanelSeries } from '../components/panels'
 import type { AnomalyRule, AnomalyEvent, CorrelationResponse, LogRecord, RushEvent, TimeseriesBucket } from '../types'
+import { metricNameInBraces, metricSelector } from '../lib/promqlNames'
 
 const props = defineProps<{ ruleId: string }>()
 const route = useRoute()
@@ -53,11 +54,12 @@ function isCounter(name: string): boolean {
 }
 
 function buildQuery(name: string, labels?: string[]): string {
+  const selector = metricSelector(name)
   if (labels?.length) {
     const by = labels.join(', ')
-    return isCounter(name) ? `sum by (${by})(rate(${name}[5m]))` : `sum by (${by})(${name})`
+    return isCounter(name) ? `sum by (${by})(rate(${selector}[5m]))` : `sum by (${by})(${selector})`
   }
-  return isCounter(name) ? `sum(rate(${name}[5m]))` : `sum(${name})`
+  return isCounter(name) ? `sum(rate(${selector}[5m]))` : `sum(${selector})`
 }
 
 // ═══ EWMA ═══
@@ -623,9 +625,11 @@ function buildServiceQuery(metricStr: string, serviceName: string): string {
     existingLabels = ''
   }
 
-  const svcLabel = `service_name="${serviceName}"`
+  const svcLabel = `service_name=${JSON.stringify(serviceName)}`
   const allLabels = existingLabels ? `${existingLabels}, ${svcLabel}` : svcLabel
-  const selector = `${name}{${allLabels}}`
+  // A dotted metric arrives as {__name__="a.b", …}: keep that matcher in the braces.
+  const selector = name ? metricSelector(name, allLabels) : `{${allLabels}}`
+  if (!name) name = metricNameInBraces(existingLabels) ?? ''
 
   return isCounter(name) ? `sum(rate(${selector}[5m]))` : `sum(${selector})`
 }

@@ -5,6 +5,7 @@ import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { usePollingTask } from '../composables/usePollingTask'
 import type { NotificationChannel, AnomalyRule, AnomalyEventWithRule, TimeseriesBucket } from '../types'
+import { metricSelector } from '../lib/promqlNames'
 
 const route = useRoute()
 const router = useRouter()
@@ -155,13 +156,14 @@ function isCounter(name: string): boolean {
 }
 
 function buildQuery(name: string, labels?: string[]): string {
+  const selector = metricSelector(name)
   if (labels?.length) {
     const by = labels.join(', ')
     return isCounter(name)
-      ? `sum by (${by})(rate(${name}[5m]))`
-      : `sum by (${by})(${name})`
+      ? `sum by (${by})(rate(${selector}[5m]))`
+      : `sum by (${by})(${selector})`
   }
-  return isCounter(name) ? `sum(rate(${name}[5m]))` : `sum(${name})`
+  return isCounter(name) ? `sum(rate(${selector}[5m]))` : `sum(${selector})`
 }
 
 // ═══ EWMA anomaly detection ═══

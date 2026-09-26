@@ -54,4 +54,33 @@ describe('PromQL completion', () => {
     const text = 'http_total{service="payments"'
     expect(completionContext(text, text.length)).toBeNull()
   })
+  it('selects dotted metric names by __name__ instead of inserting them bare', () => {
+    const text = 'rate(http.ser[5m])'
+    const ctx = completionContext(text, text.indexOf('[') )!
+    expect(ctx.prefix).toBe('http.ser')
+    expect(insertCompletion(text, ctx, { text: 'http.server.request.duration', kind: 'metric' }).text)
+      .toBe('rate({__name__="http.server.request.duration"}[5m])')
+  })
+  it('merges a dotted metric into matchers that already follow it', () => {
+    const text = 'http{job="api"}'
+    const ctx = completionContext(text, 4)!
+    expect(insertCompletion(text, ctx, { text: 'http.server.request.duration', kind: 'metric' }).text)
+      .toBe('{__name__="http.server.request.duration", job="api"}')
+    const empty = 'http{}'
+    expect(insertCompletion(empty, completionContext(empty, 4)!, { text: 'a.b', kind: 'metric' }).text)
+      .toBe('{__name__="a.b"}')
+  })
+  it('knows the metric for label completion inside a __name__ selector', () => {
+    for (const text of ['{__name__="http.server.request.duration", ser', '{"http.server.request.duration", ser']) {
+      expect(completionContext(text, text.length)).toMatchObject({
+        kind: 'label',
+        metric: 'http.server.request.duration',
+        prefix: 'ser',
+      })
+    }
+  })
+  it('still ignores numbers with decimal points', () => {
+    expect(completionContext('histogram_quantile(0.9', 22)).toBeNull()
+    expect(completionContext('x * 1.5', 7)).toBeNull()
+  })
 })

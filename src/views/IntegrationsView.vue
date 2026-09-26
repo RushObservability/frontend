@@ -13,6 +13,7 @@ import {
   type IntegrationDatabaseScope,
 } from '../lib/integrationDatabaseScope'
 import '../styles/views/IntegrationsView.css'
+import { metricSelector } from '../lib/promqlNames'
 
 const route = useRoute()
 const router = useRouter()
@@ -139,7 +140,7 @@ async function loadDbs() {
   const metric = addon.value?.dbDiscoveryMetric
   if (!metric || !selectedServer.value) return
   try {
-    const res = await api.promQuery(`${metric}{service_name="${selectedServer.value}"}`)
+    const res = await api.promQuery(metricSelector(metric, `service_name=${JSON.stringify(selectedServer.value)}`))
     const seen = new Set<string>()
     const pairs: IntegrationDatabaseScope[] = []
     for (const s of res.result) {

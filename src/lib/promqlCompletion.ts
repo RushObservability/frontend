@@ -1,3 +1,5 @@
+import { isBareMetricName, metricNameInBraces } from './promqlNames'
+
 export type CompletionKind = 'metric' | 'function' | 'label' | 'value'
 export interface PromqlCompletion { text: string; kind: CompletionKind }
 export interface CompletionContext {
@@ -47,6 +49,7 @@ export function completionContext(text: string, cursor: number): CompletionConte
   if (brackets > 0 || (quote && brace < 0)) return null
   if (brace >= 0) {
     const metric = text.slice(0, brace).match(/[a-zA-Z_:][a-zA-Z0-9_:]*\s*$/)?.[0].trim()
+      ?? metricNameInBraces(text.slice(brace + 1)) ?? undefined
     const matcher = text.slice(segment, cursor).match(/^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=~|!~|!=|=)\s*/)
     if (matcher) {
       const start = segment + matcher[0].length
@@ -79,10 +82,11 @@ export function completionContext(text: string, cursor: number): CompletionConte
     if (text.slice(segment, start).trim()) return null
     return { kind: 'label', metric, prefix: text.slice(start, cursor), start, end }
   }
+  // Dots are allowed so a partly typed OpenTelemetry name is replaced whole.
   let start = cursor
   let end = cursor
-  while (start > 0 && /[a-zA-Z0-9_:]/.test(text[start - 1]!)) start--
-  while (end < text.length && /[a-zA-Z0-9_:]/.test(text[end]!)) end++
+  while (start > 0 && /[a-zA-Z0-9_:.]/.test(text[start - 1]!)) start--
+  while (end < text.length && /[a-zA-Z0-9_:.]/.test(text[end]!)) end++
   if (text[start - 1] === '$' || /^\d/.test(text.slice(start, cursor))) return null
   return { kind: 'expression', prefix: text.slice(start, cursor), start, end }
 }
@@ -101,8 +105,19 @@ export function matchCompletions(context: CompletionContext, names: string[]): P
 }
 
 export function insertCompletion(text: string, context: CompletionContext, item: PromqlCompletion) {
-  const after = text.slice(context.end)
+  let after = text.slice(context.end)
   let insertion = item.kind === 'value' ? JSON.stringify(item.text) : item.text
   if (item.kind === 'function' && !/^\s*\(/.test(after)) insertion += '('
+  if (item.kind === 'metric' && !isBareMetricName(item.text)) {
+    // PromQL can't take a dotted name bare; select it by name, merging into
+    // matchers that already follow it.
+    const byName = `__name__=${JSON.stringify(item.text)}`
+    if (after.startsWith('{')) {
+      after = after.slice(1)
+      insertion = /^\s*\}/.test(after) ? `{${byName}` : `{${byName}, `
+    } else {
+      insertion = `{${byName}}`
+    }
+  }
   return { text: text.slice(0, context.start) + insertion + after, cursor: context.start + insertion.length }
 }
