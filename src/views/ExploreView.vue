@@ -30,6 +30,7 @@ import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from '../
 import { usePollingTask, type PollingRunContext } from '../composables/usePollingTask'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import type { ContextMenuEntry } from '../types/contextMenu'
+import { isErrorSpan, isErrorStatus } from '../lib/spanStatus'
 
 interface ExploreHistoryQuery {
   logViewId?: string
@@ -1446,7 +1447,7 @@ function spanTimestampTooltip(ts: number | string): string {
 
 
 function statusClass(status: string, code: number): string {
-  if (status === 'ERROR' || code >= 500) return 'status-error'
+  if (isErrorStatus(status) || code >= 500) return 'status-error'
   if (code >= 400) return 'status-warning'
   return 'status-ok'
 }
@@ -1548,7 +1549,7 @@ const traceGroups = computed(() => {
   return [...grouped.entries()].map(([key, rows]) => {
     const [service, method, path] = key.split('\u0000')
     const durations = rows.map(r => r.duration_ns).sort((a, b) => a - b)
-    const errors = rows.filter(r => r.status === 'ERROR' || r.http_status_code >= 500)
+    const errors = rows.filter(r => isErrorSpan(r))
     const representative = errors[0] || [...rows].sort((a, b) => b.duration_ns - a.duration_ns)[0]!
     return {
       key, service: service!, method: method!, path: path!, count: rows.length,
@@ -1763,7 +1764,7 @@ const scatterStats = computed(() => {
   const durations = scatterSourceRows.value.map((row) => Math.max(1, row.duration_ns))
   return {
     count: durations.length,
-    errors: scatterSourceRows.value.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500).length,
+    errors: scatterSourceRows.value.filter((row) => isErrorSpan(row)).length,
     p50: percentile(durations, .5),
     p95: percentile(durations, .95),
     p99: percentile(durations, .99),
@@ -1815,7 +1816,7 @@ const scatterPoints = computed<ScatterPoint[]>(() =>
     row,
     x: scatterX(row.timestamp),
     y: scatterY(row.duration_ns),
-    error: row.status === 'ERROR' || row.http_status_code >= 500,
+    error: isErrorSpan(row),
   }))
 )
 
@@ -1935,7 +1936,7 @@ const scatterSelectionSummary = computed(() => {
   if (!selection) return null
   const previewRows = scatterCohortRows.value ?? selection.rows
   const services = new Set(previewRows.map((row) => row.service_name)).size
-  const errors = previewRows.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500).length
+  const errors = previewRows.filter((row) => isErrorSpan(row)).length
   return {
     count: scatterCohortRows.value !== null ? scatterCohortTotal.value : selection.rows.length,
     loadedCount: previewRows.length,
@@ -2025,7 +2026,7 @@ function prepareScatterQuickAnalysis(kind: 'slow' | 'errors' | 'recent') {
     })
   } else if (kind === 'errors') {
     setScatterSelection({
-      label: 'All errors in this query', rows: rows.filter((row) => row.status === 'ERROR' || row.http_status_code >= 500),
+      label: 'All errors in this query', rows: rows.filter((row) => isErrorSpan(row)),
       startTime: timeRange.value.from, endTime: timeRange.value.to, errorsOnly: true, queryWide: true,
     })
   } else {
@@ -5584,7 +5585,7 @@ watch(() => route.query.log_view, (id) => {
               :class="{
                 'et-selected': modalOpen && modalRowIndex === i,
                 'et-kbd-selected': selectedRowIndex === i && !(modalOpen && modalRowIndex === i),
-                'et-error': row.status === 'ERROR' || row.http_status_code >= 500,
+                'et-error': isErrorSpan(row),
                 'et-live-new': liveNewIds.has(row.span_id),
               }"
               @click="toggleRow(i); selectedRowIndex = i"

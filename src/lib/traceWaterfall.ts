@@ -1,4 +1,5 @@
 import type { SpanNode } from '../types'
+import { isErrorStatus } from './spanStatus'
 
 /** One rendered line of the waterfall: a span, its indent, and its child count. */
 export interface WaterfallRow {
@@ -92,7 +93,7 @@ export function barWidthPercent(span: SpanNode, traceDurationNs: number): string
 }
 
 export function isSpanError(span: SpanNode): boolean {
-  return span.status.toUpperCase() === 'ERROR' || span.http_status_code >= 400
+  return isErrorStatus(span.status) || span.http_status_code >= 400
 }
 
 /** Human label for a span: HTTP route, else its name attribute, else a short id. */
@@ -116,7 +117,7 @@ export function durationClass(ns: number): string {
 }
 
 export function spanStatusClass(status: string, code: number): string {
-  if (status === 'ERROR' || code >= 500) return 'status-error'
+  if (isErrorStatus(status) || code >= 500) return 'status-error'
   if (code >= 400) return 'status-warning'
   return 'status-ok'
 }
