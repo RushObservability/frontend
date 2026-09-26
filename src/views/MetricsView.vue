@@ -15,6 +15,7 @@ import VirtualTable from '../components/VirtualTable.vue'
 import { TablePanel, TimeSeriesPanel, formatPanelRange } from '../components/panels'
 import type { TimeSeriesPanelSeries } from '../components/panels'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
+import { loneMetricName, metricSelector } from '../lib/promqlNames'
 
 interface MetricsHistoryQuery {
   query: string
@@ -51,12 +52,9 @@ const labelCache = new Map<string, string[]>()
 const counterSuffixes = ['_total', '_count', '_bucket', '_sum']
 const suggestions = ref<Array<{ label: string; query: string; kind: 'rate' | 'group' }>>([])
 
+// The metric name when the query is only a metric, bare or selected by name.
 function isBareName(q: string): string | null {
-  const trimmed = q.trim()
-  // Must look like a single metric name (alphanumeric + _ + :), no parens, no braces
-  if (!trimmed || /[({}\[\])]/.test(trimmed)) return null
-  if (!/^[a-zA-Z_:][a-zA-Z0-9_:]*$/.test(trimmed)) return null
-  return trimmed
+  return loneMetricName(q)
 }
 
 function looksLikeCounter(name: string): boolean {
@@ -73,9 +71,10 @@ async function updateSuggestions() {
   const items: Array<{ label: string; query: string; kind: 'rate' | 'group' }> = []
 
   // Primary suggestion: wrap in rate()
+  const selector = metricSelector(metric)
   items.push({
-    label: `rate(${metric}[5m])`,
-    query: `rate(${metric}[5m])`,
+    label: `rate(${selector}[5m])`,
+    query: `rate(${selector}[5m])`,
     kind: 'rate',
   })
 
@@ -83,7 +82,7 @@ async function updateSuggestions() {
   let labels = labelCache.get(metric)
   if (!labels) {
     try {
-      labels = await api.promLabels(metric)
+      labels = await api.promLabels(selector)
       labelCache.set(metric, labels)
     } catch { labels = [] }
   }
@@ -92,7 +91,7 @@ async function updateSuggestions() {
   for (const lbl of groupLabels.slice(0, 4)) {
     items.push({
       label: `sum by (${lbl}) (rate(...[5m]))`,
-      query: `sum by (${lbl}) (rate(${metric}[5m]))`,
+      query: `sum by (${lbl}) (rate(${selector}[5m]))`,
       kind: 'group',
     })
   }
@@ -252,7 +251,7 @@ function seriesPromql(metric: Record<string, string>): string {
     .filter(([k]) => k !== '__name__')
     .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
     .join(', ')
-  const selector = name + (labels ? `{${labels}}` : '')
+  const selector = name ? metricSelector(name, labels) : `{${labels}}`
   if (looksLikeCounter(name)) return `rate(${selector}[5m])`
   return selector
 }
@@ -269,7 +268,7 @@ function handleExploreSelect(_metric: string, queryStr: string) {
 }
 
 function insertMetric(name: string) {
-  query.value = name
+  query.value = metricSelector(name)
   showMetricDropdown.value = false
   metricFilter.value = ''
 }

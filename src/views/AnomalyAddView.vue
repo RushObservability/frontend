@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import type { NotificationChannel, TimeseriesBucket } from '../types'
+import { metricSelector } from '../lib/promqlNames'
 
 const api = useApi()
 const router = useRouter()
@@ -241,13 +242,14 @@ function isCounter(name: string): boolean {
 }
 
 function buildQuery(name: string, labels?: string[]): string {
+  const selector = metricSelector(name)
   if (labels?.length) {
     const by = labels.join(', ')
     return isCounter(name)
-      ? `sum by (${by})(rate(${name}[5m]))`
-      : `sum by (${by})(${name})`
+      ? `sum by (${by})(rate(${selector}[5m]))`
+      : `sum by (${by})(${selector})`
   }
-  return isCounter(name) ? `sum(rate(${name}[5m]))` : `sum(${name})`
+  return isCounter(name) ? `sum(rate(${selector}[5m]))` : `sum(${selector})`
 }
 
 // ═══ EWMA anomaly detection ═══
@@ -345,7 +347,7 @@ watch(matchedMetrics, async (metrics) => {
     // For a single metric, fetch labels directly; for multiple, intersect
     let results: string[][]
     if (metrics.length === 1) {
-      results = [await api.promLabels(`{__name__="${metrics[0]}"}`)]
+      results = [await api.promLabels(metricSelector(metrics[0]!))]
     } else {
       // Use regex match for the pattern to avoid N separate calls
       const pat = searchPattern.value.trim()
@@ -356,7 +358,7 @@ watch(matchedMetrics, async (metrics) => {
         results = [await api.promLabels(`{__name__=~"${rePat}"}`)]
       } else {
         results = await Promise.all(
-          metrics.map(name => api.promLabels(`{__name__="${name}"}`))
+          metrics.map(name => api.promLabels(metricSelector(name)))
         )
       }
     }

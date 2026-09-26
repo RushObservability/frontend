@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useApi } from '../composables/useApi'
+import { metricSelector } from '../lib/promqlNames'
 
 const props = defineProps<{
   metricNames: string[]
@@ -31,14 +32,16 @@ function metricType(name: string): 'counter' | 'gauge' {
 }
 
 function suggestedQuery(name: string): string {
-  return looksLikeCounter(name) ? `rate(${name}[5m])` : name
+  const selector = metricSelector(name)
+  return looksLikeCounter(name) ? `rate(${selector}[5m])` : selector
 }
 
 // ═══ Prefix extraction ═══
 const prefixChips = computed(() => {
   const freq = new Map<string, number>()
   for (const name of props.metricNames) {
-    const idx = name.indexOf('_')
+    // Group dotted OpenTelemetry/Datadog names (`http.server…`) as well as `http_…`.
+    const idx = name.search(/[._]/)
     if (idx > 0) {
       const prefix = name.slice(0, idx + 1)
       freq.set(prefix, (freq.get(prefix) || 0) + 1)
