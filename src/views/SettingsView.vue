@@ -10,6 +10,7 @@ import type { ApiKey, ApiKeyCreated, ServiceLink, CustomSkill, Group, Tenant, Te
 import SkillEditDialog from '../components/SkillEditDialog.vue'
 import ChannelForm from '../components/ChannelForm.vue'
 import AlertRoutingRules from '../components/AlertRoutingRules.vue'
+import MaintenanceWindows from '../components/MaintenanceWindows.vue'
 import RegexHelp from '../components/RegexHelp.vue'
 import SettingsNavigation from '../components/SettingsNavigation.vue'
 import LogViewsSettings from './settings/LogViewsSettings.vue'
@@ -5449,6 +5450,7 @@ function formatDate(ts: string): string {
           </div>
         </div>
         <AlertRoutingRules :channels="alertChannels" />
+        <MaintenanceWindows />
       </div>
     </div>
 

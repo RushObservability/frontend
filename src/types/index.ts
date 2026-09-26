@@ -1514,10 +1514,14 @@ export interface RumIngestPayload {
 export interface MaintenanceWindow {
   id: string
   name: string
+  /** `all`, `monitor:<id>`, or `tag:<key>:<value>`. */
   scope: string
+  /** RFC 3339 UTC. */
   starts_at: string
   ends_at: string
   created_at: string
+  created_by: string
+  status: 'scheduled' | 'active' | 'ended'
 }
 
 export interface CreateMaintenanceWindowRequest {
