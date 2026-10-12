@@ -28,10 +28,10 @@
     "@fontsource/jetbrains-mono": "5.3.0",
     "@rushobservability/rum-sdk": "^0.2.0",
     "dompurify": "^3.4.16",
-    "rrweb": "2.1.6",
+    "rrweb": "2.1.7",
     "vue": "^3.5.42",
-    "vue-router": "^5.3.1",
-    "web-vitals": "^6.2.2"
+    "vue-router": "^5.4.0",
+    "web-vitals": "^6.2.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",
@@ -41,8 +41,8 @@
     "@vue/tsconfig": "^0.9.1",
     "esbuild": "^0.28.2",
     "typescript": "npm:@typescript/typescript6@^6",
-    "vite": "^8.3.1",
+    "vite": "^8.3.4",
     "vitest": "^5.0.3",
-    "vue-tsc": "^3.3.11"
+    "vue-tsc": "^3.3.12"
   }
 }
