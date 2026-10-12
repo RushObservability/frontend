@@ -3,7 +3,7 @@
 # discarded, so its footprint doesn't affect the final image's CVE posture).
 # The Vue bundle is architecture-independent. Keep this stage on the BuildKit
 # host so multi-platform builds do not run Node, vue-tsc, or Vite through QEMU.
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/node@sha256:ba5ddd7d133199913a1dc69fe2906330db932316eb5000190ea9cbdb213c497f AS builder
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/node@sha256:4e771308d07813bf9a1aa25299a45e5664533c47fe4c541c14498752f2dbc2dd AS builder
 # Chainguard node runs as non-root by default; the build writes to /app and the
 # npm cache, so run this (discarded) stage as root to avoid permission errors.
 USER root
@@ -26,7 +26,7 @@ RUN npm run build
 # The runtime image (Chainguard nginx) is distroless — no shell, and we can't RUN
 # in it. Stage a busybox multi-call binary + the applet symlinks the entrypoint
 # needs (sh, sed, mkdir, grep) so it can validate and render config at start.
-FROM cgr.dev/chainguard/busybox@sha256:2840ec681db3a9dcd31edd0890437f856c22a2cf120de3d3552044ec674d4056 AS tools
+FROM cgr.dev/chainguard/busybox@sha256:f7d9063f22547e726221275158930e5033be3c6d8340c6867afb7d0d779fad8d AS tools
 # The busybox image also runs non-root, so assemble the tools under /tmp (writable).
 RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/busybox; for a in sh sed mkdir grep; do ln -s busybox /tmp/tools/$a; done"]
 
@@ -34,7 +34,7 @@ RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/b
 # Chainguard nginx: 0-CVE, distroless, runs as non-root (uid 65532) and listens
 # on 8080. Its entrypoint is bare `nginx` (no docker-entrypoint.sh / envsubst),
 # so we supply our own entrypoint to render the runtime template.
-FROM cgr.dev/chainguard/nginx@sha256:a104d1995e56b7a15e8f152078dfbdb1ecbf9f9d1af311e7906e7b4c0c790cf2
+FROM cgr.dev/chainguard/nginx@sha256:028368a7e271b3e0aed3bdc82195de6b38a2fee2bdd2a0b7ce1c4b944907098c
 
 # busybox tools for the entrypoint (sh/sed/mkdir at /usr/local/bin).
 COPY --from=tools /tmp/tools/ /usr/local/bin/
