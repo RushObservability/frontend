@@ -107,11 +107,23 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 
+expected_node="$(tr -d '[:space:]' < .nvmrc)"
+if [[ "$(node -v)" != "v${expected_node}" ]]; then
+  echo "Note: using Node $(node -v); the release workflow uses v${expected_node} (.nvmrc)." >&2
+fi
+
+# Install the locked dependencies the release workflow uses before the branch
+# exists, so a missing or stale node_modules fails here without leaving a
+# half-made release branch behind.
+npm ci --ignore-scripts
+
 git switch -c "$release_branch"
 npm version "$version" --no-git-tag-version --allow-same-version --ignore-scripts
 
+# The same checks the release workflow runs before it publishes.
 npm test
 npm run build
+npm run verify:opensource
 
 git add package.json package-lock.json
 if git diff --cached --quiet; then
