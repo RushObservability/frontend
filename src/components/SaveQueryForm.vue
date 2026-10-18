@@ -141,8 +141,8 @@ function submit() {
               <dt>Time range</dt>
               <dd>{{ formatRange(preview.timePreset) }}</dd>
               <template v-if="preview.viewMode">
-                <dt>View</dt>
-                <dd>{{ preview.viewMode === 'logs' ? 'Logs' : 'Spans' }}</dd>
+                <dt>Type</dt>
+                <dd>{{ preview.viewMode === 'logs' ? 'Logs' : 'APM' }}</dd>
               </template>
             </dl>
             <p v-if="editing" class="sqd-hint">To change the query itself, load it, adjust it in Explore, and save it again.</p>

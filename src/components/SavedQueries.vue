@@ -221,6 +221,11 @@ defineExpose({ openSave, openList })
               <li v-for="q in section.items" :key="q.id" class="sq-item">
                 <button type="button" class="sq-item-main" :aria-label="`Run ${q.name}`" @click="handleLoad(q)">
                   <span class="sq-item-name">
+                    <span
+                      v-if="q.viewMode"
+                      class="sq-kind"
+                      :class="q.viewMode === 'logs' ? 'sq-kind-logs' : 'sq-kind-apm'"
+                    >{{ q.viewMode === 'logs' ? 'Logs' : 'APM' }}</span>
                     {{ q.name }}
                     <span v-if="q.visibility === 'group'" class="sq-badge">{{ groupName(q.groupId) }}</span>
                   </span>

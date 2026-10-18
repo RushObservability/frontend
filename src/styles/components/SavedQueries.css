@@ -130,6 +130,22 @@
   background: var(--amber-dim);
 }
 
+/* Which Explore mode the query runs in; labels match the APM/Logs toggle. */
+.sq-kind {
+  flex-shrink: 0;
+  min-width: 34px;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-transform: uppercase;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+}
+.sq-kind-apm { color: var(--accent); background: var(--accent-soft); }
+.sq-kind-logs { color: var(--ok); background: var(--ok-dim); }
+
 .sq-item-desc {
   font-size: 11px;
   line-height: 1.45;

@@ -18,6 +18,12 @@ describe('saved queries', () => {
     expect(source).not.toContain('sq-dropdown')
   })
 
+  it('labels each saved query as APM or Logs', () => {
+    expect(source).toContain(":class=\"q.viewMode === 'logs' ? 'sq-kind-logs' : 'sq-kind-apm'\"")
+    expect(source).toContain("{{ q.viewMode === 'logs' ? 'Logs' : 'APM' }}")
+    expect(formSource).toContain("{{ preview.viewMode === 'logs' ? 'Logs' : 'APM' }}")
+  })
+
   it('asks before deleting a saved query', () => {
     expect(source).toContain('@click="confirmingDelete = q.id"')
     expect(source).toContain('@click="confirmDelete(q.id)"')
