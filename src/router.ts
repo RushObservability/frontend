@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuth } from './composables/useAuth'
+import { useTenant } from './composables/useTenant'
 import { frontendEdition } from './edition/manifest'
 
 const router = createRouter({
@@ -259,19 +260,53 @@ const router = createRouter({
   ],
 })
 
+// A tenant named in a link survives the login redirect, which keeps only the path.
+const PENDING_LINK_TENANT_KEY = 'rush_link_tenant'
+
+function rememberLinkTenant(name: string): void {
+  try { sessionStorage.setItem(PENDING_LINK_TENANT_KEY, name) } catch { /* storage may be unavailable */ }
+}
+
+function takeLinkTenant(): string {
+  try {
+    const name = sessionStorage.getItem(PENDING_LINK_TENANT_KEY) ?? ''
+    sessionStorage.removeItem(PENDING_LINK_TENANT_KEY)
+    return name
+  } catch {
+    return ''
+  }
+}
+
 router.beforeEach(async (to) => {
   if (to.meta.public) return true
 
   const { isAuthenticated, isAdmin, checked, checkSession } = useAuth()
+  const linkTenant = typeof to.query.tenant === 'string' ? to.query.tenant.trim() : ''
 
   if (!checked.value) {
     await checkSession()
   }
 
   if (!isAuthenticated.value) {
+    if (linkTenant) rememberLinkTenant(linkTenant)
     // Preserve only the path (not query params) in the redirect to avoid
     // leaking sensitive query string values into the URL and server logs.
     return { name: 'login', query: { redirect: to.path } }
+  }
+
+  // `?tenant=<name>` (from shared or MCP links) selects the tenant, then is
+  // removed from the URL so it does not linger in later navigation.
+  const requestedTenant = linkTenant || takeLinkTenant()
+  if (requestedTenant) {
+    const { tenant: _tenant, ...query } = to.query
+    const target = { path: to.path, query, hash: to.hash }
+    const outcome = await useTenant().applyLinkedTenant(requestedTenant)
+    if (outcome === 'switched') {
+      // Reload so every view and request starts on the new tenant.
+      window.location.replace(router.resolve(target).href)
+      return false
+    }
+    if (linkTenant) return { ...target, replace: true }
   }
 
   if (to.meta.requiresAdmin && !isAdmin.value) {

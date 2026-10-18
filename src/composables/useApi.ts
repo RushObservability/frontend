@@ -13,6 +13,7 @@ import {
   isIdempotentAnalyticsPost,
 } from '../lib/analyticsRequestCache'
 import type {
+  ApiKeyRole,
   ApiSavedQuery,
   SavedQueryGroup,
   SavedQueryInput,
@@ -722,6 +723,8 @@ export function useApi() {
   async function createApiKey(data: {
     name: string
     key_type: 'query' | 'ingest'
+    /** Query keys only. */
+    role?: ApiKeyRole
     signals: string[]
     rate_limit_per_minute: number
     source_cidrs: string[]

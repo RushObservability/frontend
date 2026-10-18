@@ -770,11 +770,15 @@ export interface ApiKey {
   prefix: string
   tenant_id: string
   key_type: 'query' | 'ingest' | 'legacy'
+  /** Query keys: `viewer` or `write`. Empty for ingest keys and on older APIs. */
+  role?: ApiKeyRole | ''
   signals: string[]
   rate_limit_per_minute: number
   source_cidrs: string[]
   created_at: string
 }
+
+export type ApiKeyRole = 'viewer' | 'write'
 
 export interface ApiKeyCreated extends ApiKey {
   key: string
