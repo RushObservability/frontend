@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import type { SavedQuery, SavedQueryGroup, SavedQueryVisibility } from '../types'
 import type { SavedQueryDraft } from '../composables/useSavedQueries'
-import DetailDrawer from './DetailDrawer.vue'
 
 export interface SaveQueryForm {
   name: string
@@ -12,7 +11,6 @@ export interface SaveQueryForm {
 }
 
 const props = defineProps<{
-  open: boolean
   /** The query being edited, or null to save the current Explore query. */
   editing: SavedQuery | null
   current: SavedQueryDraft
@@ -27,24 +25,18 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  close: []
+  cancel: []
   submit: [form: SaveQueryForm]
 }>()
 
-const form = ref<SaveQueryForm>({ name: '', description: '', visibility: 'private', groupId: '' })
-
-// Reset the form each time the drawer opens. New saves default to the whole
-// tenant when the user is allowed to share.
-watch(() => props.open, (open) => {
-  if (!open) return
-  const q = props.editing
-  form.value = q
-    ? { name: q.name, description: q.description ?? '', visibility: q.visibility ?? 'private', groupId: q.groupId ?? props.groups[0]?.id ?? '' }
-    : { name: '', description: '', visibility: props.canShare ? 'tenant' : 'private', groupId: props.groups[0]?.id ?? '' }
-}, { immediate: true })
+// The parent remounts this form each time it opens, so this runs per open.
+// New saves default to the whole tenant when the user is allowed to share.
+const q = props.editing
+const form = ref<SaveQueryForm>(q
+  ? { name: q.name, description: q.description ?? '', visibility: q.visibility ?? 'private', groupId: q.groupId ?? props.groups[0]?.id ?? '' }
+  : { name: '', description: '', visibility: props.canShare ? 'tenant' : 'private', groupId: props.groups[0]?.id ?? '' })
 
 const preview = computed(() => props.editing ?? props.current)
-const title = computed(() => (props.editing ? 'Edit saved query' : 'Save query'))
 const visibilityLocked = computed(() => !!props.editing && !props.canChangeVisibility)
 const noGroups = computed(() => !props.groups.length)
 // A query shared with a group the editor is not in keeps its group.
@@ -72,15 +64,7 @@ function submit() {
 </script>
 
 <template>
-  <DetailDrawer :open="open" :label="title" size="medium" @close="emit('close')">
-    <form class="sqd" :aria-busy="saving" @submit.prevent="submit">
-      <header class="sqd-heading">
-        <h2>{{ title }}</h2>
-        <button type="button" class="sqd-close" aria-label="Close" :disabled="saving" @click="emit('close')">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
-        </button>
-      </header>
-
+  <form class="sqd" :aria-busy="saving" @submit.prevent="submit">
       <div class="sqd-body">
         <p v-if="error" class="sqd-error" role="alert">{{ error }}</p>
         <fieldset class="sqd-fields" :disabled="saving">
@@ -165,22 +149,16 @@ function submit() {
       </div>
 
       <footer class="sqd-actions">
-        <button type="button" class="btn" :disabled="saving" @click="emit('close')">Cancel</button>
-        <button type="submit" class="btn btn-primary" :disabled="saving || !valid">
+        <button type="button" class="sqd-btn" :disabled="saving" @click="emit('cancel')">Cancel</button>
+        <button type="submit" class="sqd-btn sqd-btn-primary" :disabled="saving || !valid">
           {{ saving ? 'Saving…' : editing ? 'Save changes' : 'Save query' }}
         </button>
       </footer>
-    </form>
-  </DetailDrawer>
+  </form>
 </template>
 
 <style scoped>
-.sqd { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.sqd-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
-h2 { margin: 0; color: var(--text-primary); font-size: 14px; font-weight: 600; }
-.sqd-close { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--r-sm); color: var(--text-secondary); }
-.sqd-close:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
-.sqd-close:disabled { opacity: .4; cursor: not-allowed; }
+.sqd { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .sqd-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5); }
 .sqd-fields { display: flex; flex-direction: column; gap: var(--sp-5); padding: 0; margin: 0; border: 0; min-width: 0; }
 .sqd-field { display: grid; gap: 8px; font-size: 12px; }
@@ -202,6 +180,11 @@ legend { font-size: 13px; font-weight: 600; padding-right: 12px; color: var(--te
 .sqd-preview code { padding: 1px 6px; border-radius: 3px; background: var(--bg-surface); border: 1px solid var(--border-subtle); font-size: 11px; overflow-wrap: anywhere; }
 .sqd-preview > p { margin: 12px 0 0; }
 .sqd-actions { display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; border-top: 1px solid var(--border-subtle); padding: var(--sp-4) var(--sp-5); }
+.sqd-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 14px; border: 1px solid var(--border-default); border-radius: var(--r-sm); background: var(--bg-raised); color: var(--text-secondary); font-size: 12px; font-weight: 500; }
+.sqd-btn:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text-primary); }
+.sqd-btn:disabled { opacity: .4; cursor: not-allowed; }
+.sqd-btn-primary { background: var(--amber); border-color: var(--amber); color: var(--text-inverse); font-weight: 600; }
+.sqd-btn-primary:hover:not(:disabled) { background: var(--amber-hover); border-color: var(--amber-hover); color: var(--text-inverse); }
 .sqd-hint { color: var(--text-muted); font-size: 11px; }
 .sqd-error { color: var(--error); margin: 0 0 var(--sp-4); font-size: 12px; }
 </style>

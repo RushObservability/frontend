@@ -1386,6 +1386,7 @@ onUnmounted(() => {
 
 
 const savedQueryError = ref('')
+const savedQueriesRef = ref<InstanceType<typeof SavedQueries> | null>(null)
 
 /** Put a saved query's state into the search bar and controls without searching. */
 function applySavedQuery(query: SavedQuery) {
@@ -2606,6 +2607,17 @@ function scrollSelectedRowIntoView() {
 }
 
 function onExploreKeydown(e: KeyboardEvent) {
+  // Cmd/Ctrl+S saves the current query, even while typing in the search bar.
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    if (document.querySelector('.detail-drawer-overlay')) return
+    savedQueriesRef.value?.openSave()
+    return
+  }
+
+  // A side drawer owns the keyboard (including Escape) while it is open.
+  if (document.querySelector('.detail-drawer-overlay')) return
+
   // Guard: skip if input/textarea/select is focused
   const tag = document.activeElement?.tagName
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
@@ -2754,6 +2766,12 @@ function onExploreKeydown(e: KeyboardEvent) {
   }
 
   // r — refresh / re-run search
+  if (e.key === 's' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault()
+    savedQueriesRef.value?.openSave()
+    return
+  }
+
   if (e.key === 'r') {
     e.preventDefault()
     search({ skipHistory: true })
@@ -4940,6 +4958,7 @@ watch(() => route.query.log_view, (id) => {
         </template>
         <template #saved>
           <SavedQueries
+            ref="savedQueriesRef"
             :current-filters="savedQueryFilters"
             :current-group-by="groupByField"
             :current-time-preset="selectedPreset"
@@ -6207,6 +6226,7 @@ watch(() => route.query.log_view, (id) => {
               <div class="kbd-section">
                 <div class="kbd-section-title">Actions</div>
                 <div class="kbd-row"><span class="kbd-keys"><kbd>r</kbd></span><span class="kbd-desc">Refresh / re-run search</span></div>
+                <div class="kbd-row"><span class="kbd-keys"><kbd>s</kbd> <kbd>⌘S</kbd></span><span class="kbd-desc">Save the current query</span></div>
                 <div class="kbd-row"><span class="kbd-keys"><kbd>w</kbd></span><span class="kbd-desc">Toggle word wrap (logs)</span></div>
                 <div class="kbd-row"><span class="kbd-keys"><kbd>?</kbd></span><span class="kbd-desc">Toggle this shortcut overlay</span></div>
               </div>

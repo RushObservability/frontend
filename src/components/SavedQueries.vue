@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import type { SavedQuery, QueryFilter } from '../types'
 import { useSavedQueries, type SavedQueryDraft } from '../composables/useSavedQueries'
 import { useTenant } from '../composables/useTenant'
-import SaveQueryDrawer, { type SaveQueryForm } from './SaveQueryDrawer.vue'
+import DetailDrawer from './DetailDrawer.vue'
+import SaveQueryForm, { type SaveQueryForm as SaveQueryFormValue } from './SaveQueryForm.vue'
 
 const props = defineProps<{
   currentFilters: QueryFilter[]
@@ -19,13 +20,23 @@ const emit = defineEmits<{
 
 const { queries, groups, error, serverMode, canShare, save, update, remove, groupName, isOwner, canModify } = useSavedQueries()
 const { activeTenant } = useTenant()
-const open = ref(false)
+
+// One drawer with two views: the saved query list, and the save/edit form.
 const drawerOpen = ref(false)
+const view = ref<'list' | 'form'>('list')
+// Whether the form was reached from the list, so Back and Save return there.
+const formFromList = ref(false)
 const editing = ref<SavedQuery | null>(null)
+const formKey = ref(0)
 const saving = ref(false)
-const drawerError = ref('')
+const formError = ref('')
+const filterText = ref('')
+const confirmingDelete = ref<string | null>(null)
 const copiedId = ref<string | null>(null)
+const justSaved = ref(false)
+const listEl = ref<HTMLElement | null>(null)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
+let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const current = computed<SavedQueryDraft>(() => ({
   name: '',
@@ -36,25 +47,60 @@ const current = computed<SavedQueryDraft>(() => ({
   viewMode: props.currentViewMode,
 }))
 
+const drawerLabel = computed(() => view.value === 'list' ? 'Saved queries' : editing.value ? 'Edit saved query' : 'Save query')
+
+const filtered = computed(() => {
+  const needle = filterText.value.trim().toLowerCase()
+  if (!needle) return queries.value
+  return queries.value.filter(q =>
+    q.name.toLowerCase().includes(needle)
+    || (q.description ?? '').toLowerCase().includes(needle)
+    || (q.ownerName ?? '').toLowerCase().includes(needle))
+})
+
 const sections = computed(() => {
-  if (!serverMode.value) return [{ key: 'local', title: '', items: queries.value }].filter(s => s.items.length)
+  if (!serverMode.value) return [{ key: 'local', title: 'Saved in this browser', items: filtered.value }].filter(s => s.items.length)
   return [
-    { key: 'tenant', title: 'Everyone in tenant', items: queries.value.filter(q => q.visibility === 'tenant') },
-    { key: 'group', title: 'Shared with groups', items: queries.value.filter(q => q.visibility === 'group') },
-    { key: 'mine', title: 'Only me', items: queries.value.filter(q => q.visibility === 'private') },
+    { key: 'tenant', title: `Everyone in ${activeTenant.value}`, items: filtered.value.filter(q => q.visibility === 'tenant') },
+    { key: 'group', title: 'Shared with my groups', items: filtered.value.filter(q => q.visibility === 'group') },
+    { key: 'mine', title: 'Only me', items: filtered.value.filter(q => q.visibility === 'private') },
   ].filter(s => s.items.length)
 })
 
-function openDrawer(query: SavedQuery | null) {
+function showForm(query: SavedQuery | null, fromList: boolean) {
   editing.value = query
-  drawerError.value = ''
+  formError.value = ''
+  formFromList.value = fromList
+  formKey.value++
+  view.value = 'form'
   drawerOpen.value = true
-  open.value = false
 }
 
-async function handleSubmit(form: SaveQueryForm) {
+/** Open straight on the save form for the query on screen. */
+function openSave() {
+  showForm(null, false)
+}
+
+/** Open on the saved query list. */
+function openList() {
+  confirmingDelete.value = null
+  view.value = 'list'
+  drawerOpen.value = true
+}
+
+function backToList() {
+  view.value = 'list'
+  nextTick(() => listEl.value?.focus())
+}
+
+function closeDrawer() {
+  if (saving.value) return
+  drawerOpen.value = false
+}
+
+async function handleSubmit(form: SaveQueryFormValue) {
   saving.value = true
-  drawerError.value = ''
+  formError.value = ''
   const changes = { name: form.name, description: form.description, visibility: form.visibility, groupId: form.groupId }
   const ok = editing.value
     ? await update(editing.value.id, changes)
@@ -63,15 +109,27 @@ async function handleSubmit(form: SaveQueryForm) {
   if (!ok) {
     // A failed request sets `error`; otherwise the query was refused locally
     // because it looked like it contained a credential.
-    drawerError.value = error.value || 'This query looks like it contains a credential, so it was not saved.'
+    formError.value = error.value || 'This query looks like it contains a credential, so it was not saved.'
     return
   }
-  drawerOpen.value = false
+  if (formFromList.value) {
+    backToList()
+  } else {
+    drawerOpen.value = false
+    justSaved.value = true
+    if (savedTimer) clearTimeout(savedTimer)
+    savedTimer = setTimeout(() => { justSaved.value = false }, 1800)
+  }
 }
 
 function handleLoad(query: SavedQuery) {
   emit('load', query)
-  open.value = false
+  drawerOpen.value = false
+}
+
+async function confirmDelete(id: string) {
+  confirmingDelete.value = null
+  await remove(id)
 }
 
 async function copyLink(q: SavedQuery) {
@@ -84,106 +142,118 @@ async function copyLink(q: SavedQuery) {
   } catch { /* clipboard unavailable */ }
 }
 
-function audience(q: SavedQuery): string {
-  if (q.visibility === 'group') return groupName(q.groupId)
-  return ''
-}
-
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
+
+defineExpose({ openSave, openList })
 </script>
 
 <template>
   <div class="sq">
-    <button class="sq-trigger" :aria-expanded="open" @click="open = !open">
-      <span>&#9733;</span> Saved
+    <button type="button" class="sq-button" :class="{ 'sq-button-done': justSaved }" title="Save the current query (s)" @click="openSave">
+      <span aria-hidden="true">{{ justSaved ? '✓' : '☆' }}</span>{{ justSaved ? 'Saved' : 'Save' }}
+    </button>
+    <button type="button" class="sq-button" :aria-expanded="drawerOpen && view === 'list'" @click="openList">
+      <span aria-hidden="true">&#9733;</span>Saved
       <span v-if="queries.length" class="sq-count mono">{{ queries.length }}</span>
     </button>
 
-    <div v-if="open" class="sq-dropdown">
-      <button type="button" class="sq-save-btn" @click="openDrawer(null)">
-        + Save current query
-      </button>
-      <div v-if="error && !drawerOpen" class="sq-error" role="alert">{{ error }}</div>
-
-      <template v-for="section in sections" :key="section.key">
-        <div class="sq-divider" />
-        <div v-if="section.title" class="sq-section text-muted">{{ section.title }}</div>
-        <div class="sq-list">
-          <div
-            v-for="q in section.items"
-            :key="q.id"
-            class="sq-item"
-            role="button"
-            tabindex="0"
-            :title="q.description || undefined"
-            @click="handleLoad(q)"
-            @keydown.enter="handleLoad(q)"
-          >
-            <div class="sq-item-name">
-              {{ q.name }}
-              <span v-if="audience(q)" class="sq-badge">{{ audience(q) }}</span>
-            </div>
-            <div v-if="q.description" class="sq-item-desc text-muted">{{ q.description }}</div>
-            <div class="sq-item-meta text-muted mono">
-              {{ q.filters.length }} filter{{ q.filters.length !== 1 ? 's' : '' }}
-              <span v-if="q.groupBy"> &middot; {{ q.groupBy }}</span>
-              <span v-if="q.visibility && q.visibility !== 'private' && !isOwner(q) && q.ownerName"> &middot; by {{ q.ownerName }}</span>
-              <span v-if="!q.visibility || q.visibility === 'private'"> &middot; {{ formatDate(q.createdAt) }}</span>
-            </div>
-            <div class="sq-item-actions" @click.stop @keydown.enter.stop>
-              <span v-if="copiedId === q.id" class="sq-copied" role="status">Copied</span>
-              <button
-                v-if="q.visibility"
-                type="button"
-                class="sq-action"
-                title="Copy link"
-                aria-label="Copy link to this query"
-                @click="copyLink(q)"
-              >&#128279;</button>
-              <button
-                v-if="canModify(q)"
-                type="button"
-                class="sq-action"
-                title="Edit title, description and sharing"
-                :aria-label="`Edit ${q.name}`"
-                @click="openDrawer(q)"
-              >&#9998;</button>
-              <button
-                v-if="canModify(q)"
-                type="button"
-                class="sq-action sq-action-del"
-                title="Delete"
-                :aria-label="`Delete ${q.name}`"
-                @click="remove(q.id)"
-              >&times;</button>
-            </div>
+    <DetailDrawer :open="drawerOpen" :label="drawerLabel" size="medium" @close="closeDrawer">
+      <div class="sq-drawer">
+        <header class="sq-heading">
+          <div class="sq-heading-title">
+            <button
+              v-if="view === 'form' && formFromList"
+              type="button"
+              class="sq-icon-btn"
+              aria-label="Back to saved queries"
+              :disabled="saving"
+              @click="backToList"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+            </button>
+            <h2>{{ drawerLabel }}</h2>
           </div>
+          <button type="button" class="sq-icon-btn" aria-label="Close" :disabled="saving" @click="closeDrawer">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </header>
+
+        <SaveQueryForm
+          v-if="view === 'form'"
+          :key="formKey"
+          :editing="editing"
+          :current="current"
+          :tenant="activeTenant"
+          :groups="groups"
+          :server-mode="serverMode"
+          :can-share="canShare"
+          :can-change-visibility="!editing || isOwner(editing)"
+          :saving="saving"
+          :error="formError"
+          @cancel="formFromList ? backToList() : closeDrawer()"
+          @submit="handleSubmit"
+        />
+
+        <div v-else ref="listEl" class="sq-list-view" tabindex="-1">
+          <div class="sq-list-toolbar">
+            <input
+              v-model="filterText"
+              type="search"
+              class="sq-filter"
+              placeholder="Filter by name, description or owner"
+              aria-label="Filter saved queries"
+            >
+            <button type="button" class="sq-btn sq-btn-primary" @click="showForm(null, true)">Save current query</button>
+          </div>
+          <p v-if="error" class="sq-error" role="alert">{{ error }}</p>
+
+          <div v-if="!queries.length" class="sq-empty">
+            <p>No saved queries yet.</p>
+            <p class="text-muted">Save the query you're looking at so you and your team can come back to it.</p>
+          </div>
+          <p v-else-if="!sections.length" class="sq-empty text-muted">No saved queries match “{{ filterText }}”.</p>
+
+          <section v-for="section in sections" :key="section.key" class="sq-section">
+            <h3>{{ section.title }} <span class="text-muted">{{ section.items.length }}</span></h3>
+            <ul>
+              <li v-for="q in section.items" :key="q.id" class="sq-item">
+                <button type="button" class="sq-item-main" :aria-label="`Run ${q.name}`" @click="handleLoad(q)">
+                  <span class="sq-item-name">
+                    {{ q.name }}
+                    <span v-if="q.visibility === 'group'" class="sq-badge">{{ groupName(q.groupId) }}</span>
+                  </span>
+                  <span v-if="q.description" class="sq-item-desc">{{ q.description }}</span>
+                  <span class="sq-item-meta mono">
+                    {{ q.filters.length }} filter{{ q.filters.length !== 1 ? 's' : '' }}<template v-if="q.search"> &middot; search</template><template v-if="q.groupBy"> &middot; by {{ q.groupBy }}</template>
+                    <template v-if="q.visibility && q.visibility !== 'private' && !isOwner(q) && q.ownerName"> &middot; {{ q.ownerName }}</template>
+                    &middot; {{ formatDate(q.createdAt) }}
+                  </span>
+                </button>
+                <div v-if="confirmingDelete === q.id" class="sq-confirm" role="alert">
+                  Delete?
+                  <button type="button" class="sq-btn" @click="confirmingDelete = null">Cancel</button>
+                  <button type="button" class="sq-btn sq-danger" @click="confirmDelete(q.id)">Delete</button>
+                </div>
+                <div v-else class="sq-item-actions">
+                  <span v-if="copiedId === q.id" class="sq-copied" role="status">Copied</span>
+                  <button v-if="q.visibility" type="button" class="sq-icon-btn" title="Copy link" :aria-label="`Copy link to ${q.name}`" @click="copyLink(q)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>
+                  </button>
+                  <button v-if="canModify(q)" type="button" class="sq-icon-btn" title="Edit title, description and sharing" :aria-label="`Edit ${q.name}`" @click="showForm(q, true)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                  </button>
+                  <button v-if="canModify(q)" type="button" class="sq-icon-btn sq-icon-danger" title="Delete" :aria-label="`Delete ${q.name}`" @click="confirmingDelete = q.id">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </section>
         </div>
-      </template>
-      <template v-if="!queries.length">
-        <div class="sq-divider" />
-        <div class="sq-empty text-muted">No saved queries</div>
-      </template>
-    </div>
-
-    <div v-if="open" class="sq-backdrop" @click="open = false" />
-
-    <SaveQueryDrawer
-      :open="drawerOpen"
-      :editing="editing"
-      :current="current"
-      :tenant="activeTenant"
-      :groups="groups"
-      :server-mode="serverMode"
-      :can-share="canShare"
-      :can-change-visibility="!editing || isOwner(editing)"
-      :saving="saving"
-      :error="drawerError"
-      @close="drawerOpen = false"
-      @submit="handleSubmit"
-    />
+      </div>
+    </DetailDrawer>
   </div>
 </template>
 
