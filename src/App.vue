@@ -33,7 +33,7 @@ const {
   refreshSession,
   logout,
 } = useAuth()
-const { tenants, activeTenantName, showSwitcher, loadTenants, setTenant, activeTenant } = useTenant()
+const { tenants, activeTenantName, showSwitcher, loadTenants, setTenant, activeTenant, linkedTenantNotice, dismissLinkedTenantNotice } = useTenant()
 const usesBareLayout = computed(() => route.name === 'login' || route.meta.bareLayout === true)
 const dashboardTv = computed(() => isDashboardTv(route))
 
@@ -303,6 +303,10 @@ watch(isAuthenticated, async (authed) => {
     <div v-if="!usesBareLayout" class="app-frame">
       <AppNavigation v-if="!dashboardTv" :groups="navigationGroups" :integrations="integrationNavigation" />
       <main id="main-content" class="main" tabindex="-1">
+        <div v-if="linkedTenantNotice" class="tenant-link-notice" role="alert">
+          <span>{{ linkedTenantNotice }}</span>
+          <button type="button" class="tenant-link-notice-dismiss" aria-label="Dismiss" @click="dismissLinkedTenantNotice">&times;</button>
+        </div>
         <router-view />
       </main>
     </div>
@@ -1137,6 +1141,30 @@ button {
   flex: 1 1 auto;
   min-height: calc(100vh - 74px);
 }
+
+.tenant-link-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: var(--r-sm);
+  background: var(--warning-dim);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.tenant-link-notice-dismiss {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+}
+.tenant-link-notice-dismiss:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 .main {
   flex: 1 1 auto;
