@@ -218,6 +218,8 @@ export interface QueryFilter {
   value: string
 }
 
+export type SavedQueryVisibility = 'private' | 'tenant'
+
 export interface SavedQuery {
   id: string
   name: string
@@ -225,7 +227,35 @@ export interface SavedQuery {
   groupBy: string
   timePreset: number
   createdAt: number
+  search?: string
+  viewMode?: 'spans' | 'logs'
+  /** Unset for queries kept only in this browser (signed-out use). */
+  visibility?: SavedQueryVisibility
+  ownerId?: string
+  ownerName?: string
 }
+
+/** Saved query as stored by the API (`/api/v1/saved-queries`). */
+export interface ApiSavedQuery {
+  id: string
+  tenant_id: string
+  name: string
+  description: string
+  visibility: SavedQueryVisibility
+  owner_id: string
+  owner_name: string
+  query: {
+    filters: { field: string; op: string; value: string }[]
+    search: string
+    group_by: string
+    time_preset: number
+    view_mode: '' | 'spans' | 'logs'
+  }
+  created_at: string
+  updated_at: string
+}
+
+export type SavedQueryInput = Pick<ApiSavedQuery, 'name' | 'visibility' | 'query'> & { description?: string }
 
 // ── Log types ──
 

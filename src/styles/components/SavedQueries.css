@@ -28,7 +28,7 @@
   top: calc(100% + 4px);
   right: 0;
   z-index: 50;
-  width: 280px;
+  width: 320px;
   background: var(--bg-raised);
   border: 1px solid var(--border-default);
   border-radius: var(--r-md);
@@ -37,6 +37,9 @@
 }
 
 .sq-save-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
   padding: 6px 8px;
   font-size: 10px;
   color: var(--text-secondary);
@@ -48,8 +51,23 @@
 
 .sq-save-form {
   display: flex;
+  flex-direction: column;
   gap: 4px;
   padding: 4px;
+}
+
+.sq-save-row {
+  display: flex;
+  gap: 4px;
+}
+
+.sq-share-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
 }
 
 .sq-save-input {
@@ -72,6 +90,21 @@
   border-radius: 2px;
 }
 .sq-save-confirm:hover { background: var(--amber-hover); }
+.sq-save-confirm:disabled { opacity: 0.5; cursor: default; }
+
+.sq-error {
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--error);
+}
+
+.sq-section {
+  padding: 4px 8px 2px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 
 .sq-divider {
   height: 1px;
@@ -83,7 +116,7 @@
 
 .sq-item {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto;
   grid-template-rows: auto auto;
   gap: 0 8px;
   padding: 6px 8px;
@@ -100,29 +133,43 @@
   font-weight: 500;
 }
 
-.sq-item-del {
-  grid-column: 3;
+.sq-item:focus-visible { outline: 1px solid var(--amber); outline-offset: -1px; }
+
+.sq-item-actions {
+  grid-column: 2;
   grid-row: 1 / 3;
   align-self: center;
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sq-action {
+  font-size: 12px;
+  line-height: 1;
   color: var(--text-muted);
   opacity: 0;
   transition: all 0.1s;
-  padding: 2px;
+  padding: 2px 3px;
+  border-radius: 2px;
 }
-.sq-item:hover .sq-item-del { opacity: 1; }
-.sq-item-del:hover { color: var(--error); }
+.sq-item:hover .sq-action,
+.sq-item:focus-within .sq-action,
+.sq-action:focus-visible,
+.sq-action-on { opacity: 1; }
+.sq-action:hover { color: var(--amber); background: var(--bg-surface); }
+.sq-action-on { color: var(--amber); }
+.sq-action-del { font-size: 14px; }
+.sq-action-del:hover { color: var(--error); }
+
+.sq-copied {
+  font-size: 10px;
+  color: var(--amber);
+}
 
 .sq-item-meta {
   grid-column: 1;
   grid-row: 2;
-  font-size: 10px;
-}
-
-.sq-item-date {
-  grid-column: 2;
-  grid-row: 1 / 3;
-  align-self: center;
   font-size: 10px;
 }
 
