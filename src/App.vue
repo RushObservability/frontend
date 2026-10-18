@@ -233,7 +233,18 @@ watch(isAuthenticated, async (authed) => {
     <a v-if="!usesBareLayout" class="skip-link" href="#main-content">Skip to main content</a>
     <header v-if="!usesBareLayout && !dashboardTv" class="topbar">
       <router-link to="/" class="logo" aria-label="Rush Observability home">
-        <span class="logo-icon" aria-hidden="true">R</span>
+        <!-- Inline so the inner cutout takes the header background in both themes. -->
+        <svg class="logo-icon" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="topbar-logo-grad" x1="32" y1="4" x2="32" y2="60" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#3b82f6" />
+              <stop offset="100%" stop-color="#2563eb" />
+            </linearGradient>
+          </defs>
+          <path d="M32 4 L58 32 L32 60 L6 32 Z" fill="url(#topbar-logo-grad)" />
+          <path class="logo-icon-cutout" d="M32 14 L48 32 L32 50 L16 32 Z" />
+          <polyline points="20,32 26,32 28,24 30,40 32,28 34,36 36,32 38,32 44,32" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+        </svg>
         <span class="logo-text">Rush Observability</span>
       </router-link>
       <button class="global-search" type="button" @click="paletteOpen = true" aria-label="Open global search">
@@ -976,19 +987,13 @@ button {
 }
 
 .logo-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   width: 30px;
   height: 30px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--text-inverse);
-  font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1;
+  flex: 0 0 auto;
 }
+
+.logo-icon-cutout { fill: var(--bg-surface); }
 
 .logo-text {
   font-family: var(--font-ui);
