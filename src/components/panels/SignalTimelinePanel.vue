@@ -355,12 +355,12 @@ function errorHeight(bucket: CountBucket): number {
               class="timeline-stack"
               :style="{ height: `${Math.max(1.5, (bucket.count / maxCount) * 100)}%` }"
             >
+              <span class="timeline-bar timeline-bar--normal" :style="{ flexBasis: `${okHeight(bucket)}%` }" />
               <span
                 v-if="bucket.error_count"
                 class="timeline-bar timeline-bar--error"
                 :style="{ flexBasis: `${errorHeight(bucket)}%` }"
               />
-              <span class="timeline-bar timeline-bar--normal" :style="{ flexBasis: `${okHeight(bucket)}%` }" />
             </div>
           </div>
 
@@ -520,10 +520,7 @@ function errorHeight(bucket: CountBucket): number {
 }
 
 .timeline-key--normal { background: var(--histogram-bar-hover, #3b82f6); }
-.timeline-key--error {
-  background: transparent;
-  border: 1px solid var(--error);
-}
+.timeline-key--error { background: var(--error); }
 
 .timeline-chart {
   display: grid;
@@ -610,12 +607,12 @@ function errorHeight(bucket: CountBucket): number {
 
 .timeline-bar { display: block; width: 100%; min-height: 0; }
 .timeline-bar--normal { background: var(--histogram-bar, #7fb3f5); }
+/* Errors sit at the base of each bar, so position as well as color
+   distinguishes them from normal traffic. */
 .timeline-bar--error {
   z-index: 1;
   min-height: 2px;
-  background: transparent;
-  border: 1px solid var(--error);
-  box-sizing: border-box;
+  background: var(--error);
 }
 
 .timeline-column--active .timeline-stack {
