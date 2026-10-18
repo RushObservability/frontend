@@ -13,6 +13,9 @@ import {
   isIdempotentAnalyticsPost,
 } from '../lib/analyticsRequestCache'
 import type {
+  ApiSavedQuery,
+  SavedQueryGroup,
+  SavedQueryInput,
   AuthUser,
   AuthSession,
   TraceResponse,
@@ -765,6 +768,28 @@ export function useApi() {
     // Ownership and tenant are resolved from the session and X-Rush-Tenant, not the payload.
     const definitions = views.map(({ id, name, filters, columns }) => ({ id, name, filters, columns }))
     return await request(`/settings/log-views?scope=${scope}`, { method: 'PUT', body: JSON.stringify({ views: definitions }) })
+  }
+
+  // ── Saved queries ──
+
+  async function listSavedQueries(): Promise<{ saved_queries: ApiSavedQuery[]; groups?: SavedQueryGroup[] }> {
+    return await request('/saved-queries')
+  }
+
+  async function getSavedQuery(id: string): Promise<ApiSavedQuery> {
+    return await request(`/saved-queries/${encodePathSegment(id)}`)
+  }
+
+  async function createSavedQuery(input: SavedQueryInput): Promise<ApiSavedQuery> {
+    return await request('/saved-queries', { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  async function updateSavedQuery(id: string, input: SavedQueryInput): Promise<ApiSavedQuery> {
+    return await request(`/saved-queries/${encodePathSegment(id)}`, { method: 'PUT', body: JSON.stringify(input) })
+  }
+
+  async function deleteSavedQuery(id: string): Promise<void> {
+    await request(`/saved-queries/${encodePathSegment(id)}`, { method: 'DELETE' })
   }
 
   async function queryLogs(req: {
@@ -1984,6 +2009,7 @@ export function useApi() {
     getAuditEvents, verifyAuditChain,
     getTrace, queryEvents, queryExplore, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceTimeBreakdown, serviceTimeBreakdownTimeseries, serviceLatencyHistogram, serviceEndpoints, serviceErrors, suggestValues, queryGroup,
     queryLogs, getLogDetail, getLogContext, countLogs, groupLogs, getLogHistogram, getLogViews, saveLogViews, suggestLogValues,
+    listSavedQueries, getSavedQuery, createSavedQuery, updateSavedQuery, deleteSavedQuery,
     listDashboards, getDashboard, createDashboard, updateDashboard, deleteDashboard,
     exportDashboard, importDashboard, listDashboardTemplates, createFromTemplate,
     createWidget, updateWidget, deleteWidget,
