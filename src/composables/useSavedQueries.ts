@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue'
-import type { ApiSavedQuery, SavedQuery, SavedQueryInput, SavedQueryVisibility } from '../types'
+import type { ApiSavedQuery, SavedQuery, SavedQueryGroup, SavedQueryInput, SavedQueryVisibility } from '../types'
 import { useApi } from './useApi'
 import { useAuth } from './useAuth'
 import { useTenant } from './useTenant'
@@ -13,8 +13,9 @@ const STORAGE_KEY = 'rush_saved_queries'
 const MAX_LOCAL_QUERIES = 20
 
 /** What the caller supplies when saving; identity and ownership come from the server. */
-export type SavedQueryDraft = Pick<SavedQuery, 'name' | 'filters' | 'groupBy' | 'timePreset' | 'search' | 'viewMode'> & {
+export type SavedQueryDraft = Pick<SavedQuery, 'name' | 'description' | 'filters' | 'groupBy' | 'timePreset' | 'search' | 'viewMode'> & {
   visibility?: SavedQueryVisibility
+  groupId?: string
 }
 
 // Browser-only entries are moved to the server once per storage key, even if
@@ -26,6 +27,7 @@ export function fromApiSavedQuery(q: ApiSavedQuery): SavedQuery {
   return {
     id: q.id,
     name: q.name,
+    description: q.description || undefined,
     filters: q.query.filters.map((f, i) => ({ id: `f-${i}`, field: f.field, op: f.op, value: f.value })),
     groupBy: q.query.group_by,
     timePreset: q.query.time_preset,
@@ -33,15 +35,19 @@ export function fromApiSavedQuery(q: ApiSavedQuery): SavedQuery {
     viewMode: q.query.view_mode || undefined,
     createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
     visibility: q.visibility,
+    groupId: q.group_id || undefined,
     ownerId: q.owner_id,
     ownerName: q.owner_name,
   }
 }
 
 export function toSavedQueryInput(draft: SavedQueryDraft): SavedQueryInput {
+  const visibility = draft.visibility ?? 'private'
   return {
     name: draft.name,
-    visibility: draft.visibility ?? 'private',
+    description: draft.description ?? '',
+    visibility,
+    group_id: visibility === 'group' ? draft.groupId ?? '' : '',
     query: {
       filters: draft.filters.map(({ field, op, value }) => ({ field, op, value: String(value) })),
       search: draft.search ?? '',
@@ -71,6 +77,7 @@ export function useSavedQueries() {
   // browsers and can be shared. Signed-out use (public tenants) stays local.
   const serverMode = computed(() => isAuthenticated.value)
   const queries = ref<SavedQuery[]>([])
+  const groups = ref<SavedQueryGroup[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
   let generation = 0
@@ -80,9 +87,10 @@ export function useSavedQueries() {
     const current = ++generation
     loading.value = true
     try {
-      const { saved_queries } = await api.listSavedQueries()
+      const { saved_queries, groups: memberOf } = await api.listSavedQueries()
       if (current === generation) {
         queries.value = saved_queries.map(fromApiSavedQuery)
+        groups.value = memberOf ?? []
         error.value = null
       }
     } catch (e) {
@@ -117,6 +125,7 @@ export function useSavedQueries() {
   watch([storageKey, serverMode], async ([key, server]) => {
     generation++
     error.value = null
+    groups.value = []
     if (!server) {
       queries.value = key ? loadFrom(key) : []
       return
@@ -136,6 +145,7 @@ export function useSavedQueries() {
     if (!serverMode.value) {
       const entry: SavedQuery = { ...draft, id: crypto.randomUUID(), createdAt: Date.now() }
       delete entry.visibility
+      delete entry.groupId
       queries.value = [entry, ...queries.value].slice(0, MAX_LOCAL_QUERIES)
       return true
     }
@@ -150,11 +160,18 @@ export function useSavedQueries() {
     }
   }
 
-  async function setVisibility(id: string, visibility: SavedQueryVisibility): Promise<boolean> {
+  /** Change a query's title, description or who can see it. */
+  async function update(id: string, changes: Partial<SavedQueryDraft>): Promise<boolean> {
     const existing = queries.value.find(q => q.id === id)
-    if (!existing || !serverMode.value) return false
+    if (!existing) return false
+    const next = { ...existing, ...changes }
+    if (containsSensitiveMaterial(next)) return false
+    if (!serverMode.value) {
+      queries.value = queries.value.map(q => (q.id === id ? { ...next, visibility: undefined, groupId: undefined } : q))
+      return true
+    }
     try {
-      const updated = fromApiSavedQuery(await api.updateSavedQuery(id, toSavedQueryInput({ ...existing, visibility })))
+      const updated = fromApiSavedQuery(await api.updateSavedQuery(id, toSavedQueryInput(next)))
       queries.value = queries.value.map(q => (q.id === id ? updated : q))
       error.value = null
       return true
@@ -190,6 +207,10 @@ export function useSavedQueries() {
 
   const canShare = computed(() => serverMode.value && canWrite.value)
 
+  function groupName(id: string | undefined): string {
+    return groups.value.find(g => g.id === id)?.name ?? 'a group'
+  }
+
   function isOwner(q: SavedQuery): boolean {
     return !q.visibility || q.ownerId === user.value?.id
   }
@@ -197,11 +218,11 @@ export function useSavedQueries() {
   // Mirrors the server's rules in handlers/saved_queries.rs.
   function canModify(q: SavedQuery): boolean {
     if (!q.visibility) return true
-    if (q.visibility === 'tenant') return isAdmin.value || (isOwner(q) && canWrite.value)
-    return isOwner(q)
+    if (q.visibility === 'private') return isOwner(q)
+    return isAdmin.value || (isOwner(q) && canWrite.value)
   }
 
-  return { queries, loading, error, serverMode, canShare, save, setVisibility, remove, refresh, fetchById, isOwner, canModify }
+  return { queries, groups, loading, error, serverMode, canShare, save, update, remove, refresh, fetchById, groupName, isOwner, canModify }
 }
 
 function loadFrom(key: string): SavedQuery[] {

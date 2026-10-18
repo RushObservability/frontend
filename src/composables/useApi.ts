@@ -14,6 +14,7 @@ import {
 } from '../lib/analyticsRequestCache'
 import type {
   ApiSavedQuery,
+  SavedQueryGroup,
   SavedQueryInput,
   AuthUser,
   AuthSession,
@@ -771,7 +772,7 @@ export function useApi() {
 
   // ── Saved queries ──
 
-  async function listSavedQueries(): Promise<{ saved_queries: ApiSavedQuery[] }> {
+  async function listSavedQueries(): Promise<{ saved_queries: ApiSavedQuery[]; groups?: SavedQueryGroup[] }> {
     return await request('/saved-queries')
   }
 

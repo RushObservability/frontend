@@ -24,7 +24,7 @@ vi.mock('./useAuth', () => ({
 function apiQuery(overrides: Partial<ApiSavedQuery> = {}): ApiSavedQuery {
   return {
     id: 'q1', tenant_id: 'default', name: 'Checkout errors', description: '',
-    visibility: 'tenant', owner_id: 'bob', owner_name: 'Bob',
+    visibility: 'tenant', group_id: '', owner_id: 'bob', owner_name: 'Bob',
     query: { filters: [{ field: 'service.name', op: '=', value: 'checkout' }], search: 'timeout', group_by: 'status', time_preset: 60, view_mode: 'logs' },
     created_at: '2026-10-18 12:00:00', updated_at: '2026-10-18 12:00:00',
     ...overrides,
@@ -42,7 +42,7 @@ beforeEach(() => {
   })
   user.value = { id: 'alice', role: 'write' }
   for (const fn of Object.values(api)) fn.mockReset()
-  api.listSavedQueries.mockResolvedValue({ saved_queries: [apiQuery()] })
+  api.listSavedQueries.mockResolvedValue({ saved_queries: [apiQuery()], groups: [{ id: 'sre', name: 'SRE' }] })
 })
 afterEach(() => vi.unstubAllGlobals())
 
@@ -65,9 +65,32 @@ it('maps API queries into the Explore shape and back', async () => {
     filters: [{ field: 'service.name', op: '=', value: 'checkout' }],
   })
   expect(toSavedQueryInput(query)).toEqual({
-    name: 'Checkout errors', visibility: 'tenant',
+    name: 'Checkout errors', description: '', visibility: 'tenant', group_id: '',
     query: apiQuery().query,
   })
+
+  const grouped = fromApiSavedQuery(apiQuery({ visibility: 'group', group_id: 'sre', description: 'Why: incident 42' }))
+  expect(grouped).toMatchObject({ visibility: 'group', groupId: 'sre', description: 'Why: incident 42' })
+  expect(toSavedQueryInput(grouped)).toMatchObject({ visibility: 'group', group_id: 'sre', description: 'Why: incident 42' })
+  // A group only travels with group visibility.
+  expect(toSavedQueryInput({ ...grouped, visibility: 'private' }).group_id).toBe('')
+})
+
+it('exposes the groups the user can share with and names them', async () => {
+  const { saved, scope } = await setup()
+  expect(saved.groups.value).toEqual([{ id: 'sre', name: 'SRE' }])
+  expect(saved.groupName('sre')).toBe('SRE')
+  expect(saved.groupName('unknown')).toBe('a group')
+  scope.stop()
+})
+
+it('updates title, description and sharing in place', async () => {
+  const { saved, scope } = await setup()
+  api.updateSavedQuery.mockResolvedValueOnce(apiQuery({ name: 'Renamed', description: 'Why', visibility: 'group', group_id: 'sre' }))
+  expect(await saved.update('q1', { name: 'Renamed', description: 'Why', visibility: 'group', groupId: 'sre' })).toBe(true)
+  expect(api.updateSavedQuery).toHaveBeenCalledWith('q1', expect.objectContaining({ name: 'Renamed', description: 'Why', visibility: 'group', group_id: 'sre' }))
+  expect(saved.queries.value[0]).toMatchObject({ name: 'Renamed', visibility: 'group', groupId: 'sre' })
+  scope.stop()
 })
 
 it('loads server queries and moves browser-only entries to the server as private', async () => {
@@ -124,10 +147,14 @@ it('mirrors the server permission rules', async () => {
   const sharedByBob = fromApiSavedQuery(apiQuery())
   const sharedByAlice = fromApiSavedQuery(apiQuery({ owner_id: 'alice' }))
   const privateByAlice = fromApiSavedQuery(apiQuery({ owner_id: 'alice', visibility: 'private' }))
+  const groupByBob = fromApiSavedQuery(apiQuery({ visibility: 'group', group_id: 'sre' }))
+  const groupByAlice = fromApiSavedQuery(apiQuery({ visibility: 'group', group_id: 'sre', owner_id: 'alice' }))
 
   expect(saved.canModify(sharedByBob)).toBe(false)
   expect(saved.canModify(sharedByAlice)).toBe(true)
   expect(saved.canModify(privateByAlice)).toBe(true)
+  expect(saved.canModify(groupByBob)).toBe(false)
+  expect(saved.canModify(groupByAlice)).toBe(true)
   expect(saved.canShare.value).toBe(true)
 
   user.value = { id: 'alice', role: 'viewer' }
@@ -139,6 +166,7 @@ it('mirrors the server permission rules', async () => {
   user.value = { id: 'carol', role: 'admin' }
   await nextTick()
   expect(saved.canModify(sharedByBob)).toBe(true)
+  expect(saved.canModify(groupByBob)).toBe(true)
   expect(saved.canModify(privateByAlice)).toBe(false)
   scope.stop()
 })

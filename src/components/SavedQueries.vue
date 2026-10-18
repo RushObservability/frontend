@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { SavedQuery, QueryFilter } from '../types'
-import { useSavedQueries } from '../composables/useSavedQueries'
+import { useSavedQueries, type SavedQueryDraft } from '../composables/useSavedQueries'
+import { useTenant } from '../composables/useTenant'
+import SaveQueryDrawer, { type SaveQueryForm } from './SaveQueryDrawer.vue'
 
 const props = defineProps<{
   currentFilters: QueryFilter[]
@@ -15,62 +17,61 @@ const emit = defineEmits<{
   load: [query: SavedQuery]
 }>()
 
-const { queries, error, serverMode, canShare, save, setVisibility, remove, isOwner, canModify } = useSavedQueries()
+const { queries, groups, error, serverMode, canShare, save, update, remove, groupName, isOwner, canModify } = useSavedQueries()
+const { activeTenant } = useTenant()
 const open = ref(false)
-const saveName = ref('')
-const shareOnSave = ref(false)
-const showSaveForm = ref(false)
+const drawerOpen = ref(false)
+const editing = ref<SavedQuery | null>(null)
 const saving = ref(false)
-const rejected = ref(false)
+const drawerError = ref('')
 const copiedId = ref<string | null>(null)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
-const shared = computed(() => queries.value.filter(q => q.visibility === 'tenant'))
-const mine = computed(() => queries.value.filter(q => q.visibility !== 'tenant'))
-const sections = computed(() => serverMode.value
-  ? [
-      { key: 'shared', title: 'Shared with team', items: shared.value },
-      { key: 'mine', title: 'My queries', items: mine.value },
-    ].filter(s => s.items.length)
-  : [{ key: 'local', title: '', items: queries.value }].filter(s => s.items.length))
+const current = computed<SavedQueryDraft>(() => ({
+  name: '',
+  filters: props.currentFilters,
+  groupBy: props.currentGroupBy,
+  timePreset: props.currentTimePreset,
+  search: props.currentSearch || undefined,
+  viewMode: props.currentViewMode,
+}))
 
-async function handleSave() {
-  const name = saveName.value.trim()
-  if (!name || saving.value) return
+const sections = computed(() => {
+  if (!serverMode.value) return [{ key: 'local', title: '', items: queries.value }].filter(s => s.items.length)
+  return [
+    { key: 'tenant', title: 'Everyone in tenant', items: queries.value.filter(q => q.visibility === 'tenant') },
+    { key: 'group', title: 'Shared with groups', items: queries.value.filter(q => q.visibility === 'group') },
+    { key: 'mine', title: 'Only me', items: queries.value.filter(q => q.visibility === 'private') },
+  ].filter(s => s.items.length)
+})
+
+function openDrawer(query: SavedQuery | null) {
+  editing.value = query
+  drawerError.value = ''
+  drawerOpen.value = true
+  open.value = false
+}
+
+async function handleSubmit(form: SaveQueryForm) {
   saving.value = true
-  rejected.value = false
-  const ok = await save({
-    name,
-    filters: props.currentFilters,
-    groupBy: props.currentGroupBy,
-    timePreset: props.currentTimePreset,
-    search: props.currentSearch || undefined,
-    viewMode: props.currentViewMode,
-    visibility: shareOnSave.value && canShare.value ? 'tenant' : 'private',
-  })
+  drawerError.value = ''
+  const changes = { name: form.name, description: form.description, visibility: form.visibility, groupId: form.groupId }
+  const ok = editing.value
+    ? await update(editing.value.id, changes)
+    : await save({ ...current.value, ...changes })
   saving.value = false
   if (!ok) {
-    // A failed request sets `error`; a local rejection means the query looked
-    // like it contained a credential.
-    rejected.value = !error.value
+    // A failed request sets `error`; otherwise the query was refused locally
+    // because it looked like it contained a credential.
+    drawerError.value = error.value || 'This query looks like it contains a credential, so it was not saved.'
     return
   }
-  saveName.value = ''
-  shareOnSave.value = false
-  showSaveForm.value = false
+  drawerOpen.value = false
 }
 
 function handleLoad(query: SavedQuery) {
   emit('load', query)
   open.value = false
-}
-
-function handleRemove(id: string) {
-  void remove(id)
-}
-
-function toggleShare(q: SavedQuery) {
-  void setVisibility(q.id, q.visibility === 'tenant' ? 'private' : 'tenant')
 }
 
 async function copyLink(q: SavedQuery) {
@@ -81,6 +82,11 @@ async function copyLink(q: SavedQuery) {
     if (copiedTimer) clearTimeout(copiedTimer)
     copiedTimer = setTimeout(() => { copiedId.value = null }, 1600)
   } catch { /* clipboard unavailable */ }
+}
+
+function audience(q: SavedQuery): string {
+  if (q.visibility === 'group') return groupName(q.groupId)
+  return ''
 }
 
 function formatDate(ts: number): string {
@@ -96,31 +102,10 @@ function formatDate(ts: number): string {
     </button>
 
     <div v-if="open" class="sq-dropdown">
-      <!-- Save current -->
-      <button v-if="!showSaveForm" type="button" class="sq-save-btn" @click="showSaveForm = true">
+      <button type="button" class="sq-save-btn" @click="openDrawer(null)">
         + Save current query
       </button>
-      <form v-else class="sq-save-form" @submit.prevent="handleSave">
-        <div class="sq-save-row">
-          <input
-            v-model="saveName"
-            class="sq-save-input"
-            placeholder="Query name..."
-            maxlength="120"
-            autofocus
-            @keydown.escape="showSaveForm = false"
-          />
-          <button type="submit" class="sq-save-confirm" :disabled="saving || !saveName.trim()">Save</button>
-        </div>
-        <label v-if="canShare" class="sq-share-opt">
-          <input v-model="shareOnSave" type="checkbox" />
-          Share with team
-        </label>
-      </form>
-      <div v-if="error" class="sq-error" role="alert">{{ error }}</div>
-      <div v-else-if="rejected" class="sq-error" role="alert">
-        This query looks like it contains a credential, so it was not saved.
-      </div>
+      <div v-if="error && !drawerOpen" class="sq-error" role="alert">{{ error }}</div>
 
       <template v-for="section in sections" :key="section.key">
         <div class="sq-divider" />
@@ -132,20 +117,25 @@ function formatDate(ts: number): string {
             class="sq-item"
             role="button"
             tabindex="0"
+            :title="q.description || undefined"
             @click="handleLoad(q)"
             @keydown.enter="handleLoad(q)"
           >
-            <div class="sq-item-name">{{ q.name }}</div>
+            <div class="sq-item-name">
+              {{ q.name }}
+              <span v-if="audience(q)" class="sq-badge">{{ audience(q) }}</span>
+            </div>
+            <div v-if="q.description" class="sq-item-desc text-muted">{{ q.description }}</div>
             <div class="sq-item-meta text-muted mono">
               {{ q.filters.length }} filter{{ q.filters.length !== 1 ? 's' : '' }}
               <span v-if="q.groupBy"> &middot; {{ q.groupBy }}</span>
-              <span v-if="q.visibility === 'tenant' && !isOwner(q) && q.ownerName"> &middot; by {{ q.ownerName }}</span>
-              <span v-if="q.visibility !== 'tenant'"> &middot; {{ formatDate(q.createdAt) }}</span>
+              <span v-if="q.visibility && q.visibility !== 'private' && !isOwner(q) && q.ownerName"> &middot; by {{ q.ownerName }}</span>
+              <span v-if="!q.visibility || q.visibility === 'private'"> &middot; {{ formatDate(q.createdAt) }}</span>
             </div>
             <div class="sq-item-actions" @click.stop @keydown.enter.stop>
               <span v-if="copiedId === q.id" class="sq-copied" role="status">Copied</span>
               <button
-                v-if="q.visibility === 'tenant' || (q.visibility && isOwner(q))"
+                v-if="q.visibility"
                 type="button"
                 class="sq-action"
                 title="Copy link"
@@ -153,22 +143,20 @@ function formatDate(ts: number): string {
                 @click="copyLink(q)"
               >&#128279;</button>
               <button
-                v-if="canShare && q.visibility && isOwner(q)"
+                v-if="canModify(q)"
                 type="button"
                 class="sq-action"
-                :class="{ 'sq-action-on': q.visibility === 'tenant' }"
-                :title="q.visibility === 'tenant' ? 'Stop sharing' : 'Share with team'"
-                :aria-label="q.visibility === 'tenant' ? 'Stop sharing with team' : 'Share with team'"
-                :aria-pressed="q.visibility === 'tenant'"
-                @click="toggleShare(q)"
-              >&#128101;</button>
+                title="Edit title, description and sharing"
+                :aria-label="`Edit ${q.name}`"
+                @click="openDrawer(q)"
+              >&#9998;</button>
               <button
                 v-if="canModify(q)"
                 type="button"
                 class="sq-action sq-action-del"
                 title="Delete"
                 :aria-label="`Delete ${q.name}`"
-                @click="handleRemove(q.id)"
+                @click="remove(q.id)"
               >&times;</button>
             </div>
           </div>
@@ -181,6 +169,21 @@ function formatDate(ts: number): string {
     </div>
 
     <div v-if="open" class="sq-backdrop" @click="open = false" />
+
+    <SaveQueryDrawer
+      :open="drawerOpen"
+      :editing="editing"
+      :current="current"
+      :tenant="activeTenant"
+      :groups="groups"
+      :server-mode="serverMode"
+      :can-share="canShare"
+      :can-change-visibility="!editing || isOwner(editing)"
+      :saving="saving"
+      :error="drawerError"
+      @close="drawerOpen = false"
+      @submit="handleSubmit"
+    />
   </div>
 </template>
 

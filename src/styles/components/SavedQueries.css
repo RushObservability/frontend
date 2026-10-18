@@ -49,48 +49,10 @@
 }
 .sq-save-btn:hover { background: var(--bg-hover); color: var(--amber); }
 
-.sq-save-form {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px;
-}
 
-.sq-save-row {
-  display: flex;
-  gap: 4px;
-}
 
-.sq-share-opt {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
 
-.sq-save-input {
-  flex: 1;
-  padding: 4px 8px;
-  font-size: 11px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 2px;
-  color: var(--text-primary);
-}
-.sq-save-input:focus { border-color: var(--amber); }
 
-.sq-save-confirm {
-  padding: 4px 10px;
-  font-size: 10px;
-  font-weight: 600;
-  background: var(--amber);
-  color: var(--text-inverse);
-  border-radius: 2px;
-}
-.sq-save-confirm:hover { background: var(--amber-hover); }
-.sq-save-confirm:disabled { opacity: 0.5; cursor: default; }
 
 .sq-error {
   padding: 4px 8px;
@@ -116,8 +78,7 @@
 
 .sq-item {
   display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-rows: auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0 8px;
   padding: 6px 8px;
   cursor: pointer;
@@ -128,6 +89,10 @@
 
 .sq-item-name {
   grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 11px;
   color: var(--text-primary);
   font-weight: 500;
@@ -135,9 +100,29 @@
 
 .sq-item:focus-visible { outline: 1px solid var(--amber); outline-offset: -1px; }
 
+.sq-badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  font-size: 9px;
+  font-weight: 500;
+  border-radius: 2px;
+  color: var(--amber);
+  background: var(--amber-dim);
+}
+
+.sq-item-desc {
+  grid-column: 1;
+  font-size: 10px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .sq-item-actions {
   grid-column: 2;
-  grid-row: 1 / 3;
+  grid-row: 1 / span 3;
   align-self: center;
   display: flex;
   align-items: center;
@@ -155,10 +140,8 @@
 }
 .sq-item:hover .sq-action,
 .sq-item:focus-within .sq-action,
-.sq-action:focus-visible,
-.sq-action-on { opacity: 1; }
+.sq-action:focus-visible { opacity: 1; }
 .sq-action:hover { color: var(--amber); background: var(--bg-surface); }
-.sq-action-on { color: var(--amber); }
 .sq-action-del { font-size: 14px; }
 .sq-action-del:hover { color: var(--error); }
 
@@ -169,7 +152,6 @@
 
 .sq-item-meta {
   grid-column: 1;
-  grid-row: 2;
   font-size: 10px;
 }
 

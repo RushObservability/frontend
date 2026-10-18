@@ -218,7 +218,7 @@ export interface QueryFilter {
   value: string
 }
 
-export type SavedQueryVisibility = 'private' | 'tenant'
+export type SavedQueryVisibility = 'private' | 'group' | 'tenant'
 
 export interface SavedQuery {
   id: string
@@ -229,8 +229,11 @@ export interface SavedQuery {
   createdAt: number
   search?: string
   viewMode?: 'spans' | 'logs'
+  description?: string
   /** Unset for queries kept only in this browser (signed-out use). */
   visibility?: SavedQueryVisibility
+  /** Set when `visibility` is `group`. */
+  groupId?: string
   ownerId?: string
   ownerName?: string
 }
@@ -242,6 +245,7 @@ export interface ApiSavedQuery {
   name: string
   description: string
   visibility: SavedQueryVisibility
+  group_id: string
   owner_id: string
   owner_name: string
   query: {
@@ -255,7 +259,13 @@ export interface ApiSavedQuery {
   updated_at: string
 }
 
-export type SavedQueryInput = Pick<ApiSavedQuery, 'name' | 'visibility' | 'query'> & { description?: string }
+export type SavedQueryInput = Pick<ApiSavedQuery, 'name' | 'description' | 'visibility' | 'group_id' | 'query'>
+
+/** A group the signed-in user belongs to, offered as a sharing target. */
+export interface SavedQueryGroup {
+  id: string
+  name: string
+}
 
 // ── Log types ──
 
