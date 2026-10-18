@@ -1,20 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 48" fill="none">
-  <!-- Rush Observability — Full Logo (mark + wordmark) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 179 64" fill="none">
+  <!-- Rush Observability, full logo for dark backgrounds. The wordmark is
+       outlined JetBrains Mono SemiBold, so it renders the same without the font. -->
   <defs>
-    <linearGradient id="dg" x1="24" y1="2" x2="24" y2="46" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#3b82f6"/>
-      <stop offset="100%" stop-color="#2563eb"/>
-    </linearGradient>
-    <linearGradient id="ig" x1="24" y1="12" x2="24" y2="36" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#0d0f17"/>
-      <stop offset="100%" stop-color="#08090f"/>
-    </linearGradient>
+    <mask id="rush-pulse-cut-full" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <rect width="64" height="64" fill="#fff"/>
+      <polyline points="4,32 20,32 25,20 31,44 36,26 40,37 43,32 60,32" fill="none" stroke="#000" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </mask>
   </defs>
-  <!-- Diamond mark -->
-  <path d="M24 2 L44 24 L24 46 L4 24 Z" fill="url(#dg)"/>
-  <path d="M24 10 L37 24 L24 38 L11 24 Z" fill="url(#ig)"/>
-  <polyline points="15,24 19,24 20.5,18 22,30 24,21 25.5,27 27,24 29,24 33,24"
-    stroke="#3b82f6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <!-- Wordmark "Rush" -->
-  <text x="56" y="31" font-family="'JetBrains Mono','SF Mono',monospace" font-size="22" font-weight="600" fill="#d5dae6" letter-spacing="-0.5">Rush</text>
+  <path d="M32 3 L59 32 L32 61 L5 32 Z" fill="#3B82F6" mask="url(#rush-pulse-cut-full)"/>
+  <path transform="translate(80 47.00) scale(0.041096)" fill="#E6EAF2" d="M80 0V-730H310Q381 -730 433.5 -703.5Q486 -677 515.0 -628.5Q544 -580 544 -515Q544 -442 507.0 -387.5Q470 -333 407 -311L554 0H423L292 -295H196V0ZM196 -398H310Q363 -398 394.5 -428.5Q426 -459 426 -512Q426 -565 394.5 -596.0Q363 -627 310 -627H196ZM879.0 10Q777.0 10 717.5 -48.0Q658.0 -106 658.0 -206V-550H775.0V-207Q775.0 -152 802.5 -122.0Q830.0 -92 879.0 -92Q929.0 -92 957.0 -122.0Q985.0 -152 985.0 -207V-550H1102.0V-206Q1102.0 -106 1041.5 -48.0Q981.0 10 879.0 10ZM1440.0 9Q1379.0 9 1333.5 -10.5Q1288.0 -30 1261.5 -64.5Q1235.0 -99 1232.0 -146H1349.0Q1352.0 -119 1376.5 -103.0Q1401.0 -87 1440.0 -87H1483.0Q1531.0 -87 1555.0 -106.0Q1579.0 -125 1579.0 -157Q1579.0 -187 1557.5 -204.5Q1536.0 -222 1493.0 -228L1423.0 -238Q1332.0 -252 1289.5 -288.5Q1247.0 -325 1247.0 -398Q1247.0 -475 1297.5 -517.0Q1348.0 -559 1447.0 -559H1485.0Q1574.0 -559 1627.0 -519.0Q1680.0 -479 1686.0 -411H1569.0Q1566.0 -434 1544.0 -448.5Q1522.0 -463 1485.0 -463H1447.0Q1402.0 -463 1381.5 -446.5Q1361.0 -430 1361.0 -398Q1361.0 -369 1379.0 -354.5Q1397.0 -340 1436.0 -334L1508.0 -324Q1603.0 -310 1648.0 -271.5Q1693.0 -233 1693.0 -159Q1693.0 -79 1640.5 -35.0Q1588.0 9 1483.0 9ZM1820.0 0V-730H1937.0V-550L1935.0 -445H1937.0Q1943.0 -493 1975.0 -523Q2014.0 -560 2082.0 -560Q2164.0 -560 2213.0 -507.0Q2262.0 -454 2262.0 -363V0H2145.0V-351Q2145.0 -403 2117.5 -431.5Q2090.0 -460 2042.0 -460Q1993.0 -460 1965.0 -430.0Q1937.0 -400 1937.0 -346V0Z"/>
 </svg>
