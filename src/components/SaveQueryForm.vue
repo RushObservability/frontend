@@ -37,6 +37,8 @@ const form = ref<SaveQueryForm>(q
   : { name: '', description: '', visibility: props.canShare ? 'tenant' : 'private', groupId: props.groups[0]?.id ?? '' })
 
 const preview = computed(() => props.editing ?? props.current)
+// Same `field=value` syntax as the Explore search bar.
+const filterText = computed(() => preview.value.filters.map(f => `${f.field}${f.op}${f.value}`).join('  '))
 const visibilityLocked = computed(() => !!props.editing && !props.canChangeVisibility)
 const noGroups = computed(() => !props.groups.length)
 // A query shared with a group the editor is not in keeps its group.
@@ -126,7 +128,7 @@ function submit() {
               <dt>Filters</dt>
               <dd>
                 <span v-if="!preview.filters.length" class="sqd-hint">None</span>
-                <code v-for="(f, i) in preview.filters" :key="i">{{ f.field }}{{ f.op }}{{ f.value }}</code>
+                <span v-else class="sqd-filters">{{ filterText }}</span>
               </dd>
               <template v-if="preview.search">
                 <dt>Search</dt>
@@ -177,6 +179,7 @@ legend { font-size: 13px; font-weight: 600; padding-right: 12px; color: var(--te
 .sqd-preview dl { display: grid; grid-template-columns: 90px 1fr; gap: 8px 12px; margin: 0; font-size: 12px; }
 .sqd-preview dt { color: var(--text-muted); }
 .sqd-preview dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.sqd-filters { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
 .sqd-preview code { padding: 1px 6px; border-radius: 3px; background: var(--bg-surface); border: 1px solid var(--border-subtle); font-size: 11px; overflow-wrap: anywhere; }
 .sqd-preview > p { margin: 12px 0 0; }
 .sqd-actions { display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; border-top: 1px solid var(--border-subtle); padding: var(--sp-4) var(--sp-5); }
