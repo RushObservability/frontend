@@ -6,7 +6,7 @@ import { useAuth } from '../composables/useAuth'
 import { useFeatures } from '../composables/useFeatures'
 import { useTenant } from '../composables/useTenant'
 import { apiBaseUrl } from '../config'
-import type { ApiKey, ApiKeyCreated, ServiceLink, CustomSkill, Group, Tenant, TenantRetention, TenantSignals, GlobalRetention, User, AuthSession, SsoProvider, IdpGroupMapping, SetupToken, NotificationChannel, MetricFirewallRule, MetricFirewallInput, QueryLimitsConfig, QueryWorkloadBudget, QueryWorkloadClass, LlmProvider, LlmProviderInput, LlmProviderKind, LlmModel, LlmModelInput } from '../types'
+import type { ApiKey, ApiKeyCreated, ApiKeyRole, ServiceLink, CustomSkill, Group, Tenant, TenantRetention, TenantSignals, GlobalRetention, User, AuthSession, SsoProvider, IdpGroupMapping, SetupToken, NotificationChannel, MetricFirewallRule, MetricFirewallInput, QueryLimitsConfig, QueryWorkloadBudget, QueryWorkloadClass, LlmProvider, LlmProviderInput, LlmProviderKind, LlmModel, LlmModelInput } from '../types'
 import SkillEditDialog from '../components/SkillEditDialog.vue'
 import ChannelForm from '../components/ChannelForm.vue'
 import AlertRoutingRules from '../components/AlertRoutingRules.vue'
@@ -1047,6 +1047,7 @@ const keys = ref<ApiKey[]>([])
 const showForm = ref(false)
 const keyName = ref('')
 const keyType = ref<'query' | 'ingest'>('ingest')
+const keyRole = ref<ApiKeyRole>('viewer')
 const keySignals = ref<string[]>(['logs', 'traces', 'metrics'])
 const keyRateLimit = ref(60000)
 const keySourceCidrs = ref('')
@@ -2638,6 +2639,7 @@ async function createKey() {
     const created = await api.createApiKey({
       name: keyName.value.trim(),
       key_type: keyType.value,
+      ...(keyType.value === 'query' ? { role: keyRole.value } : {}),
       signals: keyType.value === 'ingest' ? keySignals.value : [],
       rate_limit_per_minute: keyType.value === 'ingest' ? keyRateLimit.value : 0,
       source_cidrs: keyType.value === 'ingest'
@@ -2647,6 +2649,7 @@ async function createKey() {
     newlyCreated.value = created
     keyName.value = ''
     keyType.value = 'ingest'
+    keyRole.value = 'viewer'
     keySignals.value = ['logs', 'traces', 'metrics']
     keyRateLimit.value = 60000
     keySourceCidrs.value = ''
@@ -2831,9 +2834,24 @@ function formatDate(ts: string): string {
                 <span class="text-muted fs-11">Compared with the direct network peer. Include your ingress or proxy address range when applicable.</span>
               </div>
             </template>
-            <div v-else class="key-form-note key-form-wide">
-              Query keys can use telemetry read APIs for this tenant, but are rejected by every ingest endpoint.
-            </div>
+            <template v-else>
+              <div class="form-group-inline">
+                <label class="form-label" for="api-key-role">Role</label>
+                <select id="api-key-role" v-model="keyRole" class="form-input">
+                  <option value="viewer">Viewer</option>
+                  <option value="write">Write</option>
+                </select>
+              </div>
+              <div class="key-form-note key-form-wide">
+                <template v-if="keyRole === 'viewer'">
+                  Reads telemetry, monitors, SLOs, anomalies, dashboards and saved queries in this tenant. Cannot change anything.
+                </template>
+                <template v-else>
+                  Everything a viewer can do, plus muting and editing monitors, recording deploys, saving queries and editing dashboards in this tenant.
+                </template>
+                Query keys never have admin access and are rejected by every ingest endpoint.
+              </div>
+            </template>
             <div class="form-actions-inline key-form-actions">
               <button class="btn btn-secondary" @click="showForm = false; keyName = ''">Cancel</button>
               <button
@@ -2886,8 +2904,10 @@ function formatDate(ts: string): string {
             <div class="col-scope">
               <span class="key-type-badge" :class="`key-type-${k.key_type}`">{{ k.key_type }}</span>
               <span v-if="k.key_type === 'ingest'" class="text-muted fs-11">{{ k.signals.join(', ') }} · {{ k.rate_limit_per_minute }}/min</span>
-              <span v-else-if="k.key_type === 'legacy'" class="text-muted fs-11">query compatibility</span>
-              <span v-else class="text-muted fs-11">telemetry read APIs</span>
+              <template v-else>
+                <span class="key-role-badge" :class="{ 'key-role-write': k.role === 'write' }">{{ k.role === 'write' ? 'write' : 'viewer' }}</span>
+                <span class="text-muted fs-11">{{ k.role === 'write' ? 'read and change' : 'read only' }}{{ k.key_type === 'legacy' ? ' · query compatibility' : '' }}</span>
+              </template>
             </div>
             <div class="col-created mono text-secondary">{{ formatDate(k.created_at) }}</div>
             <div class="col-actions">

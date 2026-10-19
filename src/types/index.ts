@@ -218,6 +218,8 @@ export interface QueryFilter {
   value: string
 }
 
+export type SavedQueryVisibility = 'private' | 'group' | 'tenant'
+
 export interface SavedQuery {
   id: string
   name: string
@@ -225,6 +227,44 @@ export interface SavedQuery {
   groupBy: string
   timePreset: number
   createdAt: number
+  search?: string
+  viewMode?: 'spans' | 'logs'
+  description?: string
+  /** Unset for queries kept only in this browser (signed-out use). */
+  visibility?: SavedQueryVisibility
+  /** Set when `visibility` is `group`. */
+  groupId?: string
+  ownerId?: string
+  ownerName?: string
+}
+
+/** Saved query as stored by the API (`/api/v1/saved-queries`). */
+export interface ApiSavedQuery {
+  id: string
+  tenant_id: string
+  name: string
+  description: string
+  visibility: SavedQueryVisibility
+  group_id: string
+  owner_id: string
+  owner_name: string
+  query: {
+    filters: { field: string; op: string; value: string }[]
+    search: string
+    group_by: string
+    time_preset: number
+    view_mode: '' | 'spans' | 'logs'
+  }
+  created_at: string
+  updated_at: string
+}
+
+export type SavedQueryInput = Pick<ApiSavedQuery, 'name' | 'description' | 'visibility' | 'group_id' | 'query'>
+
+/** A group the signed-in user belongs to, offered as a sharing target. */
+export interface SavedQueryGroup {
+  id: string
+  name: string
 }
 
 // ── Log types ──
@@ -730,11 +770,15 @@ export interface ApiKey {
   prefix: string
   tenant_id: string
   key_type: 'query' | 'ingest' | 'legacy'
+  /** Query keys: `viewer` or `write`. Empty for ingest keys and on older APIs. */
+  role?: ApiKeyRole | ''
   signals: string[]
   rate_limit_per_minute: number
   source_cidrs: string[]
   created_at: string
 }
+
+export type ApiKeyRole = 'viewer' | 'write'
 
 export interface ApiKeyCreated extends ApiKey {
   key: string
