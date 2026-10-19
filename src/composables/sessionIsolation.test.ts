@@ -101,6 +101,28 @@ describe('session response isolation', () => {
     expect(auth.isAuthenticated.value).toBe(false)
   })
 
+  it('still aborts in-flight analytics when a heartbeat returns a different identity', async () => {
+    // A session policy with idle_timeout_seconds enables the POST /auth/activity heartbeat.
+    const session = { idle_timeout_seconds: 900, idle_remaining_seconds: 900, activity_interval_seconds: 300 }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ user: alice, session })))
+    const auth = (await import('./useAuth')).useAuth()
+    await auth.login('alice', 'test-password')
+    const api = (await import('./useApi')).useApi()
+    const activity = vi.fn(() => Promise.resolve(json({ user: bob, session })))
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/auth/activity')) return activity()
+      return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => {
+        const error = new Error('aborted'); error.name = 'AbortError'; reject(error)
+      }))
+    }))
+    const search = api.queryExplore({} as never, new AbortController().signal)
+    const rejected = expect(search).rejects.toMatchObject({ name: 'AbortError' })
+    await auth.refreshSession(true)
+    await rejected
+    expect(activity).toHaveBeenCalledTimes(1)
+    expect(auth.isAuthenticated.value).toBe(false)
+  })
+
   it('rejects an old refresh even when the same user signs in again', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ user: alice })))
     const auth = (await import('./useAuth')).useAuth()

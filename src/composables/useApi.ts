@@ -192,12 +192,24 @@ function requestHeaders(input: HeadersInit | undefined, tenant: string): Record<
   return headers
 }
 
-export async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
+export interface ApiRequestOptions extends RequestInit {
+  /**
+   * Whether a successful non-GET request clears (and aborts) this user's
+   * analytics requests. Defaults to true. Pass false only for POSTs that change
+   * no data, such as the session heartbeat or read-only lookups; otherwise
+   * their response aborts searches started by the same click. Identity and
+   * tenant changes invalidate separately and are unaffected by this flag.
+   */
+  invalidatesAnalytics?: boolean
+}
+
+export async function apiRequest<T>(path: string, requestOptions?: ApiRequestOptions): Promise<T> {
+  const { invalidatesAnalytics = true, ...options } = requestOptions ?? {}
   const generation = getSessionGeneration()
   const { activeTenant } = useTenant()
   const tenant = activeTenant.value
   const userId = storageUserId.value || 'anonymous'
-  const method = (options?.method || 'GET').toUpperCase()
+  const method = (options.method || 'GET').toUpperCase()
   const analytics = isIdempotentAnalyticsPost(path, method)
   const canDeduplicate = method === 'GET' && !options?.signal
   const requestKey = canDeduplicate ? `${generation}:${userId}:${tenant}:${path}` : undefined
@@ -265,7 +277,9 @@ export async function apiRequest<T>(path: string, options?: RequestInit): Promis
     assertCurrentSession(generation)
     // State mutations can affect more than their own resource, so clear every
     // analytics entry for this user after the server confirms success.
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) invalidateAnalyticsRequests({ userId })
+    if (invalidatesAnalytics && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      invalidateAnalyticsRequests({ userId })
+    }
     return parseResponseBody<T>(body)
   } finally {
     if (requestKey && inFlightReads.get(requestKey) === operation) {
@@ -393,7 +407,8 @@ export function useApi() {
   }
 
   async function suggestLogValues(data: { field: string; prefix: string; filters: Filter[]; time_range: { from: string; to: string } }): Promise<string[]> {
-    return await request('/logs/suggest', { method: 'POST', body: JSON.stringify(data) })
+    // Read-only autocomplete lookup; POST only because filters go in the body.
+    return await request('/logs/suggest', { method: 'POST', body: JSON.stringify(data), invalidatesAnalytics: false })
   }
 
   async function queryGroup(req: QueryRequest, workload?: 'dashboard', signal?: AbortSignal): Promise<GroupResponse> {
@@ -1447,7 +1462,9 @@ export function useApi() {
 
   async function getMe(activity = false): Promise<AuthResponse> {
     return activity
-      ? await request<AuthResponse>('/auth/activity', { method: 'POST' })
+      // The heartbeat only renews the session cookie. It must not abort the
+      // searches started by the same user interaction that triggered it.
+      ? await request<AuthResponse>('/auth/activity', { method: 'POST', invalidatesAnalytics: false })
       : await request<AuthResponse>('/auth/me')
   }
 
