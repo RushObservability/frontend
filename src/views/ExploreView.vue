@@ -2172,12 +2172,19 @@ async function runBubbleUp() {
   // Baseline is the full visible time range minus the selection
   const baseline = timeRange.value
 
+  // Scope both cohorts to the same query as the result set: structured filters
+  // AND the free-text search. getActiveFilters() re-parses the search box, so
+  // read searchText only after it runs.
+  const activeFilters = getActiveFilters()
+  const searchParam = searchText.value || undefined
+
   try {
     const result = await api.bubbleUp({
       selection: { from: sel.startTime, to: sel.endTime },
       baseline: { from: baseline.from, to: baseline.to },
       signal: viewMode.value === 'logs' ? 'logs' : 'spans',
-      filters: viewMode.value === 'logs' ? getLogFilters(getActiveFilters()) : getActiveFilters(),
+      filters: viewMode.value === 'logs' ? getLogFilters(activeFilters) : activeFilters,
+      search: searchParam,
       top_k: 10,
       selection_min_duration_ns: sel.minDurationNs,
       selection_max_duration_ns: sel.maxDurationNs,
