@@ -23,18 +23,19 @@ it.each(['history', 'saved'])('scrubs existing unsafe %s entries from disk and r
   const scope = effectScope()
   const { useQueryHistory } = await import('./useQueryHistory')
   const { useSavedQueries } = await import('./useSavedQueries')
-  scope.run(() => {
-    if (kind === 'history') {
+  if (kind === 'history') {
+    scope.run(() => {
       const history = useQueryHistory('test-history')
       expect(history.entries.value.map(entry => entry.id)).toEqual(['safe'])
       history.push(unsafe)
       expect(history.entries.value).toHaveLength(1)
-    } else {
-      const saved = useSavedQueries()
-      expect(saved.queries.value.map(entry => entry.id)).toEqual(['safe'])
-      expect(saved.save({ name: 'Unsafe', filters: [{ key: 'password', value: 'fake-secret', operator: '=' }] } as never)).toBe(false)
-    }
-  })
+    })
+  } else {
+    // Signed out, so saved queries stay in this browser.
+    const saved = scope.run(() => useSavedQueries())!
+    expect(saved.queries.value.map(entry => entry.id)).toEqual(['safe'])
+    expect(await saved.save({ name: 'Unsafe', filters: [{ key: 'password', value: 'fake-secret', operator: '=' }] } as never)).toBe(false)
+  }
   await nextTick()
   expect(storage.get(key)).not.toContain('fake-secret')
   expect(JSON.parse(storage.get(key)!)).toHaveLength(1)

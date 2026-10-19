@@ -7,6 +7,7 @@ import { relatedProfileLocation } from '../lib/profiles'
 import { useFeatures } from '../composables/useFeatures'
 import type { RushEvent, Filter, CountBucket, QueryFilter, GroupResult, SavedQuery, TimeseriesBucket, LatencyHeatmapCell, TraceResponse, SpanNode, LogRecord, BubbleUpResponse, ExploreCountKind, ExploreSearchRequest, ExploreSearchResponse } from '../types'
 import SavedQueries from '../components/SavedQueries.vue'
+import { fromApiSavedQuery } from '../composables/useSavedQueries'
 import QueryHistory from '../components/QueryHistory.vue'
 import { useQueryHistory } from '../composables/useQueryHistory'
 import type { HistoryEntry } from '../composables/useQueryHistory'
@@ -1384,14 +1385,46 @@ onUnmounted(() => {
 })
 
 
-function loadSavedQuery(query: SavedQuery) {
+const savedQueryError = ref('')
+const savedQueriesRef = ref<InstanceType<typeof SavedQueries> | null>(null)
+
+/** Put a saved query's state into the search bar and controls without searching. */
+function applySavedQuery(query: SavedQuery) {
+  savedQueryError.value = ''
   // Restore filters into the search bar (text-mode filter syntax: field=value).
-  searchInput.value = query.filters
+  const filterText = query.filters
     .map(f => `${f.field}${f.op}${f.value}`)
     .join(' ')
+  searchInput.value = [filterText, query.search ?? ''].filter(Boolean).join(' ')
   groupByField.value = query.groupBy
-  selectedPreset.value = query.timePreset
-  search()
+  // Zero means the query was saved without a time range; keep the current one.
+  if (query.timePreset > 0) {
+    customRange.value = null
+    selectedPreset.value = query.timePreset
+  }
+}
+
+function loadSavedQuery(query: SavedQuery) {
+  applySavedQuery(query)
+  if (query.viewMode && query.viewMode !== viewMode.value) {
+    setViewMode(query.viewMode)
+  } else {
+    search()
+  }
+}
+
+/** Resolve a `?saved=<id>` share link before the first search runs. */
+async function restoreSavedQueryLink() {
+  const id = route.query.saved
+  if (typeof id !== 'string' || !id) return
+  try {
+    const query = fromApiSavedQuery(await api.getSavedQuery(id))
+    applySavedQuery(query)
+    if (query.viewMode === 'logs') viewMode.value = 'logs'
+    else if (query.viewMode === 'spans') { viewMode.value = 'spans'; tracesOnly.value = false }
+  } catch {
+    savedQueryError.value = 'This saved query does not exist in the current tenant, or it is not shared with you.'
+  }
 }
 
 function loadHistoryEntry(entry: HistoryEntry<ExploreHistoryQuery>) {
@@ -2574,6 +2607,17 @@ function scrollSelectedRowIntoView() {
 }
 
 function onExploreKeydown(e: KeyboardEvent) {
+  // Cmd/Ctrl+S saves the current query, even while typing in the search bar.
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    if (document.querySelector('.detail-drawer-overlay')) return
+    savedQueriesRef.value?.openSave()
+    return
+  }
+
+  // A side drawer owns the keyboard (including Escape) while it is open.
+  if (document.querySelector('.detail-drawer-overlay')) return
+
   // Guard: skip if input/textarea/select is focused
   const tag = document.activeElement?.tagName
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
@@ -2722,6 +2766,12 @@ function onExploreKeydown(e: KeyboardEvent) {
   }
 
   // r — refresh / re-run search
+  if (e.key === 's' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault()
+    savedQueriesRef.value?.openSave()
+    return
+  }
+
   if (e.key === 'r') {
     e.preventDefault()
     search({ skipHistory: true })
@@ -4057,6 +4107,7 @@ async function doExport() {
 
 onMounted(async () => {
   restoreFromUrl()
+  await restoreSavedQueryLink()
   await loadLogViews()
   loadServices()
   api.getFeatures().then(f => { exportMaxRows.value = f.export_max_rows || 1000 }).catch(() => { /* keep default */ })
@@ -4907,9 +4958,12 @@ watch(() => route.query.log_view, (id) => {
         </template>
         <template #saved>
           <SavedQueries
+            ref="savedQueriesRef"
             :current-filters="savedQueryFilters"
             :current-group-by="groupByField"
             :current-time-preset="selectedPreset"
+            :current-search="searchText"
+            :current-view-mode="viewMode"
             @load="loadSavedQuery"
           />
         </template>
@@ -4933,6 +4987,7 @@ watch(() => route.query.log_view, (id) => {
       </ExploreSearchToolbar>
 
       <div v-if="viewMode === 'logs' && logViewsError" class="log-view-warning" role="alert">{{ logViewsError }} <button type="button" class="btn btn-sm" @click="loadLogViews().then(() => search({ skipHistory: true }))">Retry</button></div>
+      <div v-if="savedQueryError" class="log-view-warning" role="alert">{{ savedQueryError }} <button type="button" class="btn btn-sm" @click="savedQueryError = ''">Dismiss</button></div>
       <div v-if="viewMode === 'logs' && selectedLogView" class="log-view-context">
         <span>{{ selectedLogView.name }}</span>
         <span v-if="selectedLogView.filters.length" class="text-muted">Base filter</span>
@@ -6171,6 +6226,7 @@ watch(() => route.query.log_view, (id) => {
               <div class="kbd-section">
                 <div class="kbd-section-title">Actions</div>
                 <div class="kbd-row"><span class="kbd-keys"><kbd>r</kbd></span><span class="kbd-desc">Refresh / re-run search</span></div>
+                <div class="kbd-row"><span class="kbd-keys"><kbd>s</kbd> <kbd>⌘S</kbd></span><span class="kbd-desc">Save the current query</span></div>
                 <div class="kbd-row"><span class="kbd-keys"><kbd>w</kbd></span><span class="kbd-desc">Toggle word wrap (logs)</span></div>
                 <div class="kbd-row"><span class="kbd-keys"><kbd>?</kbd></span><span class="kbd-desc">Toggle this shortcut overlay</span></div>
               </div>

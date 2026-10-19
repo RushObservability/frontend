@@ -1,0 +1,193 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import type { SavedQuery, SavedQueryGroup, SavedQueryVisibility } from '../types'
+import type { SavedQueryDraft } from '../composables/useSavedQueries'
+
+export interface SaveQueryForm {
+  name: string
+  description: string
+  visibility: SavedQueryVisibility
+  groupId: string
+}
+
+const props = defineProps<{
+  /** The query being edited, or null to save the current Explore query. */
+  editing: SavedQuery | null
+  current: SavedQueryDraft
+  tenant: string
+  groups: SavedQueryGroup[]
+  serverMode: boolean
+  canShare: boolean
+  /** Whether the viewer may change who can see the query (owners only). */
+  canChangeVisibility: boolean
+  saving: boolean
+  error: string
+}>()
+
+const emit = defineEmits<{
+  cancel: []
+  submit: [form: SaveQueryForm]
+}>()
+
+// The parent remounts this form each time it opens, so this runs per open.
+// New saves default to the whole tenant when the user is allowed to share.
+const q = props.editing
+const form = ref<SaveQueryForm>(q
+  ? { name: q.name, description: q.description ?? '', visibility: q.visibility ?? 'private', groupId: q.groupId ?? props.groups[0]?.id ?? '' }
+  : { name: '', description: '', visibility: props.canShare ? 'tenant' : 'private', groupId: props.groups[0]?.id ?? '' })
+
+const preview = computed(() => props.editing ?? props.current)
+// Same `field=value` syntax as the Explore search bar.
+const filterText = computed(() => preview.value.filters.map(f => `${f.field}${f.op}${f.value}`).join('  '))
+const visibilityLocked = computed(() => !!props.editing && !props.canChangeVisibility)
+const noGroups = computed(() => !props.groups.length)
+// A query shared with a group the editor is not in keeps its group.
+const groupOptions = computed(() => {
+  const id = props.editing?.groupId
+  return id && !props.groups.some(g => g.id === id) ? [...props.groups, { id, name: 'Current group' }] : props.groups
+})
+const valid = computed(() => !!form.value.name.trim() && (form.value.visibility !== 'group' || !!form.value.groupId))
+
+function formatRange(minutes: number): string {
+  if (!minutes) return 'Viewer’s current range'
+  if (minutes % 1440 === 0) return `Last ${minutes / 1440}d`
+  if (minutes % 60 === 0) return `Last ${minutes / 60}h`
+  return `Last ${minutes}m`
+}
+
+function submit() {
+  if (!valid.value || props.saving) return
+  emit('submit', {
+    ...form.value,
+    name: form.value.name.trim(),
+    description: form.value.description.trim(),
+  })
+}
+</script>
+
+<template>
+  <form class="sqd" :aria-busy="saving" @submit.prevent="submit">
+      <div class="sqd-body">
+        <p v-if="error" class="sqd-error" role="alert">{{ error }}</p>
+        <fieldset class="sqd-fields" :disabled="saving">
+          <label class="sqd-field">
+            Title
+            <input v-model="form.name" maxlength="120" required placeholder="Checkout 5xx by region" autofocus>
+          </label>
+
+          <label class="sqd-field">
+            Description
+            <textarea
+              v-model="form.description"
+              maxlength="1000"
+              rows="4"
+              placeholder="Why is this query useful? e.g. “First place to look when checkout alerts fire. Narrows to the payment provider timeouts we saw in the Oct 12 incident.”"
+            />
+            <span class="sqd-hint">{{ form.description.length }}/1000 · Helps teammates know when to reach for it.</span>
+          </label>
+
+          <fieldset v-if="serverMode" class="sqd-visibility">
+            <legend>Who can see it</legend>
+            <p v-if="visibilityLocked" class="sqd-hint">Only the owner can change who can see this query.</p>
+            <label class="sqd-option" :class="{ 'sqd-option-disabled': !canShare || visibilityLocked }">
+              <input v-model="form.visibility" type="radio" value="tenant" :disabled="!canShare || visibilityLocked">
+              <span>
+                <strong>Everyone in {{ tenant }}</strong>
+                <span class="sqd-hint">Anyone with access to this tenant can find and run it.</span>
+              </span>
+            </label>
+            <label class="sqd-option" :class="{ 'sqd-option-disabled': !canShare || noGroups || visibilityLocked }">
+              <input v-model="form.visibility" type="radio" value="group" :disabled="!canShare || noGroups || visibilityLocked">
+              <span class="sqd-option-main">
+                <strong>A group</strong>
+                <span class="sqd-hint">{{ noGroups ? 'You are not in any groups yet.' : 'Only members of the group can see it.' }}</span>
+                <select
+                  v-if="form.visibility === 'group'"
+                  v-model="form.groupId"
+                  aria-label="Group to share with"
+                  :disabled="visibilityLocked"
+                >
+                  <option v-for="g in groupOptions" :key="g.id" :value="g.id">{{ g.name }}</option>
+                </select>
+              </span>
+            </label>
+            <label class="sqd-option" :class="{ 'sqd-option-disabled': visibilityLocked }">
+              <input v-model="form.visibility" type="radio" value="private" :disabled="visibilityLocked">
+              <span>
+                <strong>Only me</strong>
+                <span class="sqd-hint">Private to you, on any browser you sign in from.</span>
+              </span>
+            </label>
+            <p v-if="!canShare" class="sqd-hint">Sharing needs write access. Ask an admin if you need it.</p>
+          </fieldset>
+          <p v-else class="sqd-hint">You are signed out, so this query is saved in this browser only.</p>
+
+          <fieldset class="sqd-preview">
+            <legend>Query</legend>
+            <dl>
+              <dt>Filters</dt>
+              <dd>
+                <span v-if="!preview.filters.length" class="sqd-hint">None</span>
+                <span v-else class="sqd-filters">{{ filterText }}</span>
+              </dd>
+              <template v-if="preview.search">
+                <dt>Search</dt>
+                <dd><code>{{ preview.search }}</code></dd>
+              </template>
+              <template v-if="preview.groupBy">
+                <dt>Group by</dt>
+                <dd><code>{{ preview.groupBy }}</code></dd>
+              </template>
+              <dt>Time range</dt>
+              <dd>{{ formatRange(preview.timePreset) }}</dd>
+              <template v-if="preview.viewMode">
+                <dt>Type</dt>
+                <dd>{{ preview.viewMode === 'logs' ? 'Logs' : 'APM' }}</dd>
+              </template>
+            </dl>
+            <p v-if="editing" class="sqd-hint">To change the query itself, load it, adjust it in Explore, and save it again.</p>
+          </fieldset>
+        </fieldset>
+      </div>
+
+      <footer class="sqd-actions">
+        <button type="button" class="sqd-btn" :disabled="saving" @click="emit('cancel')">Cancel</button>
+        <button type="submit" class="sqd-btn sqd-btn-primary" :disabled="saving || !valid">
+          {{ saving ? 'Saving…' : editing ? 'Save changes' : 'Save query' }}
+        </button>
+      </footer>
+  </form>
+</template>
+
+<style scoped>
+.sqd { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.sqd-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-5); }
+.sqd-fields { display: flex; flex-direction: column; gap: var(--sp-5); padding: 0; margin: 0; border: 0; min-width: 0; }
+.sqd-field { display: grid; gap: 8px; font-size: 12px; }
+input, select, textarea { min-width: 0; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--text-primary); background: var(--bg-surface); font: inherit; font-size: 12px; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; }
+textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
+fieldset fieldset { min-width: 0; padding: 20px 0 0; margin: 0; border: 0; border-top: 1px solid var(--border-subtle); }
+legend { font-size: 13px; font-weight: 600; padding-right: 12px; color: var(--text-primary); }
+.sqd-visibility { display: flex; flex-direction: column; gap: 8px; }
+.sqd-option { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: var(--r-sm); cursor: pointer; font-size: 12px; }
+.sqd-option:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.sqd-option input[type="radio"] { margin-top: 2px; padding: 0; }
+.sqd-option > span { display: grid; gap: 2px; min-width: 0; }
+.sqd-option-main select { margin-top: 6px; max-width: 320px; }
+.sqd-option-disabled { opacity: .55; cursor: not-allowed; }
+.sqd-preview dl { display: grid; grid-template-columns: 90px 1fr; gap: 8px 12px; margin: 0; font-size: 12px; }
+.sqd-preview dt { color: var(--text-muted); }
+.sqd-preview dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.sqd-filters { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sqd-preview code { padding: 1px 6px; border-radius: 3px; background: var(--bg-surface); border: 1px solid var(--border-subtle); font-size: 11px; overflow-wrap: anywhere; }
+.sqd-preview > p { margin: 12px 0 0; }
+.sqd-actions { display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; border-top: 1px solid var(--border-subtle); padding: var(--sp-4) var(--sp-5); }
+.sqd-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 14px; border: 1px solid var(--border-default); border-radius: var(--r-sm); background: var(--bg-raised); color: var(--text-secondary); font-size: 12px; font-weight: 500; }
+.sqd-btn:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text-primary); }
+.sqd-btn:disabled { opacity: .4; cursor: not-allowed; }
+.sqd-btn-primary { background: var(--amber); border-color: var(--amber); color: var(--text-inverse); font-weight: 600; }
+.sqd-btn-primary:hover:not(:disabled) { background: var(--amber-hover); border-color: var(--amber-hover); color: var(--text-inverse); }
+.sqd-hint { color: var(--text-muted); font-size: 11px; }
+.sqd-error { color: var(--error); margin: 0 0 var(--sp-4); font-size: 12px; }
+</style>

@@ -404,6 +404,21 @@ select.form-input { padding-right: 32px; }
 .key-type-query {
   color: var(--ok);
 }
+.key-role-badge {
+  display: inline-flex;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.key-role-write {
+  border-color: var(--amber-dim);
+  color: var(--amber);
+}
 .col-name {
   font-weight: 500;
   overflow: hidden;
