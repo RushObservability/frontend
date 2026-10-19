@@ -31,6 +31,7 @@ import { usePollingTask, type PollingRunContext } from '../composables/usePollin
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import type { ContextMenuEntry } from '../types/contextMenu'
 import { isErrorSpan, isErrorStatus } from '../lib/spanStatus'
+import { logStatusFacetFilters } from '../lib/logStatusFacets'
 
 interface ExploreHistoryQuery {
   logViewId?: string
@@ -807,7 +808,8 @@ function getQuickFilters(): Filter[] {
   if (quickService.value) qf.push({ field: 'service_name', op: '=', value: quickService.value })
   // Span-only sidebar controls must not shadow custom log attributes such as
   // "status". Explicit search and view filters still accept those field names.
-  if (viewMode.value === 'logs') return qf
+  // The Status facet filters logs by severity instead.
+  if (viewMode.value === 'logs') return [...qf, ...logStatusFacetFilters(quickStatusRange.value, quickErrorOnly.value)]
   if (quickMethod.value) qf.push({ field: 'http_method', op: '=', value: quickMethod.value })
   if (quickErrorOnly.value) qf.push({ field: 'status', op: '=', value: 'ERROR' })
   if (quickStatusRange.value === '2xx') {
