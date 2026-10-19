@@ -1173,11 +1173,8 @@
 .et-col-svc    { width: 110px; }
 .et-col-method { width: 56px; }
 .et-col-path   { flex: 1; min-width: 0; }
-.et-col-status { width: 48px; text-align: center; position: relative; }
-.et-trace-error {
-  position: absolute; top: 50%; right: -4px; transform: translateY(-50%);
-  width: 7px; height: 7px; border-radius: 50%; background: var(--error);
-}
+.et-col-status { width: 48px; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.et-trace-error { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--error); }
 .et-col-dur    { width: 130px; display: flex; align-items: center; gap: var(--sp-1); }
 .et-col-trace  { width: 68px; text-align: right; }
 

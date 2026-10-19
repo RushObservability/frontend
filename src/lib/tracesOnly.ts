@@ -36,6 +36,13 @@ export function visibleFilters<T extends Filter>(filters: T[]): T[] {
  * downstream span in the same trace failed. Mark those rows; a root that failed
  * itself already shows a red status.
  */
-export function failedInsideTrace(row: { trace_error?: boolean; status?: string | null; http_status_code?: number | null }): boolean {
+type ResultRow = { trace_error?: boolean; status?: string | null; http_status_code?: number | null }
+
+export function failedInsideTrace(row: ResultRow): boolean {
   return Boolean(row.trace_error) && !isErrorSpan(row)
+}
+
+/** A result row counts as an error when it failed itself or, in Traces only, its trace did. */
+export function rowHasError(row: ResultRow): boolean {
+  return isErrorSpan(row) || Boolean(row.trace_error)
 }

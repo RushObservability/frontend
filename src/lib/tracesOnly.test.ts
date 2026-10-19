@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error The app tsconfig intentionally excludes Node built-in declarations.
 import { readFileSync } from 'fs'
-import { failedInsideTrace, spanModeFilters, spanModeHint, visibleFilters } from './tracesOnly'
+import { failedInsideTrace, rowHasError, spanModeFilters, spanModeHint, visibleFilters } from './tracesOnly'
 
 const view = readFileSync(new URL('../views/ExploreView.vue', import.meta.url), 'utf8')
 const state = readFileSync(new URL('../components/ExploreResultsState.vue', import.meta.url), 'utf8')
@@ -50,6 +50,13 @@ describe('traces-only rows and chips', () => {
   it('leaves a failed root to its own red status', () => {
     expect(failedInsideTrace({ trace_error: true, status: 'STATUS_CODE_OK', http_status_code: 503 })).toBe(false)
     expect(failedInsideTrace({ trace_error: true, status: 'STATUS_CODE_ERROR', http_status_code: 0 })).toBe(false)
+  })
+
+  it('counts a row as an error when it or its trace failed', () => {
+    expect(rowHasError({ trace_error: true, status: 'STATUS_CODE_OK', http_status_code: 201 })).toBe(true)
+    expect(rowHasError({ status: 'STATUS_CODE_OK', http_status_code: 502 })).toBe(true)
+    expect(rowHasError({ trace_error: false, status: 'STATUS_CODE_OK', http_status_code: 200 })).toBe(false)
+    expect(view).not.toMatch(/isErrorSpan\(r(ow)?\)/)
   })
 
   it('renders the marker in the result row status cell', () => {
