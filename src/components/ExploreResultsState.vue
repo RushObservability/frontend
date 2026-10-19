@@ -7,6 +7,8 @@ const props = defineProps<{
   loading: boolean
   error?: string | null
   hasResults: boolean
+  /** Replaces the generic "no results" advice, e.g. when span mode would match. */
+  hint?: string | null
 }>()
 
 const title = computed(() => {
@@ -18,6 +20,7 @@ const title = computed(() => {
 const description = computed(() => {
   if (props.loading) return 'Rush is querying the selected time range.'
   if (props.error) return props.error
+  if (props.hint) return props.hint
   return props.mode === 'logs'
     ? 'Try a wider time range, remove a filter, or search for a different term.'
     : 'Try a wider time range or remove one of the active filters.'
