@@ -66,6 +66,8 @@ export interface RushEvent {
   event_attributes: string[]
   link_trace_ids: string[]
   link_span_ids: string[]
+  /** Explore Traces only rows: whether any span in this row's trace is an error. */
+  trace_error?: boolean
 }
 
 export interface SpanNode {

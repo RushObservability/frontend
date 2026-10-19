@@ -34,7 +34,7 @@ import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import type { ContextMenuEntry } from '../types/contextMenu'
 import { isErrorSpan, isErrorStatus } from '../lib/spanStatus'
 import { logStatusFacetFilters } from '../lib/logStatusFacets'
-import { spanModeFilters, spanModeHint } from '../lib/tracesOnly'
+import { failedInsideTrace, spanModeFilters, spanModeHint, visibleFilters } from '../lib/tracesOnly'
 
 interface ExploreHistoryQuery {
   logViewId?: string
@@ -3463,7 +3463,7 @@ const activeFilterChips = computed(() => {
         value: f.value,
       }))
   }
-  return filters.value.map((f, i) => ({
+  return visibleFilters(filters.value).map((f, i) => ({
     id: `filter-${i}`,
     label: `${f.field} ${f.op} ${f.value}`,
     field: f.field,
@@ -5644,6 +5644,12 @@ watch(() => route.query.log_view, (id) => {
                   @click.stop="row.http_status_code ? addFilter('http_status_code', row.http_status_code) : undefined"
                   @contextmenu="row.http_status_code ? openContextMenu($event, 'http_status_code', row.http_status_code, { traceId: row.trace_id, source: 'span' }) : undefined"
                 >{{ row.http_status_code || '\u2014' }}</span>
+                <span
+                  v-if="failedInsideTrace(row)"
+                  class="et-trace-error"
+                  title="This request returned OK, but a span later in its trace failed"
+                  aria-label="Error inside this trace"
+                />
               </div>
               <div class="et-col et-col-dur">
                 <div class="et-dur-bar">
