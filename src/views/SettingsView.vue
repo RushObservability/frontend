@@ -1048,6 +1048,7 @@ const showForm = ref(false)
 const keyName = ref('')
 const keyType = ref<'query' | 'ingest'>('ingest')
 const keyRole = ref<ApiKeyRole>('viewer')
+const keyAgent = ref(false)
 const keySignals = ref<string[]>(['logs', 'traces', 'metrics'])
 const keyRateLimit = ref(60000)
 const keySourceCidrs = ref('')
@@ -2639,7 +2640,7 @@ async function createKey() {
     const created = await api.createApiKey({
       name: keyName.value.trim(),
       key_type: keyType.value,
-      ...(keyType.value === 'query' ? { role: keyRole.value } : {}),
+      ...(keyType.value === 'query' ? { role: keyRole.value, agent: keyAgent.value } : {}),
       signals: keyType.value === 'ingest' ? keySignals.value : [],
       rate_limit_per_minute: keyType.value === 'ingest' ? keyRateLimit.value : 0,
       source_cidrs: keyType.value === 'ingest'
@@ -2650,6 +2651,7 @@ async function createKey() {
     keyName.value = ''
     keyType.value = 'ingest'
     keyRole.value = 'viewer'
+    keyAgent.value = false
     keySignals.value = ['logs', 'traces', 'metrics']
     keyRateLimit.value = 60000
     keySourceCidrs.value = ''
@@ -2851,6 +2853,16 @@ function formatDate(ts: string): string {
                 </template>
                 Query keys never have admin access and are rejected by every ingest endpoint.
               </div>
+              <div class="form-group-inline key-form-wide">
+                <label class="checkbox-label" for="api-key-agent">
+                  <input id="api-key-agent" v-model="keyAgent" type="checkbox" />
+                  <span>Allow SRE agent and natural-language search</span>
+                </label>
+                <span class="text-muted fs-11">
+                  Lets this key start and read SRE agent investigations and turn plain-language questions into queries. Uses LLM budget.
+                  Investigations it starts can use telemetry tools only, never source code or cluster access.
+                </span>
+              </div>
             </template>
             <div class="form-actions-inline key-form-actions">
               <button class="btn btn-secondary" @click="showForm = false; keyName = ''">Cancel</button>
@@ -2906,6 +2918,7 @@ function formatDate(ts: string): string {
               <span v-if="k.key_type === 'ingest'" class="text-muted fs-11">{{ k.signals.join(', ') }} · {{ k.rate_limit_per_minute }}/min</span>
               <template v-else>
                 <span class="key-role-badge" :class="{ 'key-role-write': k.role === 'write' }">{{ k.role === 'write' ? 'write' : 'viewer' }}</span>
+                <span v-if="k.agent" class="key-role-badge key-role-agent" title="Can use the SRE agent and natural-language search">agent</span>
                 <span class="text-muted fs-11">{{ k.role === 'write' ? 'read and change' : 'read only' }}{{ k.key_type === 'legacy' ? ' · query compatibility' : '' }}</span>
               </template>
             </div>

@@ -772,6 +772,8 @@ export interface ApiKey {
   key_type: 'query' | 'ingest' | 'legacy'
   /** Query keys: `viewer` or `write`. Empty for ingest keys and on older APIs. */
   role?: ApiKeyRole | ''
+  /** Query keys: may use the SRE agent and natural-language search. Absent on older APIs. */
+  agent?: boolean
   signals: string[]
   rate_limit_per_minute: number
   source_cidrs: string[]

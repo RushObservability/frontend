@@ -725,6 +725,8 @@ export function useApi() {
     key_type: 'query' | 'ingest'
     /** Query keys only. */
     role?: ApiKeyRole
+    /** Query keys only: allow SRE-agent investigations and natural-language search. */
+    agent?: boolean
     signals: string[]
     rate_limit_per_minute: number
     source_cidrs: string[]

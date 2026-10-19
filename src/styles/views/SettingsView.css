@@ -419,6 +419,10 @@ select.form-input { padding-right: 32px; }
   border-color: var(--amber-dim);
   color: var(--amber);
 }
+.key-role-agent {
+  border-color: var(--ok-dim);
+  color: var(--ok);
+}
 .col-name {
   font-weight: 500;
   overflow: hidden;

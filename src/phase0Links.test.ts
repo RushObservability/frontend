@@ -31,10 +31,22 @@ describe('tenant links', () => {
 describe('API key roles', () => {
   it('lets admins pick viewer or write for query keys only', () => {
     expect(settingsSource).toContain('<select id="api-key-role" v-model="keyRole" class="form-input">')
-    expect(settingsSource).toContain("...(keyType.value === 'query' ? { role: keyRole.value } : {}),")
+    expect(settingsSource).toContain("...(keyType.value === 'query' ? { role: keyRole.value, agent: keyAgent.value } : {}),")
   })
 
   it('shows each query key role in the list', () => {
     expect(settingsSource).toContain("{{ k.role === 'write' ? 'write' : 'viewer' }}")
+  })
+
+  it('offers agent access on query keys only, off by default, and shows it in the list', () => {
+    expect(settingsSource).toContain('const keyAgent = ref(false)')
+    expect(settingsSource).toContain('<input id="api-key-agent" v-model="keyAgent" type="checkbox" />')
+    // The checkbox lives in the query-key branch of the form, after the role picker.
+    const roleSelect = settingsSource.indexOf('id="api-key-role"')
+    const agentBox = settingsSource.indexOf('id="api-key-agent"')
+    const ingestSignals = settingsSource.indexOf("v-for=\"signal in ['logs'")
+    expect(agentBox).toBeGreaterThan(roleSelect)
+    expect(ingestSignals).toBeLessThan(roleSelect)
+    expect(settingsSource).toContain('<span v-if="k.agent" class="key-role-badge key-role-agent"')
   })
 })
