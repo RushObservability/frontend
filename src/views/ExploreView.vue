@@ -33,6 +33,7 @@ import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import type { ContextMenuEntry } from '../types/contextMenu'
 import { isErrorSpan, isErrorStatus } from '../lib/spanStatus'
 import { logStatusFacetFilters } from '../lib/logStatusFacets'
+import { spanModeFilters, spanModeHint } from '../lib/tracesOnly'
 
 interface ExploreHistoryQuery {
   logViewId?: string
@@ -176,6 +177,9 @@ const viewMode = ref<'spans' | 'logs'>('spans')
 // Start Explore at the request/trace level. Users can still switch to all
 // spans with the sidebar toggle (or the "a" keyboard shortcut).
 const tracesOnly = ref(true)
+// Set when "Traces only" finds no root span but the same search in span mode does.
+const spanModeFallback = ref<{ count: number; capped: boolean } | null>(null)
+let spanModeFallbackSeq = 0
 const resultCountLabel = computed(() => viewMode.value === 'logs' ? 'events' : tracesOnly.value ? 'traces' : 'spans')
 const apmResultMode = ref<'individual' | 'groups'>('individual')
 const otelLogs = ref<LogRecord[]>([])
@@ -1183,6 +1187,23 @@ function getActiveFilters(): Filter[] {
   return all
 }
 
+// "Traces only" lists root spans. When none match, count the same search in span
+// mode so the empty state can say matching spans exist (e.g. a service that only
+// appears as a child span) instead of implying there is no data.
+async function checkSpanModeFallback(activeFilters: Filter[], search: string | undefined) {
+  const filters = spanModeFilters(activeFilters)
+  if (!filters) return
+  const seq = ++spanModeFallbackSeq
+  try {
+    const page = await api.queryEvents({ time_range: timeRange.value, filters, search, limit: 1, columns: 'list' })
+    if (seq !== spanModeFallbackSeq || !tracesOnly.value || results.value.length) return
+    if (page.total > 0) spanModeFallback.value = { count: page.total, capped: page.total >= 10_000 }
+  } catch {
+    // Best effort: the empty state stays as is and no error banner is shown.
+    if (seq === spanModeFallbackSeq) api.error.value = null
+  }
+}
+
 async function search(opts?: { skipHistory?: boolean }) {
   if (logViewsLoading.value) return
   if (viewMode.value === 'logs' && logViewUnavailable.value) {
@@ -1199,6 +1220,8 @@ async function search(opts?: { skipHistory?: boolean }) {
   activeSearchController = controller
   refreshNow() // anchor the relative window to current time for this search
   selectedRowIndex.value = -1
+  spanModeFallback.value = null
+  spanModeFallbackSeq++
   searching.value = true
   const searchStart = performance.now()
   queryDurationMs.value = null
@@ -1268,6 +1291,7 @@ async function search(opts?: { skipHistory?: boolean }) {
     applyExploreRowsResponse(response, isLogs)
     queryDurationMs.value = Math.round(performance.now() - searchStart)
     searching.value = false
+    if (!isLogs && !results.value.length) void checkSpanModeFallback(activeFilters, searchParam)
 
     const [summaryResult, latencyResult] = await Promise.all([summaryPromise, latencyPromise])
     if (controller.signal.aborted || activeSearchController !== controller) return
@@ -5462,7 +5486,12 @@ watch(() => route.query.log_view, (id) => {
           :loading="searching"
           :error="viewMode !== 'logs' ? api.error.value : null"
           :has-results="viewMode === 'logs' ? logEntries.length > 0 : results.length > 0"
-        />
+          :hint="spanModeFallback ? spanModeHint(spanModeFallback.count, spanModeFallback.capped) : null"
+        >
+          <template v-if="spanModeFallback" #action>
+            <button type="button" class="btn btn-sm" @click="tracesOnly = false">Show matching spans</button>
+          </template>
+        </ExploreResultsState>
 
         <!-- ═══ Trace Groups (root request shapes) ═══ -->
         <div v-else-if="viewMode === 'spans' && apmResultMode === 'groups'" class="trace-groups card fade-in">
