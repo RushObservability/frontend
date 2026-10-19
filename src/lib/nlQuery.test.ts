@@ -27,6 +27,44 @@ describe('parseNaturalQuery — logs mode', () => {
       .toContainEqual({ field: 'level', op: '=', value: 'debug' })
   })
 
+  it('never emits a status_code filter (logs have no such column)', () => {
+    for (const q of ['5xx', '4xx', 'client errors', 'server error', '503', '503 errors from checkout',
+      '5xx from checkout in production', 'show me 404 logs']) {
+      expect(parseNaturalQuery(q, 'logs').chips.map(c => c.field), q)
+        .not.toContain('status_code')
+    }
+  })
+
+  it('maps 5xx to error severity, like the Logs Status facet', () => {
+    const r = parseNaturalQuery('5xx from checkout', 'logs')
+    expect(r.chips).toEqual([
+      { field: 'service_name', op: '=', value: 'checkout' },
+      { field: 'level', op: '=', value: 'error' },
+    ])
+    expect(r.search).toBe('')
+  })
+
+  it('maps client errors / 4xx to warning severity without stray words', () => {
+    for (const q of ['client errors from checkout', '4xx from checkout', '4xx errors from checkout']) {
+      const r = parseNaturalQuery(q, 'logs')
+      expect(r.chips, q).toEqual([
+        { field: 'service_name', op: '=', value: 'checkout' },
+        { field: 'level', op: '=', value: 'warn' },
+      ])
+      expect(r.search, q).toBe('')
+    }
+  })
+
+  it('keeps a bare status code as free text for the Body search', () => {
+    const r = parseNaturalQuery('503 errors from checkout', 'logs')
+    expect(r.chips).toEqual([
+      { field: 'service_name', op: '=', value: 'checkout' },
+      { field: 'level', op: '=', value: 'error' },
+    ])
+    expect(r.search).toBe('503')
+    expect(parseNaturalQuery('404', 'logs')).toMatchObject({ chips: [], search: '404' })
+  })
+
   it('leaves unrecognized words as search text', () => {
     const r = parseNaturalQuery('database connection timeout', 'logs')
     expect(r.chips).toEqual([])

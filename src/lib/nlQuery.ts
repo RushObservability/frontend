@@ -28,7 +28,6 @@ const FILLER_RE = /\b(?:i\s+want|show\s+me|give\s+me|find|look\s+for|search\s+fo
 const SERVER_ERROR_RE = /\b(?:5xx|server[\s-]+errors?)\b/g
 const CLIENT_ERROR_RE = /\b(?:4xx|client[\s-]+errors?)\b/g
 const ERROR_RE = /\berrors?\b/g
-const LOG_SERVER_ERROR_RE = /\bserver[\s-]+errors?\b/g
 
 export function parseNaturalQuery(input: string, mode: NlMode): NlParseResult {
   const text = input.toLowerCase().trim()
@@ -80,11 +79,20 @@ export function parseNaturalQuery(input: string, mode: NlMode): NlParseResult {
       strip(ERROR_RE)
     }
   } else {
-    // Log level. "server errors" is an error-level log, so consume the whole
-    // phrase rather than leaving "server" behind as a search term.
-    if (has(LOG_SERVER_ERROR_RE)) {
+    // Log level. Logs have no HTTP status column, so status phrases map to
+    // severity the same way the Logs-mode Status facet does (5xx = Error,
+    // 4xx = Warning; see logStatusFacets.ts). The whole phrase is consumed so
+    // "server"/"client"/"5xx" never leak into the free-text search. A bare
+    // 3-digit code is left as search text: log bodies carry it as a token
+    // (e.g. "response status=503"), which the Body text index matches.
+    if (has(SERVER_ERROR_RE)) {
       chips.push({ field: 'level', op: '=', value: 'error' })
-      strip(LOG_SERVER_ERROR_RE)
+      strip(SERVER_ERROR_RE)
+      strip(ERROR_RE)
+      confidence += 0.2
+    } else if (has(CLIENT_ERROR_RE)) {
+      chips.push({ field: 'level', op: '=', value: 'warn' })
+      strip(CLIENT_ERROR_RE)
       strip(ERROR_RE)
       confidence += 0.2
     } else if (/\berrors?\b/.test(remaining)) {
@@ -99,24 +107,6 @@ export function parseNaturalQuery(input: string, mode: NlMode): NlParseResult {
       chips.push({ field: 'level', op: '=', value: 'debug' })
       remaining = remaining.replace(/\bdebugs?\b/g, ' ')
       confidence += 0.2
-    }
-
-    // Status codes (unchanged log-mode behavior)
-    if (/\b(?:5xx|server\s+error)\b/.test(remaining)) {
-      chips.push({ field: 'status_code', op: '>=', value: 500 })
-      remaining = remaining.replace(/\b(?:5xx|server\s+error)\b/g, ' ')
-      confidence += 0.15
-    } else if (/\b(?:4xx|client\s+error)\b/.test(remaining)) {
-      chips.push({ field: 'status_code', op: '>=', value: 400 })
-      remaining = remaining.replace(/\b(?:4xx|client\s+error)\b/g, ' ')
-      confidence += 0.15
-    } else {
-      const sCode = remaining.match(/\b([1-5]\d{2})\b/)
-      if (sCode?.[1]) {
-        chips.push({ field: 'status_code', op: '=', value: parseInt(sCode[1]) })
-        remaining = remaining.replace(sCode[0], ' ')
-        confidence += 0.15
-      }
     }
   }
 
