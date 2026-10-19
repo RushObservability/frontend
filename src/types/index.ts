@@ -1445,6 +1445,8 @@ export interface BubbleUpRequest {
   baseline: { from: string; to: string }
   signal: string
   filters: Filter[]
+  /** Free-text explore search applied to both the selection and baseline. */
+  search?: string
   top_k?: number
   selection_min_duration_ns?: number
   selection_max_duration_ns?: number

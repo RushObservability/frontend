@@ -26,12 +26,15 @@ import ExploreResultsState from '../components/ExploreResultsState.vue'
 import SignalTimelinePanel from '../components/panels/SignalTimelinePanel.vue'
 import { useTenant } from '../composables/useTenant'
 import { compareFindingStrength, compareFindingSummary, rankCompareFindings } from '../lib/compareFindings'
+import { parseNaturalQuery, type NlChip, type NlMode } from '../lib/nlQuery'
 import { authenticatedFetch } from '../composables/authSession'
 import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from '../composables/storageScope'
 import { usePollingTask, type PollingRunContext } from '../composables/usePollingTask'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import type { ContextMenuEntry } from '../types/contextMenu'
 import { isErrorSpan, isErrorStatus } from '../lib/spanStatus'
+import { logStatusFacetFilters } from '../lib/logStatusFacets'
+import { spanModeFilters, spanModeHint } from '../lib/tracesOnly'
 
 interface ExploreHistoryQuery {
   logViewId?: string
@@ -77,7 +80,6 @@ const searchInput = ref('')
 const filters = ref<Filter[]>([])
 
 // ═══ Natural language query mode ═══
-interface NlChip { field: string; op: string; value: string | number }
 const nlMode = ref(false)
 const nlInput = ref('')
 const nlInputEl = ref<HTMLInputElement | null>(null)
@@ -176,6 +178,9 @@ const viewMode = ref<'spans' | 'logs'>('spans')
 // Start Explore at the request/trace level. Users can still switch to all
 // spans with the sidebar toggle (or the "a" keyboard shortcut).
 const tracesOnly = ref(true)
+// Set when "Traces only" finds no root span but the same search in span mode does.
+const spanModeFallback = ref<{ count: number; capped: boolean } | null>(null)
+let spanModeFallbackSeq = 0
 const resultCountLabel = computed(() => viewMode.value === 'logs' ? 'events' : tracesOnly.value ? 'traces' : 'spans')
 const apmResultMode = ref<'individual' | 'groups'>('individual')
 const otelLogs = ref<LogRecord[]>([])
@@ -808,7 +813,8 @@ function getQuickFilters(): Filter[] {
   if (quickService.value) qf.push({ field: 'service_name', op: '=', value: quickService.value })
   // Span-only sidebar controls must not shadow custom log attributes such as
   // "status". Explicit search and view filters still accept those field names.
-  if (viewMode.value === 'logs') return qf
+  // The Status facet filters logs by severity instead.
+  if (viewMode.value === 'logs') return [...qf, ...logStatusFacetFilters(quickStatusRange.value, quickErrorOnly.value)]
   if (quickMethod.value) qf.push({ field: 'http_method', op: '=', value: quickMethod.value })
   if (quickErrorOnly.value) qf.push({ field: 'status', op: '=', value: 'ERROR' })
   if (quickStatusRange.value === '2xx') {
@@ -1182,6 +1188,23 @@ function getActiveFilters(): Filter[] {
   return all
 }
 
+// "Traces only" lists root spans. When none match, count the same search in span
+// mode so the empty state can say matching spans exist (e.g. a service that only
+// appears as a child span) instead of implying there is no data.
+async function checkSpanModeFallback(activeFilters: Filter[], search: string | undefined) {
+  const filters = spanModeFilters(activeFilters)
+  if (!filters) return
+  const seq = ++spanModeFallbackSeq
+  try {
+    const page = await api.queryEvents({ time_range: timeRange.value, filters, search, limit: 1, columns: 'list' })
+    if (seq !== spanModeFallbackSeq || !tracesOnly.value || results.value.length) return
+    if (page.total > 0) spanModeFallback.value = { count: page.total, capped: page.total >= 10_000 }
+  } catch {
+    // Best effort: the empty state stays as is and no error banner is shown.
+    if (seq === spanModeFallbackSeq) api.error.value = null
+  }
+}
+
 async function search(opts?: { skipHistory?: boolean }) {
   if (logViewsLoading.value) return
   if (viewMode.value === 'logs' && logViewUnavailable.value) {
@@ -1198,6 +1221,8 @@ async function search(opts?: { skipHistory?: boolean }) {
   activeSearchController = controller
   refreshNow() // anchor the relative window to current time for this search
   selectedRowIndex.value = -1
+  spanModeFallback.value = null
+  spanModeFallbackSeq++
   searching.value = true
   const searchStart = performance.now()
   queryDurationMs.value = null
@@ -1267,6 +1292,7 @@ async function search(opts?: { skipHistory?: boolean }) {
     applyExploreRowsResponse(response, isLogs)
     queryDurationMs.value = Math.round(performance.now() - searchStart)
     searching.value = false
+    if (!isLogs && !results.value.length) void checkSpanModeFallback(activeFilters, searchParam)
 
     const [summaryResult, latencyResult] = await Promise.all([summaryPromise, latencyPromise])
     if (controller.signal.aborted || activeSearchController !== controller) return
@@ -2205,12 +2231,19 @@ async function runBubbleUp() {
   // Baseline is the full visible time range minus the selection
   const baseline = timeRange.value
 
+  // Scope both cohorts to the same query as the result set: structured filters
+  // AND the free-text search. getActiveFilters() re-parses the search box, so
+  // read searchText only after it runs.
+  const activeFilters = getActiveFilters()
+  const searchParam = searchText.value || undefined
+
   try {
     const result = await api.bubbleUp({
       selection: { from: sel.startTime, to: sel.endTime },
       baseline: { from: baseline.from, to: baseline.to },
       signal: viewMode.value === 'logs' ? 'logs' : 'spans',
-      filters: viewMode.value === 'logs' ? getLogFilters(getActiveFilters()) : getActiveFilters(),
+      filters: viewMode.value === 'logs' ? getLogFilters(activeFilters) : activeFilters,
+      search: searchParam,
       top_k: 10,
       selection_min_duration_ns: sel.minDurationNs,
       selection_max_duration_ns: sel.maxDurationNs,
@@ -3746,85 +3779,13 @@ function exitNlMode() {
   nlConfidence.value = 0
 }
 
-function parseNaturalQuery(input: string): { chips: NlChip[]; search: string; confidence: number } {
-  const text = input.toLowerCase().trim()
-  if (!text) return { chips: [], search: '', confidence: 0 }
-
-  const chips: NlChip[] = []
-  let remaining = text
-  let confidence = 0.3
-
-  // Extract service name: "from X service", "for X", "X service" at start
-  const STOPWORDS = new Set(['the', 'a', 'an', 'this', 'all', 'my', 'logs', 'log', 'errors', 'error',
-    'warn', 'info', 'debug', 'that', 'which', 'with', 'have', 'show', 'me', 'i',
-    'want', 'need', 'find', 'get', 'give', 'where', 'there', 'are', 'is', 'recent', 'latest'])
-  const servicePatterns: RegExp[] = [
-    /\b(?:from|for)\s+(?:the\s+)?([a-z0-9][a-z0-9_-]*)\s+service\b/,
-    /^([a-z0-9][a-z0-9_-]+)\s+service\b/,
-    /\b(?:from|for)\s+(?:the\s+)?([a-z0-9][a-z0-9_-]{2,})\b(?!\s*service)/,
-  ]
-  for (const pat of servicePatterns) {
-    const m = remaining.match(pat)
-    if (m?.[1] && !STOPWORDS.has(m[1])) {
-      chips.push({ field: 'service_name', op: '=', value: m[1] })
-      remaining = remaining.replace(pat, ' ')
-      confidence += 0.3
-      break
-    }
-  }
-
-  // Extract log level
-  if (/\berrors?\b/.test(remaining)) {
-    chips.push({ field: 'level', op: '=', value: 'error' })
-    remaining = remaining.replace(/\berrors?\b/g, ' ')
-    confidence += 0.2
-  } else if (/\bwarn(?:ing)?s?\b/.test(remaining)) {
-    chips.push({ field: 'level', op: '=', value: 'warn' })
-    remaining = remaining.replace(/\bwarn(?:ing)?s?\b/g, ' ')
-    confidence += 0.2
-  } else if (/\bdebugs?\b/.test(remaining)) {
-    chips.push({ field: 'level', op: '=', value: 'debug' })
-    remaining = remaining.replace(/\bdebugs?\b/g, ' ')
-    confidence += 0.2
-  }
-
-  // Extract status codes
-  if (/\b(?:5xx|server\s+error)\b/.test(remaining)) {
-    chips.push({ field: 'status_code', op: '>=', value: 500 })
-    remaining = remaining.replace(/\b(?:5xx|server\s+error)\b/g, ' ')
-    confidence += 0.15
-  } else if (/\b(?:4xx|client\s+error)\b/.test(remaining)) {
-    chips.push({ field: 'status_code', op: '>=', value: 400 })
-    remaining = remaining.replace(/\b(?:4xx|client\s+error)\b/g, ' ')
-    confidence += 0.15
-  } else {
-    const sCode = remaining.match(/\b([1-5]\d{2})\b/)
-    if (sCode?.[1]) {
-      chips.push({ field: 'status_code', op: '=', value: parseInt(sCode[1]) })
-      remaining = remaining.replace(sCode[0], ' ')
-      confidence += 0.15
-    }
-  }
-
-  // Extract environment
-  const envMatch = remaining.match(/\b(production|prod|staging|stage|dev|development)\b/)
-  if (envMatch?.[1]) {
-    const raw = envMatch[1]
-    const envVal = raw === 'prod' ? 'production' : (raw === 'stage' ? 'staging' : (raw === 'dev' ? 'development' : raw))
-    chips.push({ field: 'environment', op: '=', value: envVal })
-    remaining = remaining.replace(envMatch[0], ' ')
-    confidence += 0.1
-  }
-
-  // Strip filler words and clean up remaining
-  const fillerRe = /\b(?:i\s+want|show\s+me|give\s+me|find|look\s+for|search\s+for|that|which|have|having|with|containing|contain|the|a\b|an\b|in|on|at|of|and|or|where|there|are|is|from|for|logs?|events?|spans?|traces?)\b/g
-  const searchText = remaining.replace(fillerRe, ' ').replace(/\s+/g, ' ').trim()
-
-  return { chips, search: searchText, confidence: Math.min(confidence, 1.0) }
+/** The ✦ parser targets the active Explore mode's schema (logs vs APM spans). */
+function nlParseMode(): NlMode {
+  return viewMode.value === 'logs' ? 'logs' : 'spans'
 }
 
 function onNlInput() {
-  const { chips, search, confidence } = parseNaturalQuery(nlInput.value)
+  const { chips, search, confidence } = parseNaturalQuery(nlInput.value, nlParseMode())
   nlChips.value = chips
   nlSearch.value = search
   nlConfidence.value = confidence
@@ -3852,7 +3813,7 @@ async function callLlmParse() {
     const res = await authenticatedFetch('/api/v1/parse-query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: nlInput.value }),
+      body: JSON.stringify({ query: nlInput.value, mode: nlParseMode() }),
     })
     if (res.ok) {
       const data = await res.json()
@@ -5580,7 +5541,12 @@ watch(() => route.query.log_view, (id) => {
           :loading="searching"
           :error="viewMode !== 'logs' ? api.error.value : null"
           :has-results="viewMode === 'logs' ? logEntries.length > 0 : results.length > 0"
-        />
+          :hint="spanModeFallback ? spanModeHint(spanModeFallback.count, spanModeFallback.capped) : null"
+        >
+          <template v-if="spanModeFallback" #action>
+            <button type="button" class="btn btn-sm" @click="tracesOnly = false">Show matching spans</button>
+          </template>
+        </ExploreResultsState>
 
         <!-- ═══ Trace Groups (root request shapes) ═══ -->
         <div v-else-if="viewMode === 'spans' && apmResultMode === 'groups'" class="trace-groups card fade-in">
