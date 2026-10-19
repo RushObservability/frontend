@@ -25,6 +25,7 @@ import ExploreResultsState from '../components/ExploreResultsState.vue'
 import SignalTimelinePanel from '../components/panels/SignalTimelinePanel.vue'
 import { useTenant } from '../composables/useTenant'
 import { compareFindingStrength, compareFindingSummary, rankCompareFindings } from '../lib/compareFindings'
+import { parseNaturalQuery, type NlChip, type NlMode } from '../lib/nlQuery'
 import { authenticatedFetch } from '../composables/authSession'
 import { removeLegacyStorageKey, storageUserId, userScopedStorageKey } from '../composables/storageScope'
 import { usePollingTask, type PollingRunContext } from '../composables/usePollingTask'
@@ -76,7 +77,6 @@ const searchInput = ref('')
 const filters = ref<Filter[]>([])
 
 // ═══ Natural language query mode ═══
-interface NlChip { field: string; op: string; value: string | number }
 const nlMode = ref(false)
 const nlInput = ref('')
 const nlInputEl = ref<HTMLInputElement | null>(null)
@@ -3696,85 +3696,13 @@ function exitNlMode() {
   nlConfidence.value = 0
 }
 
-function parseNaturalQuery(input: string): { chips: NlChip[]; search: string; confidence: number } {
-  const text = input.toLowerCase().trim()
-  if (!text) return { chips: [], search: '', confidence: 0 }
-
-  const chips: NlChip[] = []
-  let remaining = text
-  let confidence = 0.3
-
-  // Extract service name: "from X service", "for X", "X service" at start
-  const STOPWORDS = new Set(['the', 'a', 'an', 'this', 'all', 'my', 'logs', 'log', 'errors', 'error',
-    'warn', 'info', 'debug', 'that', 'which', 'with', 'have', 'show', 'me', 'i',
-    'want', 'need', 'find', 'get', 'give', 'where', 'there', 'are', 'is', 'recent', 'latest'])
-  const servicePatterns: RegExp[] = [
-    /\b(?:from|for)\s+(?:the\s+)?([a-z0-9][a-z0-9_-]*)\s+service\b/,
-    /^([a-z0-9][a-z0-9_-]+)\s+service\b/,
-    /\b(?:from|for)\s+(?:the\s+)?([a-z0-9][a-z0-9_-]{2,})\b(?!\s*service)/,
-  ]
-  for (const pat of servicePatterns) {
-    const m = remaining.match(pat)
-    if (m?.[1] && !STOPWORDS.has(m[1])) {
-      chips.push({ field: 'service_name', op: '=', value: m[1] })
-      remaining = remaining.replace(pat, ' ')
-      confidence += 0.3
-      break
-    }
-  }
-
-  // Extract log level
-  if (/\berrors?\b/.test(remaining)) {
-    chips.push({ field: 'level', op: '=', value: 'error' })
-    remaining = remaining.replace(/\berrors?\b/g, ' ')
-    confidence += 0.2
-  } else if (/\bwarn(?:ing)?s?\b/.test(remaining)) {
-    chips.push({ field: 'level', op: '=', value: 'warn' })
-    remaining = remaining.replace(/\bwarn(?:ing)?s?\b/g, ' ')
-    confidence += 0.2
-  } else if (/\bdebugs?\b/.test(remaining)) {
-    chips.push({ field: 'level', op: '=', value: 'debug' })
-    remaining = remaining.replace(/\bdebugs?\b/g, ' ')
-    confidence += 0.2
-  }
-
-  // Extract status codes
-  if (/\b(?:5xx|server\s+error)\b/.test(remaining)) {
-    chips.push({ field: 'status_code', op: '>=', value: 500 })
-    remaining = remaining.replace(/\b(?:5xx|server\s+error)\b/g, ' ')
-    confidence += 0.15
-  } else if (/\b(?:4xx|client\s+error)\b/.test(remaining)) {
-    chips.push({ field: 'status_code', op: '>=', value: 400 })
-    remaining = remaining.replace(/\b(?:4xx|client\s+error)\b/g, ' ')
-    confidence += 0.15
-  } else {
-    const sCode = remaining.match(/\b([1-5]\d{2})\b/)
-    if (sCode?.[1]) {
-      chips.push({ field: 'status_code', op: '=', value: parseInt(sCode[1]) })
-      remaining = remaining.replace(sCode[0], ' ')
-      confidence += 0.15
-    }
-  }
-
-  // Extract environment
-  const envMatch = remaining.match(/\b(production|prod|staging|stage|dev|development)\b/)
-  if (envMatch?.[1]) {
-    const raw = envMatch[1]
-    const envVal = raw === 'prod' ? 'production' : (raw === 'stage' ? 'staging' : (raw === 'dev' ? 'development' : raw))
-    chips.push({ field: 'environment', op: '=', value: envVal })
-    remaining = remaining.replace(envMatch[0], ' ')
-    confidence += 0.1
-  }
-
-  // Strip filler words and clean up remaining
-  const fillerRe = /\b(?:i\s+want|show\s+me|give\s+me|find|look\s+for|search\s+for|that|which|have|having|with|containing|contain|the|a\b|an\b|in|on|at|of|and|or|where|there|are|is|from|for|logs?|events?|spans?|traces?)\b/g
-  const searchText = remaining.replace(fillerRe, ' ').replace(/\s+/g, ' ').trim()
-
-  return { chips, search: searchText, confidence: Math.min(confidence, 1.0) }
+/** The ✦ parser targets the active Explore mode's schema (logs vs APM spans). */
+function nlParseMode(): NlMode {
+  return viewMode.value === 'logs' ? 'logs' : 'spans'
 }
 
 function onNlInput() {
-  const { chips, search, confidence } = parseNaturalQuery(nlInput.value)
+  const { chips, search, confidence } = parseNaturalQuery(nlInput.value, nlParseMode())
   nlChips.value = chips
   nlSearch.value = search
   nlConfidence.value = confidence
@@ -3802,7 +3730,7 @@ async function callLlmParse() {
     const res = await authenticatedFetch('/api/v1/parse-query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: nlInput.value }),
+      body: JSON.stringify({ query: nlInput.value, mode: nlParseMode() }),
     })
     if (res.ok) {
       const data = await res.json()
