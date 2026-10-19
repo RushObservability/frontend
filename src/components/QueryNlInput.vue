@@ -6,12 +6,16 @@
 //                endpoint Explore uses) on Enter / the button, returning
 //                structured filters. (Free-text remainder is noted since SLOs
 //                evaluate structured filters only.)
+// `nlMode` picks the schema the English parser targets (spans vs logs), for both
+// the rule-based parser and the AI endpoint.
 import { ref, watch, nextTick } from 'vue'
 import type { QueryFilter } from '../types'
+import type { NlMode } from '../lib/nlQuery'
+import { parseNaturalLanguageFilters } from '../lib/sloNlQuery'
 import { useApi } from '../composables/useApi'
 import { authenticatedFetch } from '../composables/authSession'
 
-const props = defineProps<{ placeholder?: string; initial?: QueryFilter[] }>()
+const props = defineProps<{ placeholder?: string; initial?: QueryFilter[]; nlMode: NlMode }>()
 const emit = defineEmits<{ apply: [filters: QueryFilter[]] }>()
 
 const api = useApi()
@@ -119,37 +123,6 @@ function parseExpr(input: string): QueryFilter[] {
   return out
 }
 
-/** Client-side rule-based English → filters (mirrors Explore's parser). Used as
- *  the primary result so this works even when no LLM is configured; the LLM
- *  endpoint only enhances it when available. */
-function ruleBasedParse(input: string): { filters: QueryFilter[]; confidence: number } {
-  const text = input.toLowerCase().trim()
-  if (!text) return { filters: [], confidence: 0 }
-  const f: QueryFilter[] = []
-  const add = (field: string, op: string, value: string) => f.push({ id: crypto.randomUUID(), field, op, value })
-  let remaining = text
-  let confidence = 0.3
-  const STOP = new Set(['the','a','an','this','all','my','logs','log','errors','error','warn','info','debug','that','which','with','have','show','me','i','want','need','find','get','give','where','there','are','is','recent','latest'])
-  const servicePatterns = [
-    /\b(?:from|for)\s+(?:the\s+)?([a-z0-9][a-z0-9_-]*)\s+service\b/,
-    /^([a-z0-9][a-z0-9_-]+)\s+service\b/,
-    /\b(?:from|for)\s+(?:the\s+)?([a-z0-9][a-z0-9_-]{2,})\b(?!\s*service)/,
-  ]
-  for (const pat of servicePatterns) {
-    const m = remaining.match(pat)
-    if (m?.[1] && !STOP.has(m[1])) { add('service_name', '=', m[1]); remaining = remaining.replace(pat, ' '); confidence += 0.3; break }
-  }
-  if (/\berrors?\b/.test(remaining)) { add('level', '=', 'error'); remaining = remaining.replace(/\berrors?\b/g, ' '); confidence += 0.2 }
-  else if (/\bwarn(?:ing)?s?\b/.test(remaining)) { add('level', '=', 'warn'); remaining = remaining.replace(/\bwarn(?:ing)?s?\b/g, ' '); confidence += 0.2 }
-  else if (/\bdebugs?\b/.test(remaining)) { add('level', '=', 'debug'); remaining = remaining.replace(/\bdebugs?\b/g, ' '); confidence += 0.2 }
-  if (/\b(?:5xx|server\s+error)\b/.test(remaining)) { add('http_status_code', '>=', '500'); remaining = remaining.replace(/\b(?:5xx|server\s+error)\b/g, ' '); confidence += 0.15 }
-  else if (/\b(?:4xx|client\s+error)\b/.test(remaining)) { add('http_status_code', '>=', '400'); remaining = remaining.replace(/\b(?:4xx|client\s+error)\b/g, ' '); confidence += 0.15 }
-  else { const s = remaining.match(/\b([1-5]\d{2})\b/); if (s?.[1]) { add('http_status_code', '=', s[1]); remaining = remaining.replace(s[0], ' '); confidence += 0.15 } }
-  const env = remaining.match(/\b(production|prod|staging|stage|dev|development)\b/)
-  if (env?.[1]) { const r = env[1]; const v = r === 'prod' ? 'production' : r === 'stage' ? 'staging' : r === 'dev' ? 'development' : r; add('environment', '=', v); confidence += 0.1 }
-  return { filters: f, confidence: Math.min(confidence, 1) }
-}
-
 /** Render existing filters back into an editable expression string. */
 function filtersToExpr(filters: QueryFilter[]): string {
   return filters.map(f => {
@@ -186,32 +159,13 @@ async function onEnterOrButton() {
     return
   }
   // ✦ English → query. Rule-based parse is the baseline (works with no LLM);
-  // the LLM endpoint only replaces it when configured + more confident.
+  // the LLM endpoint only replaces it when configured and it finds filters.
   if (!text.value.trim() || loading.value) return
   loading.value = true
   note.value = null
   try {
-    const local = ruleBasedParse(text.value)
-    let filters = local.filters
-    let confidence = local.confidence
-    let leftover = ''
-    let source = 'rules'
-    try {
-      const res = await authenticatedFetch('/api/v1/parse-query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: text.value }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        const llm: QueryFilter[] = (data.filters ?? []).map((f: { field: string; op: string; value: string | number }) => ({
-          id: crypto.randomUUID(), field: f.field, op: f.op, value: String(f.value),
-        }))
-        // Prefer the LLM only if it actually found filters.
-        if (llm.length) { filters = llm; confidence = data.confidence ?? 0.9; leftover = data.search ?? ''; source = 'AI' }
-      }
-      // Non-OK (e.g. 501 no LLM key) → silently keep the rule-based result.
-    } catch { /* network/LLM unavailable → keep rule-based result */ }
+    const { filters, search: leftover, confidence, source } =
+      await parseNaturalLanguageFilters(text.value, props.nlMode, authenticatedFetch)
 
     emit('apply', filters)
     if (!filters.length) {
