@@ -1,0 +1,11 @@
+# Used instead of the root .dockerignore when building .oss-scanner/Dockerfile, so the scanner sees the whole source
+# tree (tests, docs and CI config), not just what the production image needs.
+node_modules
+dist
+coverage
+playwright-report
+test-results
+.env
+.env.*
+!.env.example
+*.log
