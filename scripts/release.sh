@@ -7,7 +7,7 @@ cd "$repo_root"
 version="${VERSION:-}"
 dry_run="${DRY_RUN:-0}"
 
-for required_command in git npm node gh; do
+for required_command in git npm node gh docker trivy; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     echo "Required command not found: $required_command" >&2
     exit 1
@@ -111,6 +111,16 @@ expected_node="$(tr -d '[:space:]' < .nvmrc)"
 if [[ "$(node -v)" != "v${expected_node}" ]]; then
   echo "Note: using Node $(node -v); the release workflow uses v${expected_node} (.nvmrc)." >&2
 fi
+
+# Scan the image the release workflow publishes, on each platform it builds,
+# before the PR exists. The workflow itself only builds and publishes.
+for platform in linux/amd64 linux/arm64; do
+  scan_image="rush-frontend-release-scan:${version}-${platform#linux/}"
+  echo "Release security gate: image scan for $platform"
+  docker buildx build --platform "$platform" --load --tag "$scan_image" .
+  trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$scan_image"
+  docker image rm "$scan_image" >/dev/null
+done
 
 # Install the locked dependencies the release workflow uses before the branch
 # exists, so a missing or stale node_modules fails here without leaving a
