@@ -52,9 +52,11 @@ version and tag checks.
 The build publishes a unique `candidate-<run>-<attempt>` tag first. Candidates
 are unverified and must not be used for deployments or automatic updates.
 
-Both amd64 and arm64 images must pass the fixable high/critical vulnerability
-scan and non-root check. Provenance and SBOM steps must also succeed before the
-workflow promotes the same immutable digest to version and moving release tags.
+`make release` builds the amd64 and arm64 images and fails on fixable
+high/critical vulnerabilities before it opens the release PR, so the workflow
+does not scan. Both images must pass the non-root check, and provenance and SBOM
+steps must succeed before the workflow promotes the same immutable digest to
+version and moving release tags.
 The GitHub release and licensed-build dispatch follow that promotion.
 
 A failed check leaves the candidate available for diagnosis but does not update

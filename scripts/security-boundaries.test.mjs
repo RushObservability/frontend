@@ -52,15 +52,24 @@ describe('release promotion', () => {
     expect(workflow).toContain('[[ "$previous" == "$current" ]]')
     expect(workflow).toContain('[[ "$EVENT_NAME" == push')
   })
-  it('only publishes candidate tags before both scans, user checks, and attestations', () => {
+  it('only publishes candidate tags before user checks and attestations', () => {
     const beforePromotion = workflow.split('      - name: Promote verified digest to release tags')[0]
     expect(beforePromotion).toContain(':candidate-${{ github.run_id }}-${{ github.run_attempt }}')
     expect(beforePromotion).not.toContain('tags: ${{ steps.docker-meta.outputs.tags }}')
-    for (const marker of ['TRIVY_PLATFORM: linux/amd64', 'TRIVY_PLATFORM: linux/arm64', 'for arch in amd64 arm64', '      - name: Attest image SBOM']) {
+    for (const marker of ['for arch in amd64 arm64', '      - name: Attest image SBOM']) {
       expect(beforePromotion).toContain(marker)
     }
     expect(beforePromotion).not.toContain('continue-on-error: true')
     expect(workflow.indexOf('Promote verified digest')).toBeLessThan(workflow.indexOf('Create tag and GitHub release'))
+  })
+
+  it('scans both release images in make release before the release branch exists', () => {
+    const release = readFileSync('scripts/release.sh', 'utf8')
+    const scan = release.indexOf('trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1')
+    expect(release).toContain('for platform in linux/amd64 linux/arm64; do')
+    expect(scan).toBeGreaterThan(-1)
+    expect(scan).toBeLessThan(release.indexOf('git switch -c "$release_branch"'))
+    expect(workflow).not.toContain('trivy')
   })
 
   it('promotes the supplied digest without rebuilding and refuses malformed inputs', () => {
