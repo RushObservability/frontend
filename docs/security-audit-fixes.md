@@ -2,7 +2,7 @@
 
 ## Local development
 
-Use Node 22.23.2 with npm 10.9.8. The version files, package engines, CI, and
+Use Node 22.23.4 with npm 10.9.9. The version files, package engines, CI, and
 security checks use these versions. Install through your usual Node version
 manager, then run `npm ci --ignore-scripts`.
 
