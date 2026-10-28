@@ -3,7 +3,7 @@
 # discarded, so its footprint doesn't affect the final image's CVE posture).
 # The Vue bundle is architecture-independent. Keep this stage on the BuildKit
 # host so multi-platform builds do not run Node, vue-tsc, or Vite through QEMU.
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/node@sha256:13afe2c05d49286578b74c4a14b8e4bbe70e98828abeb3d0ea9f9fd2af4cc431 AS builder
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/node@sha256:88c4f6e6941bdd4fb9039d98ad05384e1bfe5693dd31ccc8eb2f0c8522bdb40e AS builder
 # Chainguard node runs as non-root by default; the build writes to /app and the
 # npm cache, so run this (discarded) stage as root to avoid permission errors.
 USER root
