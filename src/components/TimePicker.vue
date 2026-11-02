@@ -9,6 +9,7 @@ interface Preset {
 const props = withDefaults(defineProps<{
   modelValue: number
   presets?: Preset[]
+  /** Pass null to enable custom selection; omit on pages with relative ranges only. */
   customRange?: { from: string; to: string } | null
 }>(), {
   presets: () => [
@@ -24,7 +25,6 @@ const props = withDefaults(defineProps<{
     { label: '7d', value: 10080 },
     { label: '30d', value: 43200 },
   ],
-  customRange: null,
 })
 
 const emit = defineEmits<{
@@ -146,7 +146,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
     <Transition name="tp-pop">
       <div v-if="open" ref="popoverRef" class="tp-popover" :class="{ 'align-end': alignEnd }">
         <!-- Left: Custom range -->
-        <div class="tp-custom">
+        <div v-if="customRange !== undefined" class="tp-custom">
           <div class="tp-section-label">Custom range</div>
           <div class="tp-field">
             <label class="tp-field-label">From</label>
@@ -159,7 +159,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
           <button class="tp-apply" @click="applyCustomRange">Apply range</button>
         </div>
 
-        <div class="tp-divider"></div>
+        <div v-if="customRange !== undefined" class="tp-divider"></div>
 
         <!-- Right: Quick presets -->
         <div class="tp-presets">

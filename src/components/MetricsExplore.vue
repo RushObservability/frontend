@@ -6,6 +6,7 @@ import { metricSelector } from '../lib/promqlNames'
 const props = defineProps<{
   metricNames: string[]
   timePreset: number
+  customRange?: { from: string; to: string } | null
 }>()
 
 const emit = defineEmits<{
@@ -109,8 +110,11 @@ interface SparkData {
 }
 const sparklineCache = new Map<string, SparkData>()
 const sparklineLoading = new Set<string>()
+const sparklineControllers = new Set<AbortController>()
+let sparklineGeneration = 0
 const cardRefs = ref<Map<string, HTMLElement>>(new Map())
 let observer: IntersectionObserver | null = null
+let disposed = false
 
 // Reactive trigger for sparkline updates
 const sparklineVersion = ref(0)
@@ -119,16 +123,20 @@ const sparklineVersion = ref(0)
 const sharedHoverRatio = ref<number | null>(null) // 0-1 across x range
 
 async function fetchSparkline(metricName: string) {
-  if (sparklineCache.has(metricName) || sparklineLoading.has(metricName)) return
+  if (disposed || sparklineCache.has(metricName) || sparklineLoading.has(metricName)) return
   sparklineLoading.add(metricName)
+  const generation = sparklineGeneration
+  const controller = new AbortController()
+  sparklineControllers.add(controller)
 
   try {
-    const now = Math.floor(Date.now() / 1000)
-    const start = now - props.timePreset * 60
+    const now = props.customRange ? Date.parse(props.customRange.to) / 1000 : Math.floor(Date.now() / 1000)
+    const start = props.customRange ? Date.parse(props.customRange.from) / 1000 : now - props.timePreset * 60
     const points = 60
     const step = Math.max(1, Math.floor((now - start) / points))
     const q = suggestedQuery(metricName)
-    const data = await api.promQueryRange(q, start, now, step)
+    const data = await api.promQueryRange(q, start, now, step, undefined, controller.signal)
+    if (generation !== sparklineGeneration) return
     if (data.resultType === 'matrix' && data.result.length > 0) {
       const values = data.result[0]!.values.map(([, v]) => parseFloat(v))
       const timestamps = data.result[0]!.values.map(([t]) => t)
@@ -137,10 +145,13 @@ async function fetchSparkline(metricName: string) {
       sparklineCache.set(metricName, { values: [], timestamps: [] })
     }
   } catch {
-    sparklineCache.set(metricName, { values: [], timestamps: [] })
+    if (generation === sparklineGeneration) sparklineCache.set(metricName, { values: [], timestamps: [] })
   } finally {
-    sparklineLoading.delete(metricName)
-    sparklineVersion.value++
+    sparklineControllers.delete(controller)
+    if (generation === sparklineGeneration) {
+      sparklineLoading.delete(metricName)
+      sparklineVersion.value++
+    }
   }
 }
 
@@ -274,6 +285,7 @@ function setupObserver() {
   )
 
   nextTick(() => {
+    if (disposed || !observer) return
     for (const [, el] of cardRefs.value) {
       observer!.observe(el)
     }
@@ -295,11 +307,23 @@ function handleSelect(metric: string) {
   emit('select', metric, suggestedQuery(metric))
 }
 
+watch([() => props.timePreset, () => props.customRange], () => {
+  sparklineGeneration++
+  for (const controller of sparklineControllers) controller.abort()
+  sparklineCache.clear()
+  sparklineLoading.clear()
+  sparklineVersion.value++
+  setupObserver()
+})
+
 onMounted(() => {
   setupObserver()
 })
 
 onUnmounted(() => {
+  disposed = true
+  sparklineGeneration++
+  for (const controller of sparklineControllers) controller.abort()
   if (observer) observer.disconnect()
 })
 </script>
