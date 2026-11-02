@@ -42,6 +42,7 @@ const editMode = ref(false)
 const dashMinutes = useTimeRangePreference()
 const loadingDashboard = ref(true)
 let disposed = false
+let applyingDefaults = false
 const savingDefaults = ref(false)
 const defaultsSaved = ref(false)
 const showAddWidget = ref(false)
@@ -114,7 +115,7 @@ async function loadVarOptions() {
 
 // Dashboard time range → reload every widget, and reflect in the URL.
 watch(dashMinutes, (m) => {
-  if (loadingDashboard.value) return
+  if (!dashboard.value || applyingDefaults) return
   defaultsSaved.value = false
   router.replace({ query: { ...route.query, t: String(m) }, hash: route.hash })
   loadAllWidgetData()
@@ -132,6 +133,11 @@ const refreshOptions = dashboardRefreshOptions
 const refreshInterval = ref(0)
 const refreshLoop = usePollingTask({ category: 'dashboard', intervalMs: 1_000, run: ({ signal }) => refreshAllWidgetData(true, signal) })
 let widgetRefreshRequest: Promise<void> | null = null
+let widgetRefreshController: AbortController | null = null
+let widgetRefreshGeneration = 0
+let widgetRefreshScope = ''
+const widgetRequests = new Map<string, symbol>()
+interface WidgetRefreshContext { generation: number; variables: Record<string, string>; minutes: number }
 
 const isAutoRefreshing = computed(() => refreshInterval.value > 0)
 const refreshLabel = computed(() => {
@@ -286,6 +292,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   disposed = true
+  widgetRefreshGeneration++
+  widgetRefreshController?.abort()
   refreshLoop.stop()
 })
 
@@ -295,7 +303,9 @@ async function loadDashboard() {
   try {
     dashboard.value = await api.getDashboard(props.id)
     const defaults = dashboardViewDefaults(dashboard.value.defaults, route.query, dashMinutes.value)
+    applyingDefaults = true
     dashMinutes.value = defaults.time_range_minutes
+    applyingDefaults = false
     refreshInterval.value = defaults.refresh_interval_secs
     await loadVarOptions()
     initVarValues()
@@ -323,31 +333,58 @@ async function loadAllWidgetData() {
 }
 
 async function refreshAllWidgetData(rethrow: boolean, signal?: AbortSignal) {
-  if (!dashboard.value) return
-  if (widgetRefreshRequest) return widgetRefreshRequest
+  if (!dashboard.value || disposed || signal?.aborted) return
+  const widgets = [...dashboard.value.widgets]
+  const variables = { ...varValues.value }
+  const minutes = dashMinutes.value
+  const scope = JSON.stringify([dashboard.value.id, widgets.map(w => [w.id, w.widget_type, w.query_config]), variables, minutes])
+  if (widgetRefreshRequest && widgetRefreshScope === scope && !widgetRefreshController?.signal.aborted) return widgetRefreshRequest
+  widgetRefreshController?.abort()
+  const controller = new AbortController()
+  const context = { generation: ++widgetRefreshGeneration, variables, minutes }
+  const onAbort = () => controller.abort(signal?.reason)
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (widgetRefreshScope !== scope) {
+    widgetDataMap.value = {}
+    lastRefreshedAt.value = null
+  }
+  widgetRefreshScope = scope
+  widgetRefreshController = controller
   const run = (async () => {
-    await Promise.all(dashboard.value!.widgets.map(widget => loadSingleWidget(widget, rethrow, signal)))
-    lastRefreshedAt.value = new Date()
+    await Promise.all(widgets.map(widget => loadSingleWidget(widget, rethrow, controller.signal, context)))
+    if (!disposed && !controller.signal.aborted && context.generation === widgetRefreshGeneration) lastRefreshedAt.value = new Date()
   })()
   widgetRefreshRequest = run
   try {
     await run
   } finally {
-    if (widgetRefreshRequest === run) widgetRefreshRequest = null
+    signal?.removeEventListener('abort', onAbort)
+    if (widgetRefreshRequest === run) {
+      widgetRefreshRequest = null
+      widgetRefreshController = null
+    }
   }
 }
 
-async function loadSingleWidget(widget: Widget, rethrow = false, signal?: AbortSignal) {
+async function loadSingleWidget(widget: Widget, rethrow = false, signal?: AbortSignal, context: WidgetRefreshContext = {
+  generation: widgetRefreshGeneration, variables: { ...varValues.value }, minutes: dashMinutes.value,
+}) {
+  const request = Symbol()
+  widgetRequests.set(widget.id, request)
+  const isCurrent = () => !disposed && !signal?.aborted && context.generation === widgetRefreshGeneration
+    && widgetRequests.get(widget.id) === request && dashboard.value?.widgets.some(w => w.id === widget.id)
   widgetLoadingMap.value[widget.id] = true
   widgetErrorMap.value[widget.id] = null
   try {
-    widgetDataMap.value[widget.id] = await fetchWidgetData(widget, varValues.value, dashMinutes.value, signal)
+    const data = await fetchWidgetData(widget, context.variables, context.minutes, signal)
+    if (isCurrent()) widgetDataMap.value[widget.id] = data
   } catch (e: any) {
-    if (signal?.aborted) return
+    if (!isCurrent()) return
     widgetErrorMap.value[widget.id] = e.message
     if (rethrow) throw e
   } finally {
-    widgetLoadingMap.value[widget.id] = false
+    if (isCurrent()) widgetLoadingMap.value[widget.id] = false
+    if (widgetRequests.get(widget.id) === request) widgetRequests.delete(widget.id)
   }
 }
 

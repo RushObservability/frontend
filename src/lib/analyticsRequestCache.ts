@@ -218,6 +218,7 @@ export class AnalyticsRequestCoordinator {
     }
     if (cached) this.deleteCacheEntry(key, cached)
     let operation = this.inFlight.get(key)
+    if (operation?.controller.signal.aborted) operation = undefined
     if (operation) this.metric('dedup')
     else {
       this.metric('miss')
@@ -269,7 +270,7 @@ export class AnalyticsRequestCoordinator {
     background: boolean,
   ): InFlightEntry {
     const existing = this.inFlight.get(key)
-    if (existing) {
+    if (existing && !existing.controller.signal.aborted) {
       this.metric('dedup')
       if (background) existing.background = true
       return existing
