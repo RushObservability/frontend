@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useTenant } from '../composables/useTenant'
@@ -27,7 +27,17 @@ const { entries: metricsHistory, push: pushHistory, remove: removeHistory, clear
 
 const route = useRoute()
 const router = useRouter()
-const api = useApi()
+let queryController: AbortController | null = null
+let queryGeneration = 0
+let disposed = false
+const transport = useApi()
+// Query reads belong to this page's current execution. Metadata reads keep
+// their independent lifecycle while the editor's expression changes.
+const api = {
+  ...transport,
+  promQuery: (expression: string, time?: number) => transport.promQuery(expression, time, queryController?.signal),
+  promQueryRange: (expression: string, start: number, end: number, step: number) => transport.promQueryRange(expression, start, end, step, undefined, queryController?.signal),
+}
 // This page queries metric data, so it can't function when the metrics signal
 // is disabled for the active tenant. Load the tenant list (if needed) so we
 // know whether to show the "needs metrics" notice instead.
@@ -181,8 +191,22 @@ function labelBadges(metric: Record<string, string>): Array<{ key: string; value
 }
 
 // ═══ Execute query ═══
+function cancelQuery() {
+  queryGeneration++
+  queryController?.abort()
+  queryController = null
+}
+
+onBeforeUnmount(() => { disposed = true; cancelQuery() })
+
 async function executeQuery(opts?: { skipHistory?: boolean }) {
-  if (!query.value.trim()) return
+  if (disposed) return
+  if (!query.value.trim()) { clearQuery(); return }
+  cancelQuery()
+  const generation = queryGeneration
+  const controller = new AbortController()
+  queryController = controller
+  const isCurrent = () => generation === queryGeneration && !controller.signal.aborted
 
   // If it's a bare counter metric, show suggestions alongside results
   const bare = isBareName(query.value)
@@ -209,25 +233,32 @@ async function executeQuery(opts?: { skipHistory?: boolean }) {
     if (activeTab.value === 'table') {
       const data = await api.promQuery(query.value, customRange.value ? end : undefined)
       if (data.resultType === 'vector') {
+        if (!isCurrent()) return
         vectorResults.value = data.result
       }
     } else {
       const step = Math.max(1, Math.floor((end - start) / 250))
       const data = await api.promQueryRange(query.value, start, end, step)
       if (data.resultType === 'matrix') {
+        if (!isCurrent()) return
         matrixResults.value = data.result
       }
     }
-    hasResults.value = true
+    if (isCurrent()) hasResults.value = true
   } catch (e: any) {
-    errorMsg.value = e.message || 'Query failed'
+    if (isCurrent()) errorMsg.value = e.message || 'Query failed'
   } finally {
-    executing.value = false
+    if (generation === queryGeneration) {
+      executing.value = false
+      queryController = null
+      syncUrlState()
+    }
   }
-  syncUrlState()
 }
 
 function clearQuery() {
+  cancelQuery()
+  executing.value = false
   query.value = ''
   vectorResults.value = []
   matrixResults.value = []
@@ -238,6 +269,7 @@ function clearQuery() {
 }
 
 async function loadHistoryEntry(entry: HistoryEntry<MetricsHistoryQuery>) {
+  cancelQuery()
   initializingTimeRange = true
   query.value = entry.query.query
   selectedPreset.value = entry.query.timePreset
