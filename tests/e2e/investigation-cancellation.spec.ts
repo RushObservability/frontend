@@ -20,7 +20,7 @@ for (const action of ['stop', 'navigate', 'logout'] as const) {
       req.resume()
       response = res
       res.writeHead(200, {
-        'Content-Type': 'text/event-stream', 'Access-Control-Allow-Origin': req.headers.origin || 'http://127.0.0.1:4173',
+        'Content-Type': 'text/event-stream', 'Access-Control-Allow-Origin': 'http://127.0.0.1:4173',
         'Access-Control-Allow-Credentials': 'true',
       })
       res.write('data: {"type":"thinking_delta","text":"Collecting evidence"}\n\n')
