@@ -1563,68 +1563,58 @@ export function useApi() {
 
   // ── Prometheus API ──
 
-  function promHeaders(workload?: 'dashboard'): Record<string, string> {
-    const { activeTenant } = useTenant()
-    return {
-      'X-Rush-Tenant': activeTenant.value,
-      ...(workload ? { 'X-Rush-Workload': workload } : {}),
-    }
+  async function promRequest<T>(path: string, context: string, workload?: 'dashboard', signal?: AbortSignal): Promise<T> {
+    const generation = getSessionGeneration()
+    const tenant = useTenant().activeTenant.value
+    const route = `/prom/api/v1${path}`
+    // Panels may intentionally share an expression. Share the read, with each
+    // caller owning its subscription, instead of aborting another panel.
+    const body = await analyticsRequestCoordinator.run({
+      userId: storageUserId.value || 'anonymous', tenant, method: 'GET', route,
+      variant: workload || 'interactive',
+    }, async requestSignal => {
+      const response = await authenticatedFetch(route, {
+        headers: { 'X-Rush-Tenant': tenant, ...(workload ? { 'X-Rush-Workload': workload } : {}) },
+        signal: requestSignal,
+      })
+      if (!response.ok) {
+        try { await response.body?.cancel() } catch { /* release the body */ }
+        throw responseError(response, context)
+      }
+      const text = await response.text()
+      assertCurrentSession(generation)
+      return text
+    }, { signal })
+    assertCurrentSession(generation)
+    return parseResponseBody<{ data: T }>(body).data
   }
 
   async function promQuery(query: string, time?: number, signal?: AbortSignal): Promise<PromVectorResponse> {
-    const { activeTenant } = useTenant()
     const params = new URLSearchParams({ query })
     if (time !== undefined) params.set('time', String(time))
-    const res = await authenticatedFetch(`/prom/api/v1/query?${params}`, { headers: promHeaders(), signal }, { requestKey: `prom:${activeTenant.value}:query:${params}` })
-    if (!res.ok) {
-      try { await res.body?.cancel() } catch { /* best effort: release the body */ }
-      throw responseError(res, 'Prometheus query')
-    }
-    const json = await res.json()
-    return json.data as PromVectorResponse
+    return promRequest(`/query?${params}`, 'Prometheus query', undefined, signal)
   }
 
   async function promQueryRange(
     query: string, start: number, end: number, step: number, workload?: 'dashboard', signal?: AbortSignal
   ): Promise<PromMatrixResponse> {
-    const { activeTenant } = useTenant()
     const params = new URLSearchParams({
       query,
       start: String(start),
       end: String(end),
       step: String(step),
     })
-    const res = await authenticatedFetch(`/prom/api/v1/query_range?${params}`, { headers: promHeaders(workload), signal }, { requestKey: `prom:${activeTenant.value}:query-range:${params}:${workload || 'interactive'}` })
-    if (!res.ok) {
-      try { await res.body?.cancel() } catch { /* best effort: release the body */ }
-      throw responseError(res, 'Prometheus range query')
-    }
-    const json = await res.json()
-    return json.data as PromMatrixResponse
+    return promRequest(`/query_range?${params}`, 'Prometheus range query', workload, signal)
   }
 
   async function promLabels(match?: string): Promise<string[]> {
-    const { activeTenant } = useTenant()
     const qs = match ? `?match[]=${encodeURIComponent(match)}` : ''
-    const res = await authenticatedFetch(`/prom/api/v1/labels${qs}`, { headers: promHeaders() }, { requestKey: `prom:${activeTenant.value}:labels:${qs}` })
-    if (!res.ok) {
-      try { await res.body?.cancel() } catch { /* best effort: release the body */ }
-      throw responseError(res, 'Prometheus label query')
-    }
-    const json = await res.json()
-    return json.data as string[]
+    return promRequest(`/labels${qs}`, 'Prometheus label query')
   }
 
   async function promLabelValues(label: string, match?: string): Promise<string[]> {
-    const { activeTenant } = useTenant()
     const qs = match ? `?match[]=${encodeURIComponent(match)}` : ''
-    const res = await authenticatedFetch(`/prom/api/v1/label/${encodePathSegment(label)}/values${qs}`, { headers: promHeaders() }, { requestKey: `prom:${activeTenant.value}:label-values:${label}:${qs}` })
-    if (!res.ok) {
-      try { await res.body?.cancel() } catch { /* best effort: release the body */ }
-      throw responseError(res, 'Prometheus label-values query')
-    }
-    const json = await res.json()
-    return json.data as string[]
+    return promRequest(`/label/${encodePathSegment(label)}/values${qs}`, 'Prometheus label-values query')
   }
 
   // ── Investigation Session API ──
