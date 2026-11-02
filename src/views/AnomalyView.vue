@@ -70,7 +70,6 @@ const liveRefreshing = ref(false)
 // @ts-ignore used for future feature
 const historicalRange = ref(0) // index into TIME_RANGES, default 1h
 const channels = ref<NotificationChannel[]>([])
-const notifiedKeys = ref<Set<string>>(new Set())
 
 // ═══ Top-level tabs (like alerts) ═══
 type Tab = 'anomalous' | 'history' | 'monitors'
@@ -579,7 +578,6 @@ async function refreshAll({ signal }: { signal: AbortSignal }) {
       const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
       if (failure) throw failure.reason
     }
-    triggerNotifications()
   } finally {
     liveRefreshing.value = false
   }
@@ -594,31 +592,6 @@ async function refreshAll({ signal }: { signal: AbortSignal }) {
 
 let refreshRequest: Promise<void> | null = null
 const liveLoop = usePollingTask({ category: 'anomaly', intervalMs: LIVE_INTERVAL, run: refreshAll })
-
-function triggerNotifications() {
-  for (const config of savedConfigs.value) {
-    if (!config.channelIds?.length) continue
-    const charts = allConfigCharts.value[config.id] || []
-    for (const m of charts) {
-      const len = m.values.length
-      if (len === 0 || !m.bands.anomalies[len - 1]) continue
-      // Find trailing streak start
-      let streakStart = len - 1
-      while (streakStart > 0 && m.bands.anomalies[streakStart - 1]) streakStart--
-      const dedupKey = `${config.id}:${formatSeriesName(m.name, m.labels)}:${m.timestamps[streakStart]}`
-      if (notifiedKeys.value.has(dedupKey)) continue
-      notifiedKeys.value.add(dedupKey)
-
-      for (const chId of config.channelIds) {
-        const ch = channels.value.find(c => c.id === chId)
-        const payload = buildAlertPayload(config, m, ch?.channel_type)
-        api.notifyChannel(chId, payload).catch(() => {
-          // Silently ignore notification failures
-        })
-      }
-    }
-  }
-}
 
 // ═══ Manual alert sending ═══
 const alertSending = ref<Set<string>>(new Set())
@@ -962,7 +935,6 @@ onMounted(async () => {
   if (visible.length) {
     await Promise.allSettled(visible.map(c => fetchConfigData(c)))
   }
-  triggerNotifications()
   liveLoop.start()
 })
 
