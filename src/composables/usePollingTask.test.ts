@@ -114,4 +114,18 @@ describe('polling scheduler lifecycle', () => {
     expect(task.state.value.consecutiveFailures).toBe(0)
     expect(task.state.value.backoffMs).toBeNull()
   })
+
+  it('retries an external AbortError while its own task is still active', async () => {
+    const scheduler = new PollingScheduler({ random: () => 0.5 })
+    const run = vi.fn()
+      .mockRejectedValueOnce(new DOMException('A different caller cancelled the request', 'AbortError'))
+      .mockResolvedValue(undefined)
+    const task = scheduler.register({ category: 'dashboard', intervalMs: 1000, immediate: true, run })
+    task.start()
+    await settle()
+    expect(task.state.value.nextRunAt).toBe(1000)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(task.state.value.consecutiveFailures).toBe(0)
+  })
 })

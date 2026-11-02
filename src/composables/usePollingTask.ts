@@ -80,10 +80,6 @@ function abortError(): Error {
   return error
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError'
-}
-
 function retryAfterMs(error: unknown): number | null {
   if (!error || typeof error !== 'object' || !('retryAfterMs' in error)) return null
   const value = Number((error as { retryAfterMs?: unknown }).retryAfterMs)
@@ -379,7 +375,9 @@ export class PollingScheduler {
         this.schedule(task, task.intervalMs)
       })
       .catch(error => {
-        if (controller.signal.aborted || generation !== task.generation || isAbortError(error)) return
+        // A transport can be cancelled independently of this task. Only our
+        // own cancellation should stop scheduling an otherwise active poll.
+        if (controller.signal.aborted || generation !== task.generation) return
         const durationMs = Math.max(0, this.clock.now() - startedAt)
         task.consecutiveFailures++
         const exponential = Math.min(

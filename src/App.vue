@@ -307,10 +307,10 @@ watch(isAuthenticated, async (authed) => {
           <span>{{ linkedTenantNotice }}</span>
           <button type="button" class="tenant-link-notice-dismiss" aria-label="Dismiss" @click="dismissLinkedTenantNotice">&times;</button>
         </div>
-        <router-view />
+        <router-view :key="route.path" />
       </main>
     </div>
-    <router-view v-else />
+    <router-view v-else :key="route.path" />
     <CommandPalette v-model:open="paletteOpen" :navigation-groups="navigationGroups" />
     <ApiUnavailableDialog
       :open="apiAvailability.open.value"
