@@ -106,6 +106,60 @@ function timeoutError(): Error {
   return error
 }
 
+/** Keep cancellation and keyed ownership until the response body ends. */
+function responseWithLifecycle(response: Response, signal: AbortSignal, release: () => void): Response {
+  if (!response.body) { release(); return response }
+  const reader = response.body.getReader()
+  let finished = false
+  let bodyController: ReadableStreamDefaultController<Uint8Array>
+  const releaseReader = () => { try { reader.releaseLock() } catch { /* an abort may still be settling */ } }
+  const finish = () => {
+    if (finished) return
+    finished = true
+    signal.removeEventListener('abort', onAbort)
+    release()
+  }
+  const onAbort = () => {
+    if (finished) return
+    const reason = signal.reason ?? abortError()
+    bodyController.error(reason)
+    finish()
+    void reader.cancel(reason).catch(() => {}).finally(releaseReader)
+  }
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      bodyController = controller
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) onAbort()
+    },
+    async pull(controller) {
+      try {
+        const chunk = await reader.read()
+        if (finished) { releaseReader(); return }
+        if (chunk.done) { controller.close(); finish(); releaseReader() }
+        else controller.enqueue(chunk.value)
+      } catch (error) {
+        if (!finished) controller.error(error)
+        finish()
+        releaseReader()
+      }
+    },
+    async cancel(reason) {
+      finish()
+      try { await reader.cancel(reason) } finally { releaseReader() }
+    },
+  })
+  const metadata = (wrapped: Response): Response => {
+    const clone = wrapped.clone.bind(wrapped)
+    Object.defineProperties(wrapped, {
+      url: { value: response.url }, type: { value: response.type }, redirected: { value: response.redirected },
+      clone: { value: () => metadata(clone()) },
+    })
+    return wrapped
+  }
+  return metadata(new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers }))
+}
+
 export async function authenticatedFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -113,9 +167,6 @@ export async function authenticatedFetch(
 ): Promise<Response> {
   const generation = getSessionGeneration()
   const sessionSignal = sessionController.signal
-  // All browser API calls use the session cookie boundary deliberately. Keep
-  // this default centralized so one-off fetch callers cannot silently omit
-  // credentials or allow sensitive responses to enter the HTTP cache.
   const method = (init?.method || 'GET').toUpperCase()
   const canRetry = isIdempotent(method)
   const retries = canRetry ? Math.max(0, options?.retries ?? DEFAULT_RETRIES) : 0
@@ -124,6 +175,10 @@ export async function authenticatedFetch(
   const requestKey = options?.requestKey
   const latestController = requestKey ? new AbortController() : undefined
   const parentSignal = init?.signal ?? undefined
+  const release = () => {
+    if (requestKey && latestRequests.get(requestKey) === latestController) latestRequests.delete(requestKey)
+  }
+  let bodyOwnsRequest = false
 
   if (requestKey) {
     latestRequests.get(requestKey)?.abort(abortError())
@@ -133,24 +188,16 @@ export async function authenticatedFetch(
   try {
     for (let attempt = 0; ; attempt++) {
       assertCurrentSession(generation)
-      const controller = new AbortController()
+      const timeoutController = new AbortController()
+      // Native signal composition keeps cancellation connected to the fetch
+      // body without retaining manual listeners on a long-lived session signal.
+      const signal = AbortSignal.any([sessionSignal, parentSignal, latestController?.signal, timeoutController.signal]
+        .filter((candidate): candidate is AbortSignal => candidate !== undefined))
       let timedOut = false
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const onParentAbort = () => controller.abort(parentSignal?.reason)
-      const onLatestAbort = () => controller.abort(abortError())
-      const onSessionAbort = () => controller.abort(abortError())
-      sessionSignal.addEventListener('abort', onSessionAbort, { once: true })
-
-      if (parentSignal?.aborted) controller.abort(parentSignal.reason)
-      else parentSignal?.addEventListener('abort', onParentAbort, { once: true })
-      if (latestController?.signal.aborted) controller.abort(abortError())
-      else latestController?.signal.addEventListener('abort', onLatestAbort, { once: true })
-      if (timeoutMs > 0) {
-        timer = setTimeout(() => {
-          timedOut = true
-          controller.abort()
-        }, timeoutMs)
-      }
+      const timer = timeoutMs > 0 ? setTimeout(() => {
+        timedOut = true
+        timeoutController.abort()
+      }, timeoutMs) : undefined
 
       let response: Response
       try {
@@ -158,13 +205,10 @@ export async function authenticatedFetch(
           ...init,
           credentials: init?.credentials ?? 'same-origin',
           cache: init?.cache ?? 'no-store',
-          signal: controller.signal,
+          signal,
         })
       } catch (error) {
         if (timer) clearTimeout(timer)
-        parentSignal?.removeEventListener('abort', onParentAbort)
-        latestController?.signal.removeEventListener('abort', onLatestAbort)
-        sessionSignal.removeEventListener('abort', onSessionAbort)
         assertCurrentSession(generation)
         if (parentSignal?.aborted || latestController?.signal.aborted) throw error
         if ((timedOut || isRetryableError(error)) && attempt < retries) {
@@ -175,32 +219,29 @@ export async function authenticatedFetch(
         throw error
       }
 
+      // This deadline covers headers only. SSE readers own their idle deadline.
       if (timer) clearTimeout(timer)
-      parentSignal?.removeEventListener('abort', onParentAbort)
-      latestController?.signal.removeEventListener('abort', onLatestAbort)
-      sessionSignal.removeEventListener('abort', onSessionAbort)
-
-      // A newer keyed request may have won the race while this response was
-      // resolving. Drop the body and do not let the stale response update UI.
-      if (sessionSignal.aborted || parentSignal?.aborted || latestController?.signal.aborted) {
-        try { await response.body?.cancel() } catch { /* best effort: release the body */ }
-        throw parentSignal?.reason ?? abortError()
+      if (signal.aborted) {
+        try { await response.body?.cancel() } catch { /* release a raced response */ }
+        assertCurrentSession(generation)
+        if (timedOut && attempt < retries) {
+          await waitForRetry(retryDelayMs * (attempt + 1), [parentSignal, latestController?.signal, sessionSignal])
+          continue
+        }
+        throw timedOut ? timeoutError() : parentSignal?.reason ?? abortError()
       }
 
       if (RETRYABLE_STATUSES.has(response.status) && attempt < retries) {
-        try { await response.body?.cancel() } catch { /* best effort: release the body */ }
+        try { await response.body?.cancel() } catch { /* release the retry body */ }
         await waitForRetry(retryDelayMs * (attempt + 1), [parentSignal, latestController?.signal, sessionSignal])
         continue
       }
-
-      if (response.status === 401 && !options?.ignoreUnauthorized) {
-        reportSessionExpired()
-      }
-      return response
+      if (response.status === 401 && !options?.ignoreUnauthorized) reportSessionExpired()
+      const wrapped = responseWithLifecycle(response, signal, release)
+      bodyOwnsRequest = true
+      return wrapped
     }
   } finally {
-    if (requestKey && latestRequests.get(requestKey) === latestController) {
-      latestRequests.delete(requestKey)
-    }
+    if (!bodyOwnsRequest) release()
   }
 }

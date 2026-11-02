@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, nextTick, watch, computed, onMounted } from 'vue'
+import { ref, nextTick, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useApi } from '../composables/useApi'
+import { onSessionChanged } from '../composables/authSession'
 import { safeApiErrorMessage } from '../lib/apiError'
 import { formatInvestigationActivity } from '../lib/investigationTime'
 import type { InvestigationSession, InvestigationTemplate } from '../types'
@@ -145,6 +146,18 @@ const running = ref(false)
 const done = ref(false)
 const errorMsg = ref('')
 const abortController = ref<AbortController | null>(null)
+let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null
+let streamGeneration = 0
+let disposed = false
+function cancelStream() {
+  streamGeneration++
+  abortController.value?.abort()
+  abortController.value = null
+  void activeReader?.cancel().catch(() => {})
+  activeReader = null
+}
+const stopSessionListener = onSessionChanged(() => stop())
+onUnmounted(() => { disposed = true; stopSessionListener(); cancelStream() })
 const streamEl = ref<HTMLElement | null>(null)
 const collapsedResults = ref<Set<string>>(new Set())
 
@@ -245,6 +258,9 @@ function handleEvent(event: AgentEvent) {
 }
 
 async function streamInvestigation(body: Record<string, unknown>) {
+  if (disposed) return
+  cancelStream()
+  const generation = streamGeneration
   running.value = true
   done.value = false
   errorMsg.value = ''
@@ -256,6 +272,10 @@ async function streamInvestigation(body: Record<string, unknown>) {
 
   try {
     const resp = await api.openInvestigationStream(body, controller.signal)
+    if (generation !== streamGeneration) {
+      try { await resp.body?.cancel() } catch { /* release old response */ }
+      return
+    }
 
     if (!resp.ok) {
       try { await resp.body?.cancel() } catch { /* best effort: release the body */ }
@@ -267,6 +287,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
     if (!resp.body) throw new Error('The investigation stream returned no body.')
     const reader = resp.body.getReader()
     streamReader = reader
+    activeReader = reader
     const decoder = new TextDecoder()
     let buffer = ''
     let eventCount = 0
@@ -274,6 +295,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
 
     while (true) {
       const { done: streamDone, value } = await readChunkWithTimeout(reader)
+      if (generation !== streamGeneration || controller.signal.aborted) break
       if (streamDone) break
 
       buffer += decoder.decode(value, { stream: true })
@@ -311,7 +333,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
     // A dropped proxy/browser connection can end the body without an agent
     // terminal event. Surface that state instead of leaving the turn looking
     // permanently active with no explanation or retry action.
-    if (!receivedTerminalEvent && !controller.signal.aborted) {
+    if (!receivedTerminalEvent && !controller.signal.aborted && generation === streamGeneration) {
       thinking.value = ''
       const turn = currentTurn()
       if (turn) turn.done = true
@@ -321,6 +343,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
     // A timeout/parse/size failure must release the underlying connection;
     // otherwise a stalled SSE reader can remain alive after the UI has moved on.
     try { await streamReader?.cancel() } catch { /* best effort: release the stream */ }
+    if (generation !== streamGeneration) return
     if (e.name === 'TimeoutError') controller.abort()
     if (e.name !== 'AbortError') {
       errorMsg.value = e.name === 'TimeoutError'
@@ -328,9 +351,13 @@ async function streamInvestigation(body: Record<string, unknown>) {
         : e.message || 'Connection failed'
     }
   } finally {
-    running.value = false
-    abortController.value = null
-    streamReader = null
+    try { await streamReader?.cancel() } catch { /* release on every terminal path */ }
+    try { streamReader?.releaseLock() } catch { /* an abort may still be settling */ }
+    if (generation === streamGeneration) {
+      running.value = false
+      abortController.value = null
+      activeReader = null
+    }
   }
 }
 
@@ -356,6 +383,8 @@ async function loadTemplates() {
 
 // ── Load a previous session ──
 async function loadSession(id: string) {
+  cancelStream()
+  const generation = streamGeneration
   errorMsg.value = ''
   thinking.value = ''
   running.value = false
@@ -363,6 +392,7 @@ async function loadSession(id: string) {
 
   try {
     const result = await api.getInvestigationSession(id)
+    if (generation !== streamGeneration || disposed) return
     sessionId.value = id
     sessionTitle.value = result.session.title
     showSidebar.value = false
@@ -403,7 +433,7 @@ async function loadSession(id: string) {
     currentTurnIdx.value = turns.value.length - 1
     done.value = true
   } catch (e: any) {
-    errorMsg.value = e.message || 'Failed to load session'
+    if (generation === streamGeneration) errorMsg.value = e.message || 'Failed to load session'
   }
 }
 
@@ -422,6 +452,7 @@ async function archiveSession(id: string) {
 
 // ── Initial investigation (turn 0) ──
 async function start(templateId?: string) {
+  cancelStream()
   showTemplatePicker.value = false
   // Reset to a fresh session
   sessionId.value = ''
@@ -491,11 +522,20 @@ async function submitFollowUp() {
 }
 
 function stop() {
-  abortController.value?.abort()
+  cancelStream()
   running.value = false
+  if (thinking.value) {
+    pushEventToCurrentTurn({ type: 'thinking_delta', text: thinking.value })
+    thinking.value = ''
+  }
+  done.value = true
+  const turn = currentTurn()
+  if (turn) turn.done = true
 }
 
 function resetToNew() {
+  cancelStream()
+  running.value = false
   sessionId.value = ''
   sessionTitle.value = ''
   turns.value = []
