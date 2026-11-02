@@ -20,6 +20,7 @@ import { loneMetricName, metricSelector } from '../lib/promqlNames'
 interface MetricsHistoryQuery {
   query: string
   timePreset: number
+  customRange?: { from: string; to: string }
 }
 
 const { entries: metricsHistory, push: pushHistory, remove: removeHistory, clear: clearHistory } = useQueryHistory<MetricsHistoryQuery>('rush_metrics_history')
@@ -192,7 +193,7 @@ async function executeQuery(opts?: { skipHistory?: boolean }) {
   }
 
   if (!opts?.skipHistory) {
-    pushHistory({ query: query.value, timePreset: selectedPreset.value })
+    pushHistory({ query: query.value, timePreset: selectedPreset.value, customRange: customRange.value ?? undefined })
   }
 
   executing.value = true
@@ -202,16 +203,17 @@ async function executeQuery(opts?: { skipHistory?: boolean }) {
   hasResults.value = false
 
   try {
+    const end = customRange.value ? Date.parse(customRange.value.to) / 1000 : Math.floor(Date.now() / 1000)
+    const start = customRange.value ? Date.parse(customRange.value.from) / 1000 : end - selectedPreset.value * 60
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) throw new Error('Choose a valid time range.')
     if (activeTab.value === 'table') {
-      const data = await api.promQuery(query.value)
+      const data = await api.promQuery(query.value, customRange.value ? end : undefined)
       if (data.resultType === 'vector') {
         vectorResults.value = data.result
       }
     } else {
-      const now = Math.floor(Date.now() / 1000)
-      const start = now - selectedPreset.value * 60
-      const step = Math.max(1, Math.floor((now - start) / 250))
-      const data = await api.promQueryRange(query.value, start, now, step)
+      const step = Math.max(1, Math.floor((end - start) / 250))
+      const data = await api.promQueryRange(query.value, start, end, step)
       if (data.resultType === 'matrix') {
         matrixResults.value = data.result
       }
@@ -235,9 +237,13 @@ function clearQuery() {
   syncUrlState()
 }
 
-function loadHistoryEntry(entry: HistoryEntry<MetricsHistoryQuery>) {
+async function loadHistoryEntry(entry: HistoryEntry<MetricsHistoryQuery>) {
+  initializingTimeRange = true
   query.value = entry.query.query
   selectedPreset.value = entry.query.timePreset
+  customRange.value = entry.query.customRange ?? null
+  await nextTick()
+  initializingTimeRange = false
   executeQuery({ skipHistory: true })
 }
 
@@ -447,21 +453,25 @@ async function loadHelpers() {
 const shareCopied = ref(false)
 
 function buildShareUrl(): string {
-  const params = new URLSearchParams()
-  if (query.value) params.set('q', query.value)
-  if (activeTab.value !== 'graph') params.set('tab', activeTab.value)
-  if (selectedPreset.value !== 60) params.set('t', String(selectedPreset.value))
-  if (viewMode.value !== 'query') params.set('mode', viewMode.value)
-  const href = router.resolve({ name: 'metrics', query: Object.fromEntries(params) }).href
+  const href = router.resolve({ name: 'metrics', query: metricsUrlState() }).href
   return new URL(href, window.location.origin).href
 }
 
-function syncUrlState() {
+function metricsUrlState(): Record<string, string> {
   const params: Record<string, string> = {}
   if (query.value) params.q = query.value
   if (activeTab.value !== 'graph') params.tab = activeTab.value
   if (selectedPreset.value !== 60) params.t = String(selectedPreset.value)
   if (viewMode.value !== 'query') params.mode = viewMode.value
+  if (customRange.value) {
+    params.from = customRange.value.from
+    params.to = customRange.value.to
+  }
+  return params
+}
+
+function syncUrlState() {
+  const params = metricsUrlState()
   router.replace({ name: 'metrics', query: Object.keys(params).length ? params : undefined })
 }
 
@@ -480,18 +490,33 @@ function restoreFromUrl() {
   if (q.tab === 'table') activeTab.value = 'table'
   if (q.t) selectedPreset.value = Number(q.t) || 60
   if (q.mode === 'explore') viewMode.value = 'explore'
+  if (q.from !== undefined || q.to !== undefined) {
+    const from = typeof q.from === 'string' ? Date.parse(q.from) : NaN
+    const to = typeof q.to === 'string' ? Date.parse(q.to) : NaN
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from) {
+      errorMsg.value = 'Choose a valid time range.'
+      return false
+    }
+    customRange.value = { from: new Date(from).toISOString(), to: new Date(to).toISOString() }
+    selectedPreset.value = Math.max(1, Math.round((to - from) / 60_000))
+  }
+  return true
 }
 
-onMounted(() => {
+let initializingTimeRange = true
+onMounted(async () => {
   labelCache.clear()
-  restoreFromUrl()
+  const validRange = restoreFromUrl()
   loadHelpers()
-  if (query.value.trim()) executeQuery()
+  await nextTick()
+  initializingTimeRange = false
+  if (validRange && query.value.trim()) executeQuery()
 })
 
 // Re-execute on tab or time range change if we have a query
-watch([activeTab, selectedPreset], () => {
-  if (hasResults.value && query.value.trim()) {
+watch([activeTab, selectedPreset, customRange], () => {
+  if (initializingTimeRange) return
+  if ((hasResults.value || executing.value) && query.value.trim()) {
     executeQuery()
   } else {
     syncUrlState()
@@ -549,6 +574,7 @@ watch(viewMode, () => {
       v-if="metricsEnabled && viewMode === 'explore'"
       :metric-names="metricNames"
       :time-preset="selectedPreset"
+      :custom-range="customRange"
       @select="handleExploreSelect"
     />
 
@@ -598,6 +624,7 @@ watch(viewMode, () => {
           >
             <template #summary="{ entry }">
               <span class="mono">{{ entry.query.query.length > 50 ? entry.query.query.slice(0, 50) + '...' : entry.query.query }}</span>
+              <small v-if="entry.query.customRange">{{ new Date(entry.query.customRange.from).toLocaleString() }} to {{ new Date(entry.query.customRange.to).toLocaleString() }}</small>
             </template>
           </QueryHistory>
         </div>
