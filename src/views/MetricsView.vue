@@ -237,10 +237,13 @@ function clearQuery() {
   syncUrlState()
 }
 
-function loadHistoryEntry(entry: HistoryEntry<MetricsHistoryQuery>) {
+async function loadHistoryEntry(entry: HistoryEntry<MetricsHistoryQuery>) {
+  initializingTimeRange = true
   query.value = entry.query.query
   selectedPreset.value = entry.query.timePreset
   customRange.value = entry.query.customRange ?? null
+  await nextTick()
+  initializingTimeRange = false
   executeQuery({ skipHistory: true })
 }
 
