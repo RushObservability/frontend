@@ -17,6 +17,20 @@ describe('dashboard histogram buckets', () => {
     expect(buildHistogram([{ points: [[1, 12], [2, 12]] }], 20).bins).toEqual([{ key: '12', count: 2, lower: 12, upper: 12 }])
   })
 
+  it('buckets 250,000 samples without passing them as function arguments', () => {
+    const series = Array.from({ length: 1000 }, (_, seriesIndex) => ({
+      points: Array.from({ length: 250 }, (_, pointIndex): [number, number] => [
+        pointIndex, seriesIndex * 250 + pointIndex,
+      ]),
+    }))
+    const result = buildHistogram(series, 20)
+    expect(result.sampleCount).toBe(250_000)
+    expect(result.bins).toHaveLength(20)
+    expect(result.bins.map(bin => bin.count)).toEqual(Array(20).fill(12_500))
+    expect(result.bins[0]!.lower).toBe(0)
+    expect(result.bins.at(-1)!.upper).toBe(249_999)
+  })
+
   it('returns an empty distribution without finite values', () => {
     expect(buildHistogram([{ points: [[1, Number.NaN]] }]).bins).toEqual([])
   })
