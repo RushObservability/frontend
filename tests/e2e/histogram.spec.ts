@@ -1,5 +1,36 @@
 import { test, expect } from '@playwright/test'
 
+test('a dashboard renders a histogram containing 250,000 returned samples', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.route('**/api/v1/**', async route => {
+    const url = new URL(route.request().url())
+    let body: unknown = { services: [], views: [] }
+    if (url.pathname === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role: 'admin' } }
+    if (url.pathname === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
+    if (url.pathname === '/api/v1/dashboards/large-histogram') body = {
+      id: 'large-histogram', name: 'Large histogram', visibility: 'tenant', variables: [],
+      widgets: [{
+        id: 'distribution', title: 'Sample distribution', widget_type: 'histogram',
+        query_config: { source: 'metrics', promql: 'cpu' }, display_config: {},
+        position: { col: 1, row: 1, col_span: 12, row_span: 4 },
+      }],
+    }
+    if (url.pathname === '/prom/api/v1/query_range') {
+      const end = Number(url.searchParams.get('end'))
+      body = { status: 'success', data: { resultType: 'matrix', result: Array.from({ length: 1000 }, (_, s) => ({
+        metric: { __name__: 'cpu', instance: `i${s}` },
+        values: Array.from({ length: 250 }, (_, i) => [end - (249 - i) * 14, String(i % 100)]),
+      })) } }
+    }
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+  })
+  await page.goto('/dashboards/large-histogram')
+  await expect(page.locator('.histogram-svg rect')).toHaveCount(20)
+  await expect(page.getByText('250,000 samples', { exact: true })).toBeVisible()
+  expect(errors).toEqual([])
+})
+
 test('histogram uses unscaled chart typography and responsive numeric bucket ticks', async ({ page }, info) => {
   const now = Math.floor(Date.now() / 1000)
   const values = Array.from({ length: 221 }, (_, i) => [now - 3300 + i * 15, String(1.04 + i / 1000)])
