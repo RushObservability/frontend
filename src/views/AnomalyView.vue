@@ -6,6 +6,7 @@ import { useAuth } from '../composables/useAuth'
 import { usePollingTask } from '../composables/usePollingTask'
 import type { NotificationChannel, AnomalyRule, AnomalyEventWithRule, TimeseriesBucket } from '../types'
 import { metricSelector } from '../lib/promqlNames'
+import { matchMetricNames } from '../lib/metricPattern'
 
 const route = useRoute()
 const router = useRouter()
@@ -61,6 +62,8 @@ const cursorFraction = ref<number | null>(null)
 
 const savedConfigs = ref<AnomalyConfig[]>([])
 const configData = ref<Record<string, MetricMonitor[]>>({})
+const configErrors = ref<Record<string, string>>({})
+const patternController = new AbortController()
 const configsLoaded = ref(false)
 const expandedDetectorIds = ref<Set<string>>(new Set())
 const detectorDataLoading = ref<Set<string>>(new Set())
@@ -410,6 +413,7 @@ async function fetchApmConfigData(config: AnomalyConfig, rangeIdx?: number, sign
 }
 
 async function fetchConfigData(config: AnomalyConfig, rangeIdx?: number, signal?: AbortSignal) {
+  delete configErrors.value[config.id]
   if (config.source === 'apm') {
     await fetchApmConfigData(config, rangeIdx, signal)
     return
@@ -419,13 +423,13 @@ async function fetchConfigData(config: AnomalyConfig, rangeIdx?: number, signal?
     return
   }
   try {
-    const re = new RegExp(config.pattern)
-    const names = allMetricNames.value.filter(n => re.test(n)).slice(0, MAX_MONITORS)
+    const names = await matchMetricNames(config.pattern, allMetricNames.value, MAX_MONITORS, signal ?? patternController.signal)
     if (!names.length) { configData.value[config.id] = []; return }
     configData.value[config.id] = await fetchMetrics(names, config.splitLabels?.length ? config.splitLabels : undefined, rangeIdx, signal)
   } catch (error) {
-    if (signal?.aborted) return
+    if (signal?.aborted || patternController.signal.aborted) return
     configData.value[config.id] = []
+    configErrors.value[config.id] = error instanceof Error ? error.message : 'Could not match the detector metric pattern.'
     if (signal) throw error
   }
 }
@@ -541,7 +545,7 @@ async function toggleDetectorSignal(config: AnomalyConfig) {
   }
   next.add(config.id)
   expandedDetectorIds.value = next
-  if (Object.prototype.hasOwnProperty.call(configData.value, config.id)) return
+  if (Object.prototype.hasOwnProperty.call(configData.value, config.id) && !configErrors.value[config.id]) return
   const loading = new Set(detectorDataLoading.value)
   loading.add(config.id)
   detectorDataLoading.value = loading
@@ -967,6 +971,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  patternController.abort()
   document.removeEventListener('click', onDocClick)
   liveLoop.stop()
 })
@@ -1052,6 +1057,7 @@ onUnmounted(() => {
             <router-link :to="{ name: 'anomaly-detail', params: { ruleId: config.id } }" class="open-detector-link">Open detector →</router-link>
           </div>
         </div>
+        <p v-if="configErrors[config.id]" class="empty-sub" role="alert">{{ configErrors[config.id] }}</p>
         <div class="charts-grid" v-if="anomalousChartsFor(config.id).length">
           <div v-for="(m, mi) in anomalousChartsFor(config.id)" :key="formatSeriesName(m.name, m.labels)" class="chart-card card" :data-chart-metric="formatSeriesName(m.name, m.labels)">
             <div class="chart-header">
@@ -1343,6 +1349,7 @@ onUnmounted(() => {
           </div>
         </div>
       </template>
+      <p v-if="isDetectorExpanded(config.id) && configErrors[config.id]" class="empty-sub" role="alert">{{ configErrors[config.id] }}</p>
       <div class="charts-grid detector-charts" v-if="isDetectorExpanded(config.id) && (allConfigCharts[config.id] || []).length">
         <div v-for="(m, mi) in allConfigCharts[config.id]" :key="formatSeriesName(m.name, m.labels)" class="chart-card card" :data-chart-metric="formatSeriesName(m.name, m.labels)">
           <div class="chart-header">
