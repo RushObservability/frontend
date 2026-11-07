@@ -487,6 +487,23 @@ export interface DashboardExport {
   }>
 }
 
+export interface DashboardVersionSummary {
+  id: string
+  dashboard_id: string
+  /** Audit action of the edit that produced this version, e.g. `dashboard_widget.update`. */
+  reason: string
+  created_by: string
+  created_by_name: string
+  created_at: string
+}
+
+export interface DashboardVersion extends DashboardVersionSummary {
+  snapshot: {
+    dashboard: DashboardExport['dashboard'] & { variables?: DashboardVariable[] }
+    widgets: Array<DashboardExport['widgets'][number] & { id: string }>
+  }
+}
+
 export interface WidgetData {
   diagnostic_requests?: import('../lib/queryDiagnostics').DiagnosticRequest[]
   type: WidgetType

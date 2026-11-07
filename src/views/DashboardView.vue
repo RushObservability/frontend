@@ -11,6 +11,7 @@ import { VAR_ALL } from '../types'
 import WidgetWrapper from '../components/widgets/WidgetWrapper.vue'
 import WidgetEditor from '../components/widgets/WidgetEditor.vue'
 import VariableEditor from '../components/widgets/VariableEditor.vue'
+import DashboardHistory from '../components/widgets/DashboardHistory.vue'
 import TimePicker from '../components/TimePicker.vue'
 import { usePollingTask } from '../composables/usePollingTask'
 import { defaultPanelCaption, formatPanelRange, formatPanelSource } from '../components/panels/panelPresentation'
@@ -47,6 +48,7 @@ const savingDefaults = ref(false)
 const defaultsSaved = ref(false)
 const showAddWidget = ref(false)
 const showVarEditor = ref(false)
+const showHistory = ref(false)
 const editingWidget = ref<Widget | null>(null)
 const savingWidget = ref(false)
 const widgetSaveError = ref<string | null>(null)
@@ -61,6 +63,7 @@ watch(tvMode, enabled => {
   editMode.value = false
   showAddWidget.value = false
   showVarEditor.value = false
+  showHistory.value = false
 })
 
 // ── Template variables ──
@@ -498,6 +501,14 @@ async function saveVariables(vars: DashboardVariable[]) {
   } catch { /* error in api.error */ }
 }
 
+async function onRestored(restored: DashboardWithWidgets) {
+  dashboard.value = restored
+  showHistory.value = false
+  await loadVarOptions()
+  initVarValues()
+  loadAllWidgetData()
+}
+
 function editWidget(widget: Widget) {
   widgetSaveError.value = null
   editingWidget.value = widget
@@ -546,6 +557,9 @@ function widgetStyle(widget: Widget) {
         </button>
         <button class="share-btn" @click="shareLink" :title="shareCopied ? 'Copied!' : 'Copy a link with the current time and variables'">
           {{ shareCopied ? '✓ Link copied' : 'Share view' }}
+        </button>
+        <button v-if="dashboard" class="share-btn" type="button" title="See earlier versions of this dashboard" @click="showHistory = true">
+          History
         </button>
         <button v-if="canWrite" class="btn-edit" :class="{ active: editMode }" @click="editMode = !editMode">
           {{ editMode ? 'Finish editing' : 'Edit dashboard' }}
@@ -705,6 +719,14 @@ function widgetStyle(widget: Widget) {
       :variables="variables"
       @save="saveVariables"
       @cancel="showVarEditor = false"
+    />
+
+    <DashboardHistory
+      v-if="showHistory && dashboard"
+      :dashboard="dashboard"
+      :can-restore="canWrite"
+      @restored="onRestored"
+      @close="showHistory = false"
     />
   </div>
 </template>

@@ -32,6 +32,8 @@ import type {
   DashboardWithWidgets,
   DashboardTemplate,
   DashboardExport,
+  DashboardVersion,
+  DashboardVersionSummary,
   Widget,
   NotificationChannel,
   NotificationLogEntry,
@@ -503,6 +505,20 @@ export function useApi() {
 
   async function exportDashboard(id: string): Promise<DashboardExport> {
     return await request(`/dashboards/${encodePathSegment(id)}/export`)
+  }
+
+  async function listDashboardVersions(id: string): Promise<{ versions: DashboardVersionSummary[] }> {
+    return await request(`/dashboards/${encodePathSegment(id)}/versions`)
+  }
+
+  async function getDashboardVersion(id: string, versionId: string): Promise<DashboardVersion> {
+    return await request(`/dashboards/${encodePathSegment(id)}/versions/${encodePathSegment(versionId)}`)
+  }
+
+  async function restoreDashboardVersion(id: string, versionId: string): Promise<DashboardWithWidgets> {
+    return await request(`/dashboards/${encodePathSegment(id)}/versions/${encodePathSegment(versionId)}/restore`, {
+      method: 'POST',
+    })
   }
 
   async function importDashboard(data: DashboardExport): Promise<Dashboard> {
@@ -2024,6 +2040,7 @@ export function useApi() {
     listSavedQueries, getSavedQuery, createSavedQuery, updateSavedQuery, deleteSavedQuery,
     listDashboards, getDashboard, createDashboard, updateDashboard, deleteDashboard,
     exportDashboard, importDashboard, listDashboardTemplates, createFromTemplate,
+    listDashboardVersions, getDashboardVersion, restoreDashboardVersion,
     createWidget, updateWidget, deleteWidget,
     listChannels, createChannel, updateChannel, deleteChannel, testChannel, notifyChannel, listNotificationLog,
     listAlertRoutes, createAlertRoute, updateAlertRoute, deleteAlertRoute,
