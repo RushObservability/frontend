@@ -1,6 +1,7 @@
 import { useApi } from './useApi'
 import { applyVarsToFilters, substitute } from './useVarSubst'
 import { parseUtcTimestamp } from '../lib/utcTimestamp'
+import type { DiagnosticRequest } from '../lib/queryDiagnostics'
 import type { CountBucket, Filter, GroupedTimeseriesBucket, TimeseriesBucket, Widget, WidgetData, WidgetPanelQuery, WidgetQueryConfig, WidgetType } from '../types'
 
 export function useWidgetData() {
@@ -23,6 +24,9 @@ export function useWidgetData() {
     const from = exactRange ? new Date(exactRange.from) : new Date(to.getTime() - rangeMin * 60 * 1000)
     const timeRange = { from: from.toISOString(), to: to.toISOString() }
     const timeDomain = { from: from.getTime() / 1000, to: to.getTime() / 1000 }
+    const diagnostic_requests: DiagnosticRequest[] = visibleQueries.map(query => query.source === 'metrics'
+      ? { signal: 'metrics', time_range: timeRange, filters: [], promql: substitute(query.promql || '', varValues, '.*') }
+      : { signal: query.source === 'logs' ? 'logs' : 'spans', time_range: timeRange, filters: applyVarsToFilters(query.filters || [], varValues) })
 
     if (!visibleQueries.length) {
       return { type: widget.widget_type, series: [], time_domain: timeDomain }
@@ -71,16 +75,16 @@ export function useWidgetData() {
       if (!series.length && queryErrors.length) {
         throw new Error(queryErrors.map(error => `${error.ref_id}: ${error.message}`).join(' · '))
       }
-      return { type: widget.widget_type, series, query_errors: queryErrors, time_domain: timeDomain }
+      return { type: widget.widget_type, series, query_errors: queryErrors, time_domain: timeDomain, diagnostic_requests }
     }
 
     // Stat/bar/table panels use the first visible query for now. The editor
     // communicates that multiple overlaid queries are a time-series feature.
     const data = await fetchQueryData(widget.widget_type, visibleQueries[0]!, varValues, timeRange, signal)
     if ((widget.widget_type === 'heatmap' || widget.widget_type === 'histogram') && data.buckets) {
-      return { type: widget.widget_type, series: [bucketsToSeries(data.buckets, visibleQueries[0]!)], time_domain: timeDomain }
+      return { type: widget.widget_type, series: [bucketsToSeries(data.buckets, visibleQueries[0]!)], time_domain: timeDomain, diagnostic_requests }
     }
-    return widget.widget_type === 'timeseries' || widget.widget_type === 'heatmap' || widget.widget_type === 'histogram' ? { ...data, time_domain: timeDomain } : data
+    return { ...data, time_domain: timeDomain, diagnostic_requests: diagnostic_requests.slice(0, 1) }
   }
 
   async function fetchQueryData(

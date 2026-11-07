@@ -16,6 +16,8 @@ import { TablePanel, TimeSeriesPanel, formatPanelRange } from '../components/pan
 import type { TimeSeriesPanelSeries } from '../components/panels'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import { loneMetricName, metricSelector } from '../lib/promqlNames'
+import QueryDiagnosis from '../components/QueryDiagnosis.vue'
+import type { DiagnosticRequest } from '../lib/queryDiagnostics'
 
 interface MetricsHistoryQuery {
   query: string
@@ -52,6 +54,7 @@ const query = ref('')
 const activeTab = ref<'graph' | 'table'>('graph')
 const executing = ref(false)
 const errorMsg = ref('')
+const diagnosticRequest = ref<DiagnosticRequest | null>(null)
 const queryTextarea = ref<InstanceType<typeof PromqlEditor> | null>(null)
 
 // ═══ Time range ═══
@@ -225,6 +228,7 @@ async function executeQuery(opts?: { skipHistory?: boolean }) {
   vectorResults.value = []
   matrixResults.value = []
   hasResults.value = false
+  diagnosticRequest.value = null
 
   try {
     const end = customRange.value ? Date.parse(customRange.value.to) / 1000 : Math.floor(Date.now() / 1000)
@@ -244,7 +248,10 @@ async function executeQuery(opts?: { skipHistory?: boolean }) {
         matrixResults.value = data.result
       }
     }
-    if (isCurrent()) hasResults.value = true
+    if (isCurrent()) {
+      hasResults.value = true
+      diagnosticRequest.value = { signal: 'metrics', filters: [], promql: query.value, time_range: { from: new Date(start * 1000).toISOString(), to: new Date(end * 1000).toISOString() } }
+    }
   } catch (e: any) {
     if (isCurrent()) errorMsg.value = e.message || 'Query failed'
   } finally {
@@ -260,6 +267,7 @@ function clearQuery() {
   cancelQuery()
   executing.value = false
   query.value = ''
+  diagnosticRequest.value = null
   vectorResults.value = []
   matrixResults.value = []
   hasResults.value = false
@@ -773,6 +781,7 @@ watch(viewMode, () => {
           </button>
         </div>
       </template>
+      <template v-if="diagnosticRequest && hasResults && !errorMsg && !matrixResults.length" #footer><QueryDiagnosis :request="diagnosticRequest" /></template>
     </TimeSeriesPanel>
 
     <!-- ═══ Table Tab ═══ -->
@@ -790,6 +799,7 @@ watch(viewMode, () => {
       :empty-title="hasResults ? 'No rows returned' : 'Run a PromQL query'"
       :empty-message="hasResults ? 'Try another expression or adjust its label matchers.' : 'Enter an expression above, then select Execute.'"
     >
+      <template v-if="diagnosticRequest && hasResults && !errorMsg && !vectorResults.length" #footer><QueryDiagnosis :request="diagnosticRequest" /></template>
       <div class="result-table">
         <div class="result-table-row result-table-head" role="row">
           <div role="columnheader">Metric</div>

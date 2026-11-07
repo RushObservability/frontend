@@ -23,6 +23,7 @@ import TraceWaterfall from '../components/TraceWaterfall.vue'
 import { isSpanError, serviceColor } from '../lib/traceWaterfall'
 import ExploreSearchToolbar from '../components/ExploreSearchToolbar.vue'
 import ExploreResultsState from '../components/ExploreResultsState.vue'
+import QueryDiagnosis from '../components/QueryDiagnosis.vue'
 import SignalTimelinePanel from '../components/panels/SignalTimelinePanel.vue'
 import { useTenant } from '../composables/useTenant'
 import { compareFindingStrength, compareFindingSummary, rankCompareFindings } from '../lib/compareFindings'
@@ -5543,8 +5544,9 @@ watch(() => route.query.log_view, (id) => {
           :has-results="viewMode === 'logs' ? logEntries.length > 0 : results.length > 0"
           :hint="spanModeFallback ? spanModeHint(spanModeFallback.count, spanModeFallback.capped) : null"
         >
-          <template v-if="spanModeFallback" #action>
-            <button type="button" class="btn btn-sm" @click="tracesOnly = false">Show matching spans</button>
+          <template #action>
+            <button v-if="spanModeFallback" type="button" class="btn btn-sm" @click="tracesOnly = false">Show matching spans</button>
+            <QueryDiagnosis v-if="!searching && !api.error.value" :request="{ signal: 'spans', time_range: timeRange, filters: getActiveFilters(), search: searchText || undefined }" />
           </template>
         </ExploreResultsState>
 
@@ -5736,7 +5738,9 @@ watch(() => route.query.log_view, (id) => {
 
         <!-- ═══ Log Table (Logs mode) ═══ -->
         <div v-else-if="viewMode === 'logs'" class="event-table card" :class="{ 'log-wrap-mode': logWordWrap, 'custom-log-layout': customLogLayout }">
-          <ExploreResultsState v-if="!logEntries.length" mode="logs" :loading="false" :has-results="false" />
+          <ExploreResultsState v-if="!logEntries.length" mode="logs" :loading="false" :has-results="false">
+            <template #action><QueryDiagnosis :request="{ signal: 'logs', time_range: timeRange, filters: getLogFilters(getActiveFilters()), search: searchText || undefined }" /></template>
+          </ExploreResultsState>
           <template v-else>
             <!-- Log table header -->
             <div v-if="!customLogLayout" class="et-head">
