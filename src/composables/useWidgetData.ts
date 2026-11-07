@@ -13,13 +13,14 @@ export function useWidgetData() {
     varValues: Record<string, string> = {},
     rangeMinutes?: number,
     signal?: AbortSignal,
+    exactRange?: { from: string; to: string },
   ): Promise<WidgetData> {
     const qc = widget.query_config
     const queries = effectiveQueries(qc)
     const visibleQueries = queries.filter(query => !query.hidden)
     const rangeMin = rangeMinutes ?? qc.time_range_minutes ?? 60
-    const to = new Date()
-    const from = new Date(to.getTime() - rangeMin * 60 * 1000)
+    const to = exactRange ? new Date(exactRange.to) : new Date()
+    const from = exactRange ? new Date(exactRange.from) : new Date(to.getTime() - rangeMin * 60 * 1000)
     const timeRange = { from: from.toISOString(), to: to.toISOString() }
     const timeDomain = { from: from.getTime() / 1000, to: to.getTime() / 1000 }
 
@@ -106,7 +107,7 @@ export function useWidgetData() {
       }))
       if (widgetType === 'counter') {
         const last = series[0]?.points.slice(-1)[0]
-        return { type: 'counter', count: last ? last[1] : 0 }
+        return { type: 'counter', count: last && Number.isFinite(last[1]) ? last[1] : undefined }
       }
       return { type: widgetType, series }
     }
@@ -122,7 +123,7 @@ export function useWidgetData() {
         }
         case 'counter': {
           const buckets = await api.countLogs({ time_range: timeRange, filters, interval: query.interval || '1h' }, 'dashboard', signal)
-          return { type: 'counter', count: buckets.reduce((sum, bucket) => sum + bucket.count, 0) }
+          return { type: 'counter', count: buckets.length ? buckets.reduce((sum, bucket) => sum + bucket.count, 0) : undefined }
         }
         case 'pie':
         case 'bar': {
@@ -175,7 +176,7 @@ export function useWidgetData() {
       }
       case 'counter': {
         const buckets = await api.queryCount({ time_range: timeRange, filters, interval: query.interval || '1h' }, 'dashboard', signal)
-        return { type: 'counter', count: buckets.reduce((sum, bucket) => sum + bucket.count, 0) }
+        return { type: 'counter', count: buckets.length ? buckets.reduce((sum, bucket) => sum + bucket.count, 0) : undefined }
       }
       default:
         return { type: widgetType, count: 0 }
