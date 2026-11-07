@@ -1,11 +1,12 @@
 import { test, expect, type Page } from '@playwright/test'
+import { queryUrl, queryBody, queryReply } from './query-contract'
 
 async function stub(page: Page) {
   const requests: Array<{ filters: Array<{ value: string }>; time_range: { from: string; to: string } }> = []
   let hold = false
   let release = () => {}
   await page.route('**/api/v1/**', async route => {
-    const path = new URL(route.request().url()).pathname
+    const path = queryUrl(route.request()).pathname
     let body: unknown = { deploys: [], services: [], views: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role: 'admin' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
@@ -19,12 +20,12 @@ async function stub(page: Page) {
       }],
     }
     if (path === '/api/v1/query/count') {
-      const query = route.request().postDataJSON()
+      const query = queryBody(route.request())
       requests.push(query)
       if (hold) { hold = false; await new Promise<void>(resolve => { release = resolve }) }
       body = [{ bucket: '2026-11-01 00:00:00', count: query.filters[0].value === 'B' ? 222 : 111 }]
     }
-    try { await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) }) } catch { /* superseded read */ }
+    try { await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) }) } catch { /* superseded read */ }
   })
   return { requests, holdNext: () => { hold = true }, release: () => release() }
 }

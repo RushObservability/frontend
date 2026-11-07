@@ -10,6 +10,10 @@ const query = {
   limit: 100,
 }
 
+function response(signal = 'spans', operation = 'search') {
+  return new Response(JSON.stringify({ version: 'v1', signal, operation, data: { rows: [], total: 0 } }), { status: 200 })
+}
+
 describe('useApi analytics request policy', () => {
   beforeEach(() => {
     invalidateAnalyticsRequests()
@@ -26,7 +30,7 @@ describe('useApi analytics request policy', () => {
 
   it('deduplicates and caches an idempotent analytics POST', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(new Response('{"rows":[],"total":0}', { status: 200 })))
+      Promise.resolve(response()))
     vi.stubGlobal('fetch', fetchMock)
     const api = useApi()
 
@@ -39,7 +43,7 @@ describe('useApi analytics request policy', () => {
   it('invalidates analytics results after a successful mutation', async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.endsWith('/query')) return Promise.resolve(new Response('{"rows":[],"total":0}', { status: 200 }))
+      if (url.endsWith('/query/execute')) return Promise.resolve(response())
       return Promise.resolve(new Response('{"id":"dash-1","name":"Test"}', { status: 200 }))
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -51,7 +55,7 @@ describe('useApi analytics request policy', () => {
     await api.queryEvents(query)
 
     expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/query'))).toHaveLength(2)
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/query/execute'))).toHaveLength(2)
   })
 
   describe('in-flight analytics vs. concurrent non-GET requests', () => {
@@ -61,9 +65,9 @@ describe('useApi analytics request policy', () => {
       let aborted = false
       const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input)
-        if (!url.endsWith('/explore/search')) return other(url, init)
+        if (!url.endsWith('/query/execute')) return other(url, init)
         return new Promise<Response>((resolve, reject) => {
-          release = () => resolve(new Response('{"rows":[],"total":0}', { status: 200 }))
+          release = () => resolve(response('logs', 'explore'))
           init?.signal?.addEventListener('abort', () => {
             aborted = true
             const error = new Error('The request was aborted.')
@@ -74,7 +78,7 @@ describe('useApi analytics request policy', () => {
       })
       return { fetchMock, release: () => release(), wasAborted: () => aborted }
     }
-    const search = { ...query, mode: 'logs' } as never
+    const search = { ...query, signal: 'logs' } as never
 
     it('keeps an in-flight search alive across a session heartbeat (POST /auth/activity)', async () => {
       const { fetchMock, release, wasAborted } = pendingSearchFetch(() =>
@@ -135,7 +139,7 @@ describe('useApi analytics request policy', () => {
 
   it('never shares a cached POST response across tenants', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(new Response('{"rows":[],"total":0}', { status: 200 })))
+      Promise.resolve(response()))
     vi.stubGlobal('fetch', fetchMock)
     const api = useApi()
     const tenant = useTenant().activeTenant

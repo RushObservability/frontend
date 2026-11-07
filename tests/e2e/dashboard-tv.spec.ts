@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { queryUrl, queryReply } from './query-contract'
 
 async function stub(page: Page, nativeFullscreen: boolean | 'real' = false) {
   const requests = { dashboard: 0, queries: 0 }
@@ -17,7 +18,7 @@ async function stub(page: Page, nativeFullscreen: boolean | 'real' = false) {
     }
   }, { nativeFullscreen })
   await page.route('**/api/v1/**', async route => {
-    const path = new URL(route.request().url()).pathname
+    const path = queryUrl(route.request()).pathname
     let body: unknown = { services: [], views: [], channels: [], monitors: [], deploys: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role: 'admin' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
@@ -43,7 +44,7 @@ async function stub(page: Page, nativeFullscreen: boolean | 'real' = false) {
         })),
       } }
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
   return requests
 }

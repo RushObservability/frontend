@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test'
+import { queryUrl, queryReply } from './query-contract'
 
 test('duplicate metric panels both render and keep refreshing', async ({ page }) => {
   await page.clock.install()
   let queries = 0
   await page.route('**/api/v1/**', async route => {
-    const url = new URL(route.request().url())
+    const url = queryUrl(route.request())
     const path = url.pathname
     let body: unknown = { deploys: [], services: [], views: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role: 'admin' } }
@@ -24,7 +25,7 @@ test('duplicate metric panels both render and keep refreshing', async ({ page })
       const end = Number(url.searchParams.get('end'))
       body = { status: 'success', data: { resultType: 'matrix', result: [{ metric: { __name__: 'cpu' }, values: [[end - 60, '1'], [end, '2']] }] } }
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
   await page.goto('/dashboards/duplicates')
   await expect(page.locator('.ts-legend')).toHaveCount(2)

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { queryUrl, queryReply } from './query-contract'
 
 async function stub(page: Page, role = 'admin') {
   const state = {
@@ -6,7 +7,7 @@ async function stub(page: Page, role = 'admin') {
     saves: [] as Record<string, unknown>[], queries: 0, failSave: false,
   }
   await page.route('**/api/v1/**', async route => {
-    const path = new URL(route.request().url()).pathname
+    const path = queryUrl(route.request()).pathname
     let body: unknown = { services: [], views: [], channels: [], monitors: [], deploys: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
@@ -34,7 +35,7 @@ async function stub(page: Page, role = 'admin') {
       const now = Math.floor(Date.now() / 1000)
       body = { status: 'success', data: { resultType: 'matrix', result: [{ metric: { service: 'payments' }, values: [[now - 60, '20'], [now, '30']] }] } }
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
   return state
 }
