@@ -12,6 +12,10 @@ import TimeseriesWidget from './TimeseriesWidget.vue'
 import HeatmapWidget from './HeatmapWidget.vue'
 import HistogramWidget from './HistogramWidget.vue'
 import PieWidget from './PieWidget.vue'
+import LogPatternsWidget from './LogPatternsWidget.vue'
+import StateTimelineWidget from './StateTimelineWidget.vue'
+import ScatterWidget from './ScatterWidget.vue'
+import { timelineStates, STATE_COLORS } from '../../lib/dashboardPanels'
 import type { PieStyle, PieCalculation, PieSort } from '../../lib/pie'
 import { buildHistogram } from '../../lib/histogram'
 
@@ -54,6 +58,9 @@ const pieCalculation = ref<PieCalculation>('last')
 const pieSort = ref<PieSort>('descending')
 const pieLegendPosition = ref<'right' | 'bottom'>('right')
 const displayMode = ref<'lines' | 'stacked-lines'>('lines')
+const states = ref(timelineStates(undefined))
+const xLabel = ref(''), yLabel = ref(''), xUnit = ref('')
+const statesError = computed(() => states.value.some(s => !s.label.trim() || !Number.isFinite(s.value)) || new Set(states.value.map(s => s.value)).size !== states.value.length ? 'Each state needs a unique numeric value and a name.' : '')
 const activeEditorTab = ref<'query' | 'panel'>('query')
 
 interface EditorQuery extends Omit<WidgetPanelQuery, 'filters'> {
@@ -88,6 +95,8 @@ function makeQuery(seed: Partial<EditorQuery> = {}): EditorQuery {
     interval: seed.interval || '1m',
     limit: seed.limit || 10,
     promql: seed.promql || '',
+    x_field: seed.x_field || '',
+    y_field: seed.y_field || '',
   }
 }
 
@@ -129,6 +138,9 @@ const VIZ = [
   { type: 'counter' as WidgetType, label: 'Stat', glyph: '#', note: 'One prominent value' },
   { type: 'bar' as WidgetType, label: 'Bar chart', glyph: '▊', note: 'Compare grouped values' },
   { type: 'table' as WidgetType, label: 'Table', glyph: '☰', note: 'Inspect detailed rows' },
+  { type: 'log-patterns' as WidgetType, label: 'Log patterns', glyph: '≋', note: 'Group recurring log messages and see their volume' },
+  { type: 'state-timeline' as WidgetType, label: 'State timeline', glyph: '━', note: 'Map metric values to named states over time' },
+  { type: 'scatter' as WidgetType, label: 'Scatter plot', glyph: '⠿', note: 'Compare two numeric fields on the same event' },
 ]
 
 const APM_METRICS = [
@@ -172,10 +184,12 @@ function isApmPresetActive(preset: typeof APM_PRESETS[number]): boolean {
   )
 }
 
-const metricsOk = computed(() => ['timeseries', 'heatmap', 'histogram', 'pie', 'counter'].includes(widgetType.value))
+const metricsOk = computed(() => ['timeseries', 'heatmap', 'histogram', 'pie', 'counter', 'state-timeline'].includes(widgetType.value))
 
 watch(() => props.widget, (widget) => {
   if (!widget) {
+    states.value = timelineStates(undefined)
+    xLabel.value = ''; yLabel.value = ''; xUnit.value = ''
     fill.value = false
     histogramBucketCount.value = 20
     pieStyle.value = 'donut'
@@ -188,6 +202,10 @@ watch(() => props.widget, (widget) => {
     return
   }
   title.value = widget.title
+  states.value = timelineStates(widget.display_config?.states)
+  xLabel.value = String(widget.display_config?.x_label || '')
+  yLabel.value = String(widget.display_config?.y_label || '')
+  xUnit.value = String(widget.display_config?.x_unit || '')
   widgetType.value = widget.widget_type
   timeRangeMinutes.value = widget.query_config.time_range_minutes || 60
   colSpan.value = widget.position.col_span || 6
@@ -215,6 +233,8 @@ watch(() => props.widget, (widget) => {
         interval: widget.query_config.interval,
         limit: widget.query_config.limit,
         promql: widget.query_config.promql,
+        x_field: widget.query_config.x_field,
+        y_field: widget.query_config.y_field,
       } satisfies WidgetPanelQuery]
   queries.value = stored.map((query, index) => makeQuery({
     ...query,
@@ -233,6 +253,20 @@ function setDisplayMode(mode: 'lines' | 'stacked-lines') {
 
 // If a non-metrics-capable viz is chosen while in metrics mode, fall back to spans.
 watch([widgetType], () => {
+  if (['log-patterns', 'state-timeline', 'scatter'].includes(widgetType.value)) {
+    queries.value = queries.value.slice(0, 1)
+    activeQueryId.value = queries.value[0]!.ref_id
+    queries.value.forEach(query => {
+      if (widgetType.value === 'log-patterns') query.source = 'logs'
+      if (widgetType.value === 'state-timeline') query.source = 'metrics'
+      if (widgetType.value === 'scatter') {
+        if (query.source === 'metrics') query.source = 'spans'
+        if (!query.x_field) query.x_field = query.source === 'logs' ? 'body.bytes' : 'attributes.http.request.body.size'
+        if (!query.y_field) query.y_field = query.source === 'logs' ? 'body.duration_ms' : 'duration_ms'
+        if (props.widget?.widget_type !== 'scatter') query.limit = 500
+      }
+    })
+  }
   if (!metricsOk.value) {
     queries.value.forEach((query) => { if (query.source === 'metrics') query.source = 'spans' })
   }
@@ -287,6 +321,8 @@ function buildPanelQuery(query: EditorQuery): WidgetPanelQuery {
     interval: query.interval,
     limit: query.limit,
     promql: query.source === 'metrics' ? query.promql : undefined,
+    x_field: widgetType.value === 'scatter' ? query.x_field?.trim() : undefined,
+    y_field: widgetType.value === 'scatter' ? query.y_field?.trim() : undefined,
   }
 }
 
@@ -304,6 +340,8 @@ function buildQueryConfig(): WidgetQueryConfig {
     limit: first.limit,
     source: first.source,
     promql: first.promql,
+    x_field: first.x_field,
+    y_field: first.y_field,
   }
 }
 
@@ -313,25 +351,34 @@ const previewHistogram = computed(() => buildHistogram(previewData.value?.series
 const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
 let previewTimer: ReturnType<typeof setTimeout> | undefined
+let previewController: AbortController | undefined
+let previewGeneration = 0
 
 function refreshPreview() {
   clearTimeout(previewTimer)
+  previewController?.abort()
+  const generation = ++previewGeneration
   previewTimer = setTimeout(async () => {
     previewLoading.value = true
     previewError.value = null
     try {
+      const controller = new AbortController()
+      previewController = controller
       const temp: Widget = {
         id: 'preview', dashboard_id: props.dashboardId, title: title.value,
         widget_type: widgetType.value, query_config: buildQueryConfig(),
         position: { col: 1, row: 1, col_span: colSpan.value, row_span: rowSpan.value },
         display_config: {}, created_at: '', updated_at: '',
       }
-      previewData.value = await fetchWidgetData(temp, props.varValues || {})
+      const data = await fetchWidgetData(temp, props.varValues || {}, undefined, controller.signal)
+      if (generation === previewGeneration) previewData.value = data
     } catch (e: any) {
-      previewError.value = e?.message || 'Preview failed'
-      previewData.value = null
+      if (generation === previewGeneration && e?.name !== 'AbortError') {
+        previewError.value = e?.message || 'Preview failed'
+        previewData.value = null
+      }
     } finally {
-      previewLoading.value = false
+      if (generation === previewGeneration) previewLoading.value = false
     }
   }, 400)
 }
@@ -345,6 +392,8 @@ function handleEditorKeydown(event: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', handleEditorKeydown))
 onUnmounted(() => {
   clearTimeout(previewTimer)
+  previewController?.abort()
+  previewGeneration++
   window.removeEventListener('keydown', handleEditorKeydown)
 })
 
@@ -370,6 +419,7 @@ async function applyNl() {
 }
 
 function save() {
+  if (widgetType.value === 'state-timeline' && statesError.value) return
   // Preserve any existing display_config keys (e.g. color), then layer in the
   // user-editable description/unit.
   const displayConfig: Record<string, unknown> = { ...(props.widget?.display_config || {}) }
@@ -377,6 +427,12 @@ function save() {
   const u = unit.value.trim()
   if (desc) displayConfig.description = desc; else delete displayConfig.description
   if (u) displayConfig.unit = u; else delete displayConfig.unit
+  if (widgetType.value === 'state-timeline') displayConfig.states = states.value.map(s => ({ ...s, label: s.label.trim() }))
+  else delete displayConfig.states
+  for (const [key, value] of [['x_label', xLabel.value], ['y_label', yLabel.value], ['x_unit', xUnit.value]]) {
+    if (widgetType.value === 'scatter' && value?.trim()) displayConfig[key!] = value.trim()
+    else delete displayConfig[key!]
+  }
   if (widgetType.value === 'timeseries') {
     displayConfig.fill = fill.value
     displayConfig.display_mode = displayMode.value
@@ -417,7 +473,7 @@ function save() {
       </div>
       <div class="we-header-actions">
         <button class="btn btn-secondary" @click="emit('cancel')">Cancel</button>
-        <button class="btn btn-primary" :disabled="saving" @click="save">{{ saving ? 'Saving…' : widget ? 'Apply changes' : 'Add to dashboard' }}</button>
+        <button class="btn btn-primary" :disabled="saving || (widgetType === 'state-timeline' && !!statesError) || (widgetType === 'scatter' && (!activeQuery.x_field?.trim() || !activeQuery.y_field?.trim()))" @click="save">{{ saving ? 'Saving…' : widget ? 'Apply changes' : 'Add to dashboard' }}</button>
       </div>
     </header>
     <p v-if="saveError" class="we-save-error" role="alert">{{ saveError }} Your edits are still here.</p>
@@ -449,6 +505,9 @@ function save() {
                 <CounterWidget v-if="widgetType === 'counter'" :value="previewData.count || 0" :label="title || 'Stat'" />
                 <BarWidget v-else-if="widgetType === 'bar'" :groups="previewData.groups || []" />
                 <PieWidget v-else-if="widgetType === 'pie'" :data="previewData" :pie-style="pieStyle" :calculation="pieCalculation" :sort="pieSort" :legend-position="pieLegendPosition" :unit="unit" />
+                <LogPatternsWidget v-else-if="widgetType === 'log-patterns'" :patterns="previewData.patterns || []" :total="previewData.pattern_total || 0" :time-domain="previewData.time_domain" />
+                <StateTimelineWidget v-else-if="widgetType === 'state-timeline' && previewData.time_domain" :series="previewData.series || []" :time-domain="previewData.time_domain" :step-secs="previewData.step_secs" :states="states" />
+                <ScatterWidget v-else-if="widgetType === 'scatter'" :points="previewData.scatter_points || []" :x-label="xLabel || activeQuery.x_field || 'X'" :y-label="yLabel || activeQuery.y_field || 'Y'" :x-unit="xUnit" :y-unit="unit" :source="previewData.source" :truncated="previewData.truncated" :time-domain="previewData.time_domain" />
                 <TableWidget v-else-if="widgetType === 'table'" :rows="(previewData.rows || []) as Record<string, unknown>[]" />
                 <TimeseriesWidget v-else-if="widgetType === 'timeseries'" :buckets="previewData.buckets || []" :series="previewData.series" :unit="unit" :display-mode="displayMode" :fill="fill" />
                 <HeatmapWidget v-else-if="widgetType === 'heatmap'" :series="previewData.series || []" :time-domain="previewData.time_domain" :unit="unit" />
@@ -513,11 +572,11 @@ function save() {
           <section class="we-config-section">
             <div class="we-section-heading"><span>{{ activeQuery.ref_id }}</span><div><strong>Query identity</strong><small>Each query can use a different signal and series style</small></div></div>
             <div class="we-source-toggle">
-              <button class="we-seg" :class="{ active: source === 'spans' }" @click="source = 'spans'">APM</button>
-              <button class="we-seg" :class="{ active: source === 'logs' }" @click="source = 'logs'">Logs</button>
+              <button class="we-seg" :class="{ active: source === 'spans' }" :disabled="widgetType === 'log-patterns' || widgetType === 'state-timeline'" @click="source = 'spans'">APM</button>
+              <button class="we-seg" :class="{ active: source === 'logs' }" :disabled="widgetType === 'state-timeline'" @click="source = 'logs'">Logs</button>
               <button class="we-seg" :class="{ active: source === 'metrics' }" :disabled="!metricsOk" :title="metricsOk ? '' : 'Metrics supports Time series, Heatmap, Histogram, and Stat panels'" @click="metricsOk && (source = 'metrics')">Metrics</button>
             </div>
-            <div class="we-query-identity">
+            <div v-if="!['log-patterns', 'state-timeline', 'scatter'].includes(widgetType)" class="we-query-identity">
               <div class="we-field">
                 <label class="we-label">Series label</label>
                 <input v-model="activeQuery.alias" class="we-input" :placeholder="`Query ${activeQuery.ref_id}`" />
@@ -611,6 +670,13 @@ function save() {
 
           <section class="we-config-section">
             <div class="we-section-heading"><span>03</span><div><strong>Query options</strong><small>Control resolution and result size for {{ activeQuery.ref_id }}</small></div></div>
+            <div v-if="widgetType === 'scatter'" class="we-options">
+              <div class="we-field"><label class="we-label" for="we-scatter-x">X field</label><input id="we-scatter-x" v-model="activeQuery.x_field" class="we-input mono" :placeholder="source === 'logs' ? 'body.bytes' : 'attributes.http.request.body.size'" /></div>
+              <div class="we-field"><label class="we-label" for="we-scatter-y">Y field</label><input id="we-scatter-y" v-model="activeQuery.y_field" class="we-input mono" :placeholder="source === 'logs' ? 'body.duration_ms' : 'duration_ms'" /></div>
+              <small class="we-field-help">Both values come from the same event. Non-numeric and missing pairs are excluded. APM supports duration_ms, duration_ns, http_status_code, and attributes.&lt;name&gt;. Logs support log.&lt;name&gt;, resource.&lt;name&gt;, and body.&lt;json.path&gt;.</small>
+            </div>
+            <p v-if="widgetType === 'log-patterns'" class="we-field-help">All matching severities are included. Numbers and UUIDs are normalized; other text stays distinct. Shares use all matching events, not just the displayed patterns.</p>
+            <p v-if="widgetType === 'state-timeline'" class="we-field-help">Use a discrete metric such as up. Each returned series gets a row. Configure value-to-state mappings under Panel options. Missing samples remain gaps.</p>
             <div class="we-options">
               <div class="we-field">
                 <label class="we-label">Time range</label>
@@ -626,9 +692,9 @@ function save() {
                   <option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option>
                 </select>
               </div>
-              <div v-if="widgetType === 'bar' || widgetType === 'pie' || widgetType === 'table'" class="we-field">
+              <div v-if="['bar', 'pie', 'table', 'log-patterns', 'scatter'].includes(widgetType)" class="we-field">
                 <label class="we-label">Result limit</label>
-                <input v-model.number="limit" type="number" min="1" max="100" class="we-input mono" />
+                <input v-model.number="limit" type="number" min="1" :max="widgetType === 'scatter' ? 2000 : widgetType === 'log-patterns' ? 50 : 100" class="we-input mono" />
               </div>
             </div>
           </section>
@@ -651,6 +717,23 @@ function save() {
             <div class="we-field">
               <label class="we-label">Description</label>
               <textarea v-model="description" class="we-input" rows="3" placeholder="Explain what this panel shows and why it matters"></textarea>
+            </div>
+            <template v-if="widgetType === 'scatter'">
+              <div class="we-field"><label class="we-label" for="we-x-label">X-axis label</label><input id="we-x-label" v-model="xLabel" class="we-input" :placeholder="activeQuery.x_field" /></div>
+              <div class="we-field"><label class="we-label" for="we-y-label">Y-axis label</label><input id="we-y-label" v-model="yLabel" class="we-input" :placeholder="activeQuery.y_field" /></div>
+              <div class="we-field"><label class="we-label" for="we-x-unit">X-axis unit</label><input id="we-x-unit" v-model="xUnit" class="we-input" placeholder="bytes, KB, items" /></div>
+            </template>
+            <div v-if="widgetType === 'state-timeline'" class="we-field">
+              <label class="we-label">Value-to-state mappings</label>
+              <div v-for="(state, i) in states" :key="i" class="we-state-mapping">
+                <input v-model.number="state.value" type="number" step="any" class="we-input" :aria-label="`State ${i + 1} value`" />
+                <input v-model="state.label" class="we-input" :aria-label="`State ${i + 1} name`" />
+                <select v-model="state.color" class="we-input" :aria-label="`State ${i + 1} color`"><option v-for="c in STATE_COLORS" :key="c" :value="c">{{ c }}</option></select>
+                <button type="button" class="we-add-query" :aria-label="`Remove state ${i + 1}`" @click="states.splice(i, 1)">×</button>
+              </div>
+              <button type="button" class="we-add-query" :disabled="states.length >= 20" @click="states.push({ value: states.length ? Math.max(...states.map(s => s.value)) + 1 : 0, label: 'New state', color: 'blue' })">+ Add state</button>
+              <small v-if="statesError" role="alert" class="we-field-help">{{ statesError }}</small>
+              <small class="we-field-help">Unmapped numbers show their value. No data always stays gray.</small>
             </div>
             <div class="we-field">
               <label class="we-label" for="we-value-unit">{{ widgetType === 'histogram' ? 'X-axis unit' : 'Unit' }}</label>
@@ -721,3 +804,7 @@ function save() {
 </template>
 
 <style scoped src="../../styles/widgets/WidgetEditor.css"></style>
+<style scoped>
+.we-state-mapping { display: grid; grid-template-columns: 65px minmax(80px, 1fr) 90px 28px; gap: 6px; margin-bottom: 8px; }
+@media (max-width: 480px) { .we-state-mapping { grid-template-columns: 60px minmax(60px, 1fr); } }
+</style>

@@ -384,7 +384,7 @@ export function invalidateAnalyticsRequests(target?: { userId?: string; tenant?:
 /** Only JSON read/query endpoints belong here. Mutating POSTs must invalidate. */
 export function isIdempotentAnalyticsPost(route: string, method: string): boolean {
   if (method.toUpperCase() !== 'POST') return false
-  return /^\/(?:query(?:\/count|\/timeseries|\/group)?|explore\/search|logs(?:\/context|\/detail|\/histogram|\/count|\/group)?|stats|bubbleup|rum\/(?:query|vitals|pages|errors|sessions)|monitors\/(?:preview|suggest))$/.test(route)
+  return /^\/(?:query(?:\/count|\/timeseries|\/group|\/scatter)?|explore\/search|logs(?:\/context|\/detail|\/histogram|\/count|\/group|\/patterns)?|stats|bubbleup|rum\/(?:query|vitals|pages|errors|sessions)|monitors\/(?:preview|suggest))$/.test(route)
     || /^\/funnels\/[^/]+\/run$/.test(route)
     || /^\/anomaly-events\/[^/]+\/analyze$/.test(route)
 }
