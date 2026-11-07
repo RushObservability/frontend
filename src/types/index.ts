@@ -488,6 +488,7 @@ export interface DashboardExport {
 }
 
 export interface WidgetData {
+  diagnostic_requests?: import('../lib/queryDiagnostics').DiagnosticRequest[]
   type: WidgetType
   buckets?: CountBucket[]
   groups?: Array<{ key: string; count: number }>

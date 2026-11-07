@@ -11,6 +11,8 @@ import HistogramPanel from '../panels/HistogramPanel.vue'
 import PiePanel from '../panels/PiePanel.vue'
 import type { PieStyle, PieCalculation, PieSort } from '../../lib/pie'
 import { buildHistogram } from '../../lib/histogram'
+import QueryDiagnosis from '../QueryDiagnosis.vue'
+import { hasWidgetSamples } from '../../lib/queryDiagnostics'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -120,6 +122,9 @@ const panelProps = computed<Record<string, unknown>>(() => {
         </div>
       </template>
     </component>
+    <div v-if="!loading && !error && !hasWidgetSamples(data) && data?.diagnostic_requests?.length" class="widget-diagnostics">
+      <QueryDiagnosis v-for="(request, index) in data.diagnostic_requests.slice(0, 3)" :key="index" :request="request" />
+    </div>
     <div
       v-if="editMode"
       class="resize-handle"
@@ -130,3 +135,6 @@ const panelProps = computed<Record<string, unknown>>(() => {
 </template>
 
 <style scoped src="../../styles/widgets/WidgetWrapper.css"></style>
+<style scoped>
+.widget-diagnostics { padding: 0 16px 12px; }
+</style>
