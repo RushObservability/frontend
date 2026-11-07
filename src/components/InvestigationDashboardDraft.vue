@@ -117,7 +117,7 @@ async function save() {
             <div class="draft-panel-tools"><details><summary>View query</summary><pre>{{ JSON.stringify(widget.query_config, null, 2) }}</pre></details><button type="button" class="btn btn-sm" :disabled="busy || saving" @click="excluded.includes(widget.id) ? excluded = excluded.filter(id => id !== widget.id) : excluded.push(widget.id)">{{ excluded.includes(widget.id) ? 'Include panel' : 'Exclude panel' }}</button></div>
           </article>
         </div>
-        <div class="draft-save"><span>{{ retained.length }} panels selected. Only panels with successful previews can be saved.</span><button type="button" class="btn btn-primary" :disabled="!canSave" @click="save">{{ saving ? 'Saving…' : 'Save private dashboard' }}</button></div>
+        <div class="draft-save"><span>{{ retained.length }} {{ retained.length === 1 ? 'panel' : 'panels' }} selected. Only panels with successful previews can be saved.</span><button type="button" class="btn btn-primary" :disabled="!canSave" @click="save">{{ saving ? 'Saving…' : 'Save private dashboard' }}</button></div>
       </template>
     </template>
   </section>
@@ -126,10 +126,10 @@ async function save() {
 <style scoped>
 .investigation-draft { flex: 0 0 auto; margin: 20px 0; padding-top: 18px; border-top: 1px solid var(--border-default); font-size: 12px; }
 .btn { padding: 6px 10px; border: 1px solid var(--border-default); border-radius: var(--r-sm); background: var(--bg-raised); color: var(--text-primary); font: inherit; cursor: pointer; white-space: nowrap; }
-.btn:hover:not(:disabled) { border-color: var(--blue); }
-.btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
-.btn-primary { background: var(--blue); border-color: var(--blue); color: var(--text-inverse); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--text-inverse); }
 .draft-heading, .draft-toolbar, .draft-save, .draft-panel-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .draft-heading { align-items: flex-start; }
 .draft-heading h3 { margin: 0 0 6px; font-size: 15px; color: var(--text-primary); }
@@ -139,7 +139,7 @@ async function save() {
 label { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); }
 input, textarea, select { width: 100%; border: 1px solid var(--border-default); border-radius: var(--r-sm); background: var(--bg-raised); color: var(--text-primary); font: inherit; padding: 8px 10px; }
 textarea { resize: vertical; }
-input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .draft-name { margin: 18px 0 12px; }
 .draft-panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .draft-panel { min-width: 0; }
