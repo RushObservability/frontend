@@ -6,6 +6,7 @@ import { encodePathSegment } from '../lib/url'
 import { authenticatedFetch, assertCurrentSession, getSessionGeneration, onSessionChanged } from './authSession'
 import { storageUserId } from './storageScope'
 import { safeApiErrorMessage } from '../lib/apiError'
+import { adaptQuery, decodeQuery, metricsQuery, QUERY_ENDPOINT } from '../lib/queryContract'
 import {
   analyticsRequestCoordinator,
   analyticsSupersessionKey,
@@ -224,10 +225,13 @@ export async function apiRequest<T>(path: string, requestOptions?: ApiRequestOpt
 
   const headers = requestHeaders(options?.headers, tenant)
   const workload = new Headers(headers).get('X-Rush-Workload') || 'interactive'
+  const unified = method === 'POST' && typeof options.body === 'string'
+    ? adaptQuery(path, JSON.parse(options.body)) : undefined
 
   const execute = async (signal?: AbortSignal): Promise<string> => {
-    const res = await authenticatedFetch(`${API_BASE}${path}`, {
+    const res = await authenticatedFetch(`${API_BASE}${unified ? QUERY_ENDPOINT : path}`, {
       ...options,
+      ...(unified ? { body: JSON.stringify(unified) } : {}),
       credentials: 'same-origin',
       headers,
       signal,
@@ -244,7 +248,8 @@ export async function apiRequest<T>(path: string, requestOptions?: ApiRequestOpt
       throw responseError(res)
     }
     // Tolerate empty bodies (e.g. 204 No Content from DELETE endpoints).
-    const body = await res.text()
+    const raw = await res.text()
+    const body = unified ? JSON.stringify(decodeQuery(JSON.parse(raw), unified)) : raw
     assertCurrentSession(generation)
     return body
   }
@@ -262,11 +267,13 @@ export async function apiRequest<T>(path: string, requestOptions?: ApiRequestOpt
       // Only caller-cancellable search surfaces opt into latest-request-wins.
       // Other views intentionally issue different queries to the same route in
       // parallel (for example, one request per correlated service).
-      supersedeKey: options?.signal && workload !== 'dashboard'
+      // PromQL callers own cancellation. Parallel metric-browser sparklines
+      // share this endpoint and must not supersede different expressions.
+      supersedeKey: options?.signal && workload !== 'dashboard' && path !== QUERY_ENDPOINT
         ? analyticsSupersessionKey(path, method, options?.body)
         : undefined,
-      ttlMs: workload === 'dashboard' ? 2_000 : 1_500,
-      staleMs: workload === 'dashboard' ? 8_000 : 0,
+      ttlMs: path === QUERY_ENDPOINT ? 0 : workload === 'dashboard' ? 2_000 : 1_500,
+      staleMs: path === QUERY_ENDPOINT ? 0 : workload === 'dashboard' ? 8_000 : 0,
     })
     assertCurrentSession(generation)
     return parseResponseBody<T>(body)
@@ -1620,21 +1627,21 @@ export function useApi() {
   }
 
   async function promQuery(query: string, time?: number, signal?: AbortSignal): Promise<PromVectorResponse> {
-    const params = new URLSearchParams({ query })
-    if (time !== undefined) params.set('time', String(time))
-    return promRequest(`/query?${params}`, 'Prometheus query', undefined, signal)
+    const at = time ?? Date.now() / 1000
+    const req = metricsQuery(query, at, at)
+    const result = await request<unknown>(QUERY_ENDPOINT, { method: 'POST', body: JSON.stringify(req), signal })
+    return decodeQuery<{ data: PromVectorResponse }>(result, req).data
   }
 
   async function promQueryRange(
     query: string, start: number, end: number, step: number, workload?: 'dashboard', signal?: AbortSignal
   ): Promise<PromMatrixResponse> {
-    const params = new URLSearchParams({
-      query,
-      start: String(start),
-      end: String(end),
-      step: String(step),
+    const req = metricsQuery(query, start, end, step)
+    const result = await request<unknown>(QUERY_ENDPOINT, {
+      method: 'POST', body: JSON.stringify(req), signal,
+      headers: workload ? { 'X-Rush-Workload': workload } : undefined,
     })
-    return promRequest(`/query_range?${params}`, 'Prometheus range query', workload, signal)
+    return decodeQuery<{ data: PromMatrixResponse }>(result, req).data
   }
 
   async function promLabels(match?: string): Promise<string[]> {

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { queryUrl, queryBody, queryReply } from './query-contract'
 
 async function stub(page: Page) {
   const calls: Array<{ path: string; body: Record<string, unknown> }> = []
@@ -10,22 +11,22 @@ async function stub(page: Page) {
     { id: 'scatter', title: 'Payload versus latency', widget_type: 'scatter', query_config: { source: 'spans', filters: [], x_field: 'attributes.bytes', y_field: 'duration_ms', time_range_minutes: 60, limit: 500 }, position: { col: 7, row: 4, col_span: 6, row_span: 4 }, display_config: { x_label: 'Payload', y_label: 'Duration', x_unit: 'bytes', unit: 'ms' } },
   ]
   await page.route('**/api/v1/**', async route => {
-    const path = new URL(route.request().url()).pathname
+    const path = queryUrl(route.request()).pathname
     let body: unknown = { services: [], deploys: [], values: [], views: [], buckets: [], groups: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role: 'admin' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
     if (path === '/api/v1/dashboards/panels') body = { id: 'panels', name: 'Service operations', description: '', visibility: 'private', tags: [], variables: [], widgets }
     if (path === '/api/v1/logs/patterns') {
-      calls.push({ path, body: route.request().postDataJSON() })
+      calls.push({ path, body: queryBody(route.request()) })
       body = { total: 100, patterns: [{ service: 'payments', severity: 'WARN', template: 'Retrying request N', example: 'Retrying request 3', trace_id: trace, last_seen: new Date().toISOString(), count: 25, total_count: 100, buckets: [[now - 1800, 10], [now - 1200, 15]] }] }
     }
     if (path === '/api/v1/query/scatter') {
-      calls.push({ path, body: route.request().postDataJSON() })
+      calls.push({ path, body: queryBody(route.request()) })
       body = { points: [{ x: 438, y: 1260, timestamp: new Date().toISOString(), trace_id: trace, span_id: 'b'.repeat(16), service: 'payments', label: 'POST /charge', error: 1 }, { x: 0, y: 0, timestamp: new Date().toISOString(), trace_id: '', span_id: '', service: 'payments', label: 'GET /status', error: 0 }], truncated: true }
     }
     if (path.endsWith('/query_range')) body = { status: 'success', data: { resultType: 'matrix', result: [{ metric: { __name__: 'up', service_name: 'payments' }, values: [[now - 1800, '0'], [now - 1786, '0'], [now - 900, '1']] }] } }
     if ((path.endsWith('/widgets/states') && route.request().method() === 'PUT') || (path.endsWith('/widgets') && route.request().method() === 'POST')) { saved = route.request().postDataJSON(); body = { ...widgets[1], ...saved } }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
   return { calls, saved: () => saved }
 }

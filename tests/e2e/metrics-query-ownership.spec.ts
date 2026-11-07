@@ -1,13 +1,14 @@
 import { test, expect, type Page } from '@playwright/test'
+import { queryUrl, queryReply } from './query-contract'
 
 async function stub(page: Page) {
   const requests: URL[] = [], aborted: string[] = []
   let release = () => {}
   page.on('requestfailed', request => {
-    if (request.url().includes('/prom/api/v1/query_range?')) aborted.push(new URL(request.url()).searchParams.get('query')!)
+    if (queryUrl(request).pathname === '/prom/api/v1/query_range') aborted.push(queryUrl(request).searchParams.get('query')!)
   })
   await page.route('**/api/v1/**', async route => {
-    const url = new URL(route.request().url()), path = url.pathname
+    const url = queryUrl(route.request()), path = url.pathname
     let body: unknown = { services: [], views: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role: 'admin' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
@@ -22,7 +23,7 @@ async function stub(page: Page) {
         ...(range ? { values: [[end - 60, '1'], [end, '2']] } : { value: [end, '2'] }),
       }] } }
     }
-    try { await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) }) } catch { /* cancelled request */ }
+    try { await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) }) } catch { /* cancelled request */ }
   })
   return { requests, aborted, release: () => release() }
 }

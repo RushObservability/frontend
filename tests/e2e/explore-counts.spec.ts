@@ -1,16 +1,17 @@
 import { test, expect, type Page } from '@playwright/test'
+import { queryUrl, queryBody, queryReply } from './query-contract'
 import type { CountBucket, TraceResponse } from '../../src/types'
 
 async function stubExplore(page: Page) {
   const state = { total: 410_936, kind: 'exact', summaryFails: false, searches: [] as Record<string, any>[], trace: null as TraceResponse | null, histogram: null as CountBucket[] | null }
   await page.route('**/api/v1/**', async route => {
-    const path = new URL(route.request().url()).pathname
+    const path = queryUrl(route.request()).pathname
     let body: unknown = { views: [], services: [], buckets: [], keys: [], groups: [], values: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'count-test', username: 'tester', role: 'admin' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
     if (path.startsWith('/api/v1/traces/') && state.trace) body = state.trace
     if (path === '/api/v1/explore/search') {
-      const query = route.request().postDataJSON()
+      const query = queryBody(route.request())
       state.searches.push(query)
       if (query.include_summary && state.summaryFails) {
         await route.fulfill({ status: 503, body: 'Unavailable' })
@@ -43,7 +44,7 @@ async function stubExplore(page: Page) {
         errors: {}, query_stats: {},
       }
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
   return state
 }

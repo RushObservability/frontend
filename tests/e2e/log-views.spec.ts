@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { queryUrl, queryBody, queryReply } from './query-contract'
 import type { LogView } from '../../src/lib/logViews'
 
 let pageErrors: string[] = []
@@ -18,7 +19,7 @@ async function stubLogApi(page: Page, initialViews: LogView[] = [], role = 'admi
   const shared = new Map<string, LogView[]>([['default', initialViews]])
   await page.route('**/api/v1/**', async route => {
     const request = route.request()
-    const path = new URL(request.url()).pathname
+    const path = queryUrl(request).pathname
     let body: unknown = { keys: [], groups: [], users: [], links: [], channels: [], skills: [], values: [], providers: [], mappings: [], routes: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: state.userId, username: 'tester', role, display_name: 'Tester' } }
     if (path === '/api/v1/auth/admin/sessions') body = { sessions: [] }
@@ -40,7 +41,7 @@ async function stubLogApi(page: Page, initialViews: LogView[] = [], role = 'admi
       }
     }
     if (path === '/api/v1/explore/search') {
-      const query = request.postDataJSON()
+      const query = queryBody(request)
       state.searches.push(query)
       body = {
         signal: 'logs', count: { value: 1, kind: 'exact' }, next_cursor: null,
@@ -53,7 +54,7 @@ async function stubLogApi(page: Page, initialViews: LogView[] = [], role = 'admi
         errors: {}, query_stats: { clickhouse_queries: 1, matched_rows: 1, matched_logical_bytes: 100, time_to_first_results_ms: 1, response_bytes: 300 },
       }
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ status: 200, contentType: 'application/json', body: queryReply(route, body) })
   })
   return state
 }

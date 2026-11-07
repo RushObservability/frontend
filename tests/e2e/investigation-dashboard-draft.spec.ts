@@ -1,9 +1,10 @@
 import { test, expect, type Page } from '@playwright/test'
+import { queryUrl, queryReply } from './query-contract'
 
 async function stub(page: Page, role = 'admin', emptyMetric = false) {
   const state = { generations: [] as Record<string, unknown>[], saves: [] as Record<string, any>[], previewRanges: [] as Record<string, any>[] }
   await page.route('**/api/v1/**', async route => {
-    const url = new URL(route.request().url()), path = url.pathname
+    const url = queryUrl(route.request()), path = url.pathname
     let body: unknown = { sessions: [], templates: [], services: [], views: [], deploys: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
@@ -27,7 +28,7 @@ async function stub(page: Page, role = 'admin', emptyMetric = false) {
     if (path.endsWith('/query_range')) body = { status: 'success', data: { resultType: 'matrix', result: emptyMetric ? [] : [{ metric: { __name__: 'cpu_usage' }, values: [[1793968200, '2']] }] } }
     if (path === '/api/v1/dashboards/import') { state.saves.push(route.request().postDataJSON()); body = { id: 'saved' } }
     if (path === '/api/v1/dashboards/saved') body = { id: 'saved', name: 'Saved dashboard', visibility: 'private', tags: [], variables: [], widgets: [] }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
   return state
 }

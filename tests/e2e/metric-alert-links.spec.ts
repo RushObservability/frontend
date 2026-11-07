@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { queryUrl, queryReply } from './query-contract'
 
 const metric = {
   __name__: 'rush_audit_outbox_events',
@@ -10,7 +11,7 @@ const selector = 'rush_audit_outbox_events{instance="unknown", service_name="wid
 async function stubMetricAlertApi(page: Page, series = metric) {
   const state = { previews: [] as Record<string, any>[], saves: [] as Record<string, any>[] }
   await page.route('**/api/v1/**', async route => {
-    const path = new URL(route.request().url()).pathname
+    const path = queryUrl(route.request()).pathname
     let body: unknown = { channels: [], monitors: [], services: [], views: [], suggestions: [], values: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'test-user', username: 'tester', role: 'admin' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
@@ -29,7 +30,7 @@ async function stubMetricAlertApi(page: Page, series = metric) {
         body = { status: 'success', data: { resultType: 'matrix', result: [{ metric: series, values: [[now - 60, '1'], [now, '2']] }] } }
       }
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
   return state
 }

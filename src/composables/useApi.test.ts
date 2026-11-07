@@ -17,7 +17,7 @@ describe('tenant-aware API transport', () => {
 
   it('scopes service-detail query and stream requests to the active tenant', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ buckets: [], grouped: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: 'v1', signal: 'spans', operation: 'timeseries', data: { buckets: [], grouped: false } }), { status: 200 }))
       .mockResolvedValueOnce(new Response('data: [DONE]\n\n', { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -40,7 +40,7 @@ describe('tenant-aware API transport', () => {
 
   it('marks dashboard panel reads with the bounded dashboard workload class', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ buckets: [], grouped: false }), { status: 200 }),
+      new Response(JSON.stringify({ version: 'v1', signal: 'spans', operation: 'timeseries', data: { buckets: [], grouped: false } }), { status: 200 }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -245,7 +245,7 @@ describe('tenant-aware API transport', () => {
     const [path, init] = fetchMock.mock.calls[0]!
     const forwardedSignal = init.signal as AbortSignal
     const headers = init.headers as Record<string, string>
-    expect(path).toBe('/api/v1/explore/search')
+    expect(path).toBe('/api/v1/query/execute')
     expect(forwardedSignal).toBeInstanceOf(AbortSignal)
     expect(headers['X-Rush-Tenant']).toBe('customer-a')
     expect(JSON.parse(init.body as string)).toMatchObject({ signal: 'spans', search: 'POST' })

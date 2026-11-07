@@ -1,8 +1,9 @@
 import { test, expect, type Page } from '@playwright/test'
+import { queryUrl, queryReply } from './query-contract'
 
 async function stub(page: Page, options: { slowLabels?: boolean; failNames?: boolean } = {}) {
   await page.route('**/api/v1/**', async route => {
-    const path = new URL(route.request().url()).pathname
+    const path = queryUrl(route.request()).pathname
     let body: unknown = { services: [], views: [], channels: [], monitors: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role: 'admin' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
@@ -20,7 +21,7 @@ async function stub(page: Page, options: { slowLabels?: boolean; failNames?: boo
       if (path.endsWith('/service_name/values')) body = { status: 'success', data: ['payments', 'payments worker'] }
       if (path.endsWith('/query_range')) body = { status: 'success', data: { resultType: 'matrix', result: [] } }
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
 }
 async function dashboard(page: Page) {
@@ -72,9 +73,9 @@ test('Metrics uses the same editor and Ctrl+Enter executes instead of accepting 
   await expect(editor).toHaveValue('http_requests_total')
   await editor.fill('rate')
   await expect(page.getByRole('option', { name: 'rate() function', exact: true })).toBeVisible()
-  const request = page.waitForRequest(r => r.url().includes('/prom/api/v1/query_range?'))
+  const request = page.waitForRequest(r => queryUrl(r).pathname === '/prom/api/v1/query_range')
   await editor.press('Control+Enter')
-  expect(new URL((await request).url()).searchParams.get('query')).toBe('rate')
+  expect(queryUrl(await request).searchParams.get('query')).toBe('rate')
   await expect(editor).toHaveValue('rate')
 })
 

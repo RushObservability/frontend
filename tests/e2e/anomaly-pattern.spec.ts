@@ -1,8 +1,9 @@
 import { test, expect, type Page } from '@playwright/test'
+import { queryUrl, queryReply } from './query-contract'
 
 async function stub(page: Page, pattern: string, names: string[]) {
   await page.route('**/api/v1/**', async route => {
-    const url = new URL(route.request().url())
+    const url = queryUrl(route.request())
     const path = url.pathname
     let body: unknown = { channels: [], events: [], services: [], views: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role: 'admin' } }
@@ -20,7 +21,7 @@ async function stub(page: Page, pattern: string, names: string[]) {
         values: Array.from({ length: 22 }, (_, i) => [end - (21 - i) * 15, i >= 20 ? '100' : '1']),
       }] } }
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
 }
 

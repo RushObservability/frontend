@@ -12,7 +12,7 @@ function pendingFetch() {
     calls.push({ signal, resolve })
   }))
   vi.stubGlobal('fetch', fetch)
-  return { calls, fetch, respond: (index = 0) => calls[index]!.resolve(new Response(JSON.stringify({ data: { resultType: 'matrix', result: [] } }))) }
+  return { calls, fetch, respond: (index = 0) => calls[index]!.resolve(new Response(JSON.stringify({ version: 'v1', signal: 'metrics', operation: 'range', data: { data: { resultType: 'matrix', result: [] } } }))) }
 }
 
 describe('shared Prometheus reads', () => {
@@ -60,10 +60,11 @@ describe('shared Prometheus reads', () => {
   it('keeps different tenants and expressions independent', async () => {
     const pending = pendingFetch()
     const api = useApi()
-    const a = api.promQueryRange('cpu', 0, 60, 15)
-    const b = api.promQueryRange('memory', 0, 60, 15)
+    const controller = new AbortController()
+    const a = api.promQueryRange('cpu', 0, 60, 15, undefined, controller.signal)
+    const b = api.promQueryRange('memory', 0, 60, 15, undefined, controller.signal)
     useTenant().activeTenant.value = 'other'
-    const c = api.promQueryRange('cpu', 0, 60, 15)
+    const c = api.promQueryRange('cpu', 0, 60, 15, undefined, controller.signal)
     expect(pending.fetch).toHaveBeenCalledTimes(3)
     expect(pending.calls.every(call => !call.signal.aborted)).toBe(true)
     for (let i = 0; i < 3; i++) pending.respond(i)

@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test'
+import { queryUrl, queryReply } from './query-contract'
 
 test('a dashboard renders a histogram containing 250,000 returned samples', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/api/v1/**', async route => {
-    const url = new URL(route.request().url())
+    const url = queryUrl(route.request())
     let body: unknown = { services: [], views: [] }
     if (url.pathname === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role: 'admin' } }
     if (url.pathname === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
@@ -23,7 +24,7 @@ test('a dashboard renders a histogram containing 250,000 returned samples', asyn
         values: Array.from({ length: 250 }, (_, i) => [end - (249 - i) * 14, String(i % 100)]),
       })) } }
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
   await page.goto('/dashboards/large-histogram')
   await expect(page.locator('.histogram-svg rect')).toHaveCount(20)
@@ -42,7 +43,7 @@ test('histogram uses unscaled chart typography and responsive numeric bucket tic
   }))
   const saves: Record<string, any>[] = []
   await page.route('**/api/v1/**', async route => {
-    const path = new URL(route.request().url()).pathname
+    const path = queryUrl(route.request()).pathname
     let body: unknown = { services: [], views: [], channels: [], monitors: [], deploys: [] }
     if (path === '/api/v1/auth/me') body = { user: { id: 'tester', username: 'tester', role: 'admin' } }
     if (path === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }] }
@@ -59,7 +60,7 @@ test('histogram uses unscaled chart typography and responsive numeric bucket tic
     if (path.startsWith('/prom/api/v1/')) body = {
       status: 'success', data: { resultType: 'matrix', result: [{ metric: { __name__: 'example_metric' }, values }] },
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
+    await route.fulfill({ contentType: 'application/json', body: queryReply(route, body) })
   })
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto('/dashboards/histogram-test')
