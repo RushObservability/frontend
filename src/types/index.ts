@@ -356,7 +356,7 @@ export interface PromMatrixResponse { resultType: 'matrix'; result: PromMatrixRe
 
 // ── Dashboard types ──
 
-export type WidgetType = 'timeseries' | 'heatmap' | 'histogram' | 'pie' | 'bar' | 'table' | 'counter'
+export type WidgetType = 'timeseries' | 'heatmap' | 'histogram' | 'pie' | 'bar' | 'table' | 'counter' | 'log-patterns' | 'state-timeline' | 'scatter'
 
 export interface WidgetPosition {
   col: number
@@ -384,9 +384,13 @@ export interface WidgetPanelQuery {
   interval?: string
   limit?: number
   promql?: string
+  x_field?: string
+  y_field?: string
 }
 
 export interface WidgetQueryConfig {
+  x_field?: string
+  y_field?: string
   time_range_minutes: number
   /** Multi-query panels. When absent, legacy top-level fields below remain supported. */
   queries?: WidgetPanelQuery[]
@@ -505,6 +509,14 @@ export interface DashboardVersion extends DashboardVersionSummary {
 }
 
 export interface WidgetData {
+  patterns?: LogPattern[]
+  pattern_total?: number
+  scatter_points?: ScatterPoint[]
+  truncated?: boolean
+  source?: 'logs' | 'spans'
+  x_field?: string
+  y_field?: string
+  step_secs?: number
   diagnostic_requests?: import('../lib/queryDiagnostics').DiagnosticRequest[]
   type: WidgetType
   buckets?: CountBucket[]
@@ -517,6 +529,35 @@ export interface WidgetData {
   time_domain?: TimeDomain
   /** Individual query failures when at least one sibling query still returned data. */
   query_errors?: Array<{ ref_id: string; message: string }>
+}
+
+export interface LogPattern {
+  service: string
+  severity: string
+  template: string
+  example: string
+  trace_id: string
+  last_seen: string
+  count: number
+  buckets: [number, number][]
+  total_count: number
+}
+
+export interface ScatterPoint {
+  x: number
+  y: number
+  timestamp: string
+  trace_id: string
+  span_id: string
+  service: string
+  label: string
+  error: number
+}
+
+export interface TimelineState {
+  value: number
+  label: string
+  color: 'green' | 'yellow' | 'red' | 'blue' | 'purple'
 }
 
 // ── Alert types ──

@@ -8,6 +8,8 @@ const api = vi.hoisted(() => ({
   groupLogs: vi.fn(),
   queryGroup: vi.fn(),
   promQueryRange: vi.fn(),
+  logPatterns: vi.fn(),
+  scatterPoints: vi.fn(),
 }))
 vi.mock('./useApi', () => ({ useApi: () => api }))
 
@@ -21,6 +23,30 @@ function widget(source: 'spans' | 'logs'): Widget {
 }
 
 describe('dashboard bucket times', () => {
+  it('fetches tenant-filtered patterns with the captured range, variables and cancellation', async () => {
+    api.logPatterns.mockResolvedValue({ patterns: [], total: 42 })
+    const panel = widget('logs'); panel.widget_type = 'log-patterns'
+    panel.query_config.filters = [{ field: 'service_name', op: '=', value: '$service' }]
+    const controller = new AbortController(), range = { from: '2026-11-07T13:00:00Z', to: '2026-11-07T14:00:00Z' }
+    const data = await useWidgetData().fetchWidgetData(panel, { service: 'payments' }, undefined, controller.signal, range)
+    expect(api.logPatterns).toHaveBeenCalledWith({ time_range: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, filters: [{ field: 'service_name', op: '=', value: 'payments' }], limit: 10 }, controller.signal)
+    expect(data.pattern_total).toBe(42)
+  })
+  it('preserves paired scatter fields and rejects unsupported metrics sources', async () => {
+    api.scatterPoints.mockResolvedValue({ points: [], truncated: true })
+    const panel = widget('spans'); panel.widget_type = 'scatter'; panel.query_config.x_field = 'attributes.bytes'; panel.query_config.y_field = 'duration_ms'
+    const data = await useWidgetData().fetchWidgetData(panel)
+    expect(api.scatterPoints).toHaveBeenCalledWith(expect.objectContaining({ source: 'spans', x_field: 'attributes.bytes', y_field: 'duration_ms', limit: 500 }), undefined)
+    expect(data.truncated).toBe(true)
+    panel.query_config.source = 'metrics'
+    await expect(useWidgetData().fetchWidgetData(panel)).rejects.toThrow('event fields')
+  })
+  it('keeps the actual PromQL step so timeline gaps are not forward-filled indefinitely', async () => {
+    api.promQueryRange.mockResolvedValue({ result: [{ metric: { service_name: 'payments' }, values: [[10, '0'], [20, '1']] }] })
+    const panel = widget('spans'); panel.widget_type = 'state-timeline'; panel.query_config.source = 'metrics'; panel.query_config.promql = 'up'
+    const data = await useWidgetData().fetchWidgetData(panel)
+    expect(data.step_secs).toBe(14); expect(data.series?.[0]?.points[0]).toEqual([10, 0]); expect(data.time_domain).toBeDefined()
+  })
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-17T01:00:00Z'))

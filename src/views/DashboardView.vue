@@ -526,6 +526,7 @@ function widgetStyle(widget: Widget) {
   return {
     gridColumn: `${pos.col} / span ${pos.col_span}`,
     gridRow: `${pos.row} / span ${pos.row_span}`,
+    '--widget-row-span': pos.row_span,
   }
 }
 </script>
@@ -663,6 +664,7 @@ function widgetStyle(widget: Widget) {
         <WidgetWrapper
           :title="titleFor(widget)"
           :type="widget.widget_type"
+          :display-config="widget.display_config"
           :description="(widget.display_config?.description as string) || ''"
           :caption="panelCaption(widget)"
           :source-label="panelSourceLabel(widget)"

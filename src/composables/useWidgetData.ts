@@ -94,6 +94,18 @@ export function useWidgetData() {
     timeRange: { from: string; to: string },
     signal?: AbortSignal,
   ): Promise<WidgetData> {
+    if (widgetType === 'log-patterns') {
+      if (query.source !== 'logs') throw new Error('Log patterns require the Logs source.')
+      const result = await api.logPatterns({ time_range: timeRange, filters: applyVarsToFilters(query.filters || [], varValues), limit: query.limit ?? 10 }, signal)
+      return { type: widgetType, patterns: result.patterns, pattern_total: result.total }
+    }
+    if (widgetType === 'scatter') {
+      if (query.source === 'metrics') throw new Error('Scatter plots require event fields from APM or Logs.')
+      const result = await api.scatterPoints({ source: query.source, time_range: timeRange,
+        filters: applyVarsToFilters(query.filters || [], varValues), x_field: query.x_field || '', y_field: query.y_field || '', limit: query.limit ?? 500 }, signal)
+      return { type: widgetType, scatter_points: result.points, truncated: result.truncated, source: query.source, x_field: query.x_field, y_field: query.y_field }
+    }
+    if (widgetType === 'state-timeline' && query.source !== 'metrics') throw new Error('State timelines require a Metrics query.')
     if (query.source === 'metrics') {
       const promql = substitute(query.promql || '', varValues, '.*')
       if (!promql.trim()) return { type: widgetType, series: [] }
@@ -113,7 +125,7 @@ export function useWidgetData() {
         const last = series[0]?.points.slice(-1)[0]
         return { type: 'counter', count: last && Number.isFinite(last[1]) ? last[1] : undefined }
       }
-      return { type: widgetType, series }
+      return { type: widgetType, series, step_secs: step }
     }
 
     if (query.source === 'logs') {
@@ -253,6 +265,8 @@ function effectiveQueries(config: WidgetQueryConfig): WidgetPanelQuery[] {
     interval: config.interval,
     limit: config.limit,
     promql: config.promql,
+    x_field: config.x_field,
+    y_field: config.y_field,
   }]
 }
 

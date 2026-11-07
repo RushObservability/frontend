@@ -919,6 +919,20 @@ export function useApi() {
     }
   }
 
+  async function logPatterns(req: { time_range: { from: string; to: string }; filters: Filter[]; limit: number }, signal?: AbortSignal) {
+    return request<{ patterns: import('../types').LogPattern[]; total: number }>('/logs/patterns', {
+      method: 'POST', headers: { 'X-Rush-Workload': 'dashboard' }, body: JSON.stringify(req), signal,
+      invalidatesAnalytics: false,
+    })
+  }
+
+  async function scatterPoints(req: { source: 'logs' | 'spans'; time_range: { from: string; to: string }; filters: Filter[]; x_field: string; y_field: string; limit: number }, signal?: AbortSignal) {
+    return request<{ points: import('../types').ScatterPoint[]; truncated: boolean }>('/query/scatter', {
+      method: 'POST', headers: { 'X-Rush-Workload': 'dashboard' }, body: JSON.stringify(req), signal,
+      invalidatesAnalytics: false,
+    })
+  }
+
   async function getLogHistogram(req: {
     time_range: { from: string; to: string }
     filters?: Filter[]
@@ -2036,7 +2050,7 @@ export function useApi() {
     login, logout, getMe, listAuthSessions, revokeAuthSession, getSessionTimeoutSettings, saveSessionTimeoutSettings,
     getAuditEvents, verifyAuditChain,
     getTrace, queryEvents, queryExplore, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceTimeBreakdown, serviceTimeBreakdownTimeseries, serviceLatencyHistogram, serviceEndpoints, serviceErrors, suggestValues, queryGroup,
-    queryLogs, getLogDetail, getLogContext, countLogs, groupLogs, getLogHistogram, getLogViews, saveLogViews, suggestLogValues,
+    queryLogs, getLogDetail, getLogContext, countLogs, groupLogs, logPatterns, scatterPoints, getLogHistogram, getLogViews, saveLogViews, suggestLogValues,
     listSavedQueries, getSavedQuery, createSavedQuery, updateSavedQuery, deleteSavedQuery,
     listDashboards, getDashboard, createDashboard, updateDashboard, deleteDashboard,
     exportDashboard, importDashboard, listDashboardTemplates, createFromTemplate,

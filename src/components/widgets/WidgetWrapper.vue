@@ -9,6 +9,7 @@ import TimeSeriesPanel from '../panels/TimeSeriesPanel.vue'
 import HeatmapPanel from '../panels/HeatmapPanel.vue'
 import HistogramPanel from '../panels/HistogramPanel.vue'
 import PiePanel from '../panels/PiePanel.vue'
+import AnalysisPanel from '../panels/AnalysisPanel.vue'
 import type { PieStyle, PieCalculation, PieSort } from '../../lib/pie'
 import { buildHistogram } from '../../lib/histogram'
 import QueryDiagnosis from '../QueryDiagnosis.vue'
@@ -17,6 +18,7 @@ import { hasWidgetSamples } from '../../lib/queryDiagnostics'
 const props = withDefaults(defineProps<{
   title: string
   type: WidgetType
+  displayConfig?: Record<string, unknown>
   description?: string
   caption?: string
   sourceLabel?: string
@@ -45,6 +47,7 @@ defineEmits<{
 }>()
 
 const panelComponent = computed<Component>(() => {
+  if (['log-patterns', 'state-timeline', 'scatter'].includes(props.type)) return AnalysisPanel
   if (props.type === 'counter') return StatPanel
   if (props.type === 'bar') return BarPanel
   if (props.type === 'table') return TablePanel
@@ -65,6 +68,7 @@ const panelProps = computed<Record<string, unknown>>(() => {
     error: props.error || null,
   }
 
+  if (['log-patterns', 'state-timeline', 'scatter'].includes(props.type)) return { ...base, type: props.type, data: props.data, config: props.displayConfig }
   if (props.type === 'counter') {
     return {
       ...base,

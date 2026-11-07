@@ -170,7 +170,7 @@
   .edit-mode-actions > * { flex: 1; }
   .add-panel-types { display: none; }
   .widget-grid { grid-template-columns: 1fr; }
-  .widget-cell { grid-column: 1 / -1 !important; }
+  .widget-cell { grid-column: 1 / -1 !important; grid-row: auto / span var(--widget-row-span, 3) !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {

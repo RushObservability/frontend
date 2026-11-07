@@ -25,6 +25,9 @@ export function formatPanelSource(config: PanelQueryConfig): string {
 }
 
 export function defaultPanelCaption(type: WidgetType): string {
+  if (type === 'log-patterns') return 'Recurring messages grouped by service, severity, and normalized body.'
+  if (type === 'state-timeline') return 'Metric states over the selected window. Gray intervals have no data.'
+  if (type === 'scatter') return 'Paired numeric values from the same event. Results show the latest matching events.'
   if (type === 'counter') return 'Current value for the selected dashboard window.'
   if (type === 'bar') return 'Top groups ranked by volume for the selected window.'
   if (type === 'table') return 'Latest matching records for the selected window.'
