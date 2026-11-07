@@ -61,8 +61,8 @@ async function diagnose() {
 <style scoped>
 .query-diagnosis { max-width: 620px; font-size: 12px; text-align: left; }
 .diagnose-button { border: 1px solid var(--border-default); background: var(--bg-raised); color: var(--text-primary); padding: 6px 10px; border-radius: var(--r-sm); font: inherit; cursor: pointer; }
-.diagnose-button:hover { border-color: var(--blue); }
-.diagnose-button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.diagnose-button:hover { border-color: var(--accent); }
+.diagnose-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .diagnose-button:disabled { opacity: .6; cursor: progress; }
 .diagnose-result { color: var(--text-secondary); line-height: 1.6; }
 .diagnose-result p { margin: 8px 0; }
