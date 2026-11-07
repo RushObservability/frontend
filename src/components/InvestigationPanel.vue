@@ -4,6 +4,7 @@ import { useApi } from '../composables/useApi'
 import { onSessionChanged } from '../composables/authSession'
 import { safeApiErrorMessage } from '../lib/apiError'
 import { formatInvestigationActivity } from '../lib/investigationTime'
+import InvestigationDashboardDraft from './InvestigationDashboardDraft.vue'
 import type { InvestigationSession, InvestigationTemplate } from '../types'
 
 interface AgentEvent {
@@ -878,6 +879,8 @@ onMounted(async () => {
         <div v-if="running && !thinking && turns.length > 0 && turns[currentTurnIdx]?.events.length === 0" class="stream-loading">
           Starting investigation...
         </div>
+
+        <InvestigationDashboardDraft v-if="sessionActive && sessionId" :session-id="sessionId" />
 
         <!-- Session cost summary (multi-turn total) -->
         <div v-if="done && turns.length > 1 && sessionTokenStats.total > 0" class="session-cost-bar">
