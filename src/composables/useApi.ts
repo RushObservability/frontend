@@ -126,6 +126,10 @@ import type {
   ExploreSearchResponse,
   QueryLimitsConfig,
   QueryLimitsResponse,
+  Notebook,
+  NotebookCell,
+  NotebookCellType,
+  NotebookWithCells,
 } from '../types'
 
 const API_BASE = '/api/v1'
@@ -477,6 +481,52 @@ export function useApi() {
   }
 
   // ── Dashboard API ──
+
+  // Notebook writes change no telemetry, so they leave cached and in-flight
+  // analytics queries (including other notebook cells' searches) alone.
+  async function listNotebooks(): Promise<{ notebooks: Notebook[] }> {
+    return await request('/notebooks')
+  }
+
+  async function getNotebook(id: string, signal?: AbortSignal): Promise<NotebookWithCells> {
+    return await request(`/notebooks/${encodePathSegment(id)}`, { signal })
+  }
+
+  async function createNotebook(data: {
+    name: string; description?: string; visibility?: Notebook['visibility']
+    incident_start: string; incident_end?: string; tags?: string[]
+  }): Promise<NotebookWithCells> {
+    return await request('/notebooks', { method: 'POST', invalidatesAnalytics: false, body: JSON.stringify(data) })
+  }
+
+  /** `updated_at` is the copy the caller loaded; a newer saved copy fails with status 409. */
+  async function updateNotebook(id: string, data: Partial<Pick<Notebook,
+    'name' | 'description' | 'visibility' | 'status' | 'incident_start' | 'incident_end' | 'tags'>> & { updated_at: string }): Promise<Notebook> {
+    return await request(`/notebooks/${encodePathSegment(id)}`, { method: 'PUT', invalidatesAnalytics: false, body: JSON.stringify(data) })
+  }
+
+  async function deleteNotebook(id: string): Promise<void> {
+    await request(`/notebooks/${encodePathSegment(id)}`, { method: 'DELETE', invalidatesAnalytics: false })
+  }
+
+  async function createNotebookCell(notebookId: string, data: Partial<Pick<NotebookCell,
+    'title' | 'body' | 'query_config' | 'time' | 'display_config' | 'position'>> & { cell_type: NotebookCellType }): Promise<NotebookCell> {
+    return await request(`/notebooks/${encodePathSegment(notebookId)}/cells`, { method: 'POST', invalidatesAnalytics: false, body: JSON.stringify(data) })
+  }
+
+  /** `updated_at` is the copy the caller loaded; a newer saved copy fails with status 409. */
+  async function updateNotebookCell(notebookId: string, cellId: string, data: Partial<Pick<NotebookCell,
+    'title' | 'body' | 'query_config' | 'time' | 'display_config'>> & { updated_at: string }): Promise<NotebookCell> {
+    return await request(`/notebooks/${encodePathSegment(notebookId)}/cells/${encodePathSegment(cellId)}`, { method: 'PUT', invalidatesAnalytics: false, body: JSON.stringify(data) })
+  }
+
+  async function deleteNotebookCell(notebookId: string, cellId: string): Promise<void> {
+    await request(`/notebooks/${encodePathSegment(notebookId)}/cells/${encodePathSegment(cellId)}`, { method: 'DELETE', invalidatesAnalytics: false })
+  }
+
+  async function reorderNotebookCells(notebookId: string, cellIds: string[]): Promise<{ cells: NotebookCell[] }> {
+    return await request(`/notebooks/${encodePathSegment(notebookId)}/cells/reorder`, { method: 'POST', invalidatesAnalytics: false, body: JSON.stringify({ cell_ids: cellIds }) })
+  }
 
   async function listDashboards(): Promise<{ dashboards: Dashboard[] }> {
     return await request('/dashboards')
@@ -2059,6 +2109,8 @@ export function useApi() {
     getTrace, queryEvents, queryExplore, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceTimeBreakdown, serviceTimeBreakdownTimeseries, serviceLatencyHistogram, serviceEndpoints, serviceErrors, suggestValues, queryGroup,
     queryLogs, getLogDetail, getLogContext, countLogs, groupLogs, logPatterns, scatterPoints, getLogHistogram, getLogViews, saveLogViews, suggestLogValues,
     listSavedQueries, getSavedQuery, createSavedQuery, updateSavedQuery, deleteSavedQuery,
+    listNotebooks, getNotebook, createNotebook, updateNotebook, deleteNotebook,
+    createNotebookCell, updateNotebookCell, deleteNotebookCell, reorderNotebookCells,
     listDashboards, getDashboard, createDashboard, updateDashboard, deleteDashboard,
     exportDashboard, importDashboard, listDashboardTemplates, createFromTemplate,
     listDashboardVersions, getDashboardVersion, restoreDashboardVersion,
