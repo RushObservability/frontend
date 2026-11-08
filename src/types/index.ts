@@ -1818,3 +1818,51 @@ export interface SreAgentModelOption {
   provider_kind: LlmProviderKind
   reasoning: string[]
 }
+
+// ── Incident notebooks ──
+
+/** When a notebook query cell looks; resolved against the incident window. */
+export type NotebookCellTime =
+  | { mode: 'inherit' }
+  | { mode: 'absolute'; from: string; to: string }
+  | { mode: 'relative'; offset_from_min: number; offset_to_min: number }
+  | { mode: 'live'; minutes: number }
+
+export type NotebookCellType = 'note' | 'logs' | 'spans' | 'panel' | 'promql'
+
+export interface NotebookCell {
+  id: string
+  notebook_id: string
+  position: number
+  cell_type: NotebookCellType
+  title: string
+  body: string
+  /** logs/spans: `{ search }`; panel: a WidgetQueryConfig (its widget_type lives in display_config). */
+  query_config: Record<string, unknown>
+  time: NotebookCellTime
+  display_config: Record<string, unknown>
+  author_id: string
+  author_name: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Notebook {
+  id: string
+  name: string
+  description: string
+  owner_id: string
+  owner_name: string
+  visibility: 'private' | 'tenant'
+  status: 'open' | 'resolved'
+  incident_start: string
+  /** Empty while the incident is ongoing. */
+  incident_end: string
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface NotebookWithCells extends Notebook {
+  cells: NotebookCell[]
+}

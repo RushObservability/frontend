@@ -7,6 +7,7 @@ export type PollingCategory =
   | 'dashboard'
   | 'explore_live'
   | 'integration_activity'
+  | 'notebook'
   | 'service_graph'
   | 'slo_detail'
   | 'slo_list'

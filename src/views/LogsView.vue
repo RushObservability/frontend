@@ -8,6 +8,7 @@ import TimePicker from '../components/TimePicker.vue'
 import VirtualTable from '../components/VirtualTable.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
+import { parseSearchQuery } from '../lib/searchQuery'
 
 const router = useRouter()
 
@@ -43,21 +44,7 @@ function parseSearch() {
   const raw = searchInput.value.trim()
   if (!raw) { filters.value = []; return }
 
-  const newFilters: Filter[] = []
-  const parts = raw.split(/\s+/)
-  const textParts: string[] = []
-
-  for (const part of parts) {
-    const opMatch = part.match(/^([a-zA-Z0-9_.]+)(=|!=|>=|<=|>|<|~)(.+)$/)
-    if (opMatch) {
-      const [, field, rawOp, value] = opMatch
-      const opMap: Record<string, string> = { '=': '=', '!=': '!=', '>': '>', '<': '<', '>=': '>=', '<=': '<=', '~': 'LIKE' }
-      const op = opMap[rawOp!] || '='
-      newFilters.push({ field: field!, op, value: value! })
-    } else {
-      textParts.push(part)
-    }
-  }
+  const { filters: newFilters, text: textParts } = parseSearchQuery(raw)
   filters.value = newFilters
   searchInput.value = textParts.concat(newFilters.map(f => `${f.field}${f.op}${f.value}`)).join(' ')
 }

@@ -84,6 +84,10 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     routeNames: ['slos', 'slo-detail'], keywords: ['reliability', 'objectives'],
   },
   {
+    id: 'notebooks', label: 'Notebooks', path: '/notebooks', icon: '▤', group: 'respond',
+    routeNames: ['notebooks', 'notebook'], keywords: ['incident', 'postmortem', 'notes', 'timeline'],
+  },
+  {
     id: 'deploys', label: 'Deploys', path: '/deploys', icon: '↑', group: 'respond',
     routeNames: ['deploys'], keywords: ['changes', 'releases'],
   },

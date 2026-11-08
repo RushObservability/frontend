@@ -66,6 +66,17 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/notebooks',
+      name: 'notebooks',
+      component: () => import('./views/NotebooksListView.vue'),
+    },
+    {
+      path: '/notebooks/:id',
+      name: 'notebook',
+      component: () => import('./views/NotebookView.vue'),
+      props: true,
+    },
+    {
       path: '/alerts',
       name: 'alerts',
       component: () => import('./views/MonitorsView.vue'),

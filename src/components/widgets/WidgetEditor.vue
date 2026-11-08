@@ -22,6 +22,8 @@ import { buildHistogram } from '../../lib/histogram'
 const props = defineProps<{
   widget?: Widget | null
   dashboardId: string
+  /** Where the panel lives, for the editor's breadcrumb and save button. Defaults to dashboard. */
+  context?: 'dashboard' | 'notebook'
   variables?: DashboardVariable[]
   varValues?: Record<string, string>
   saving?: boolean
@@ -464,7 +466,7 @@ function save() {
   <div class="we-workbench" role="dialog" aria-modal="true" :aria-label="widget ? 'Edit panel' : 'Add panel'">
     <header class="we-header">
       <div class="we-heading">
-        <div class="we-breadcrumb">DASHBOARD <span>/</span> {{ widget ? 'EDIT PANEL' : 'NEW PANEL' }}</div>
+        <div class="we-breadcrumb">{{ (context || 'dashboard').toUpperCase() }} <span>/</span> {{ widget ? 'EDIT PANEL' : 'NEW PANEL' }}</div>
         <div class="we-title-row">
           <h2>{{ widget ? 'Edit panel' : 'Add visualization' }}</h2>
           <span class="we-context-chip">{{ queries.length > 1 ? `mixed · ${queries.length} queries` : source }}</span>
@@ -473,7 +475,7 @@ function save() {
       </div>
       <div class="we-header-actions">
         <button class="btn btn-secondary" @click="emit('cancel')">Cancel</button>
-        <button class="btn btn-primary" :disabled="saving || (widgetType === 'state-timeline' && !!statesError) || (widgetType === 'scatter' && (!activeQuery.x_field?.trim() || !activeQuery.y_field?.trim()))" @click="save">{{ saving ? 'Saving…' : widget ? 'Apply changes' : 'Add to dashboard' }}</button>
+        <button class="btn btn-primary" :disabled="saving || (widgetType === 'state-timeline' && !!statesError) || (widgetType === 'scatter' && (!activeQuery.x_field?.trim() || !activeQuery.y_field?.trim()))" @click="save">{{ saving ? 'Saving…' : widget ? 'Apply changes' : `Add to ${context || 'dashboard'}` }}</button>
       </div>
     </header>
     <p v-if="saveError" class="we-save-error" role="alert">{{ saveError }} Your edits are still here.</p>
