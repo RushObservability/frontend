@@ -36,6 +36,8 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   error?: string | null
   editMode?: boolean
+  /** Show "Add to notebook" outside edit mode. */
+  notebookable?: boolean
 }>(), { fill: null })
 
 defineEmits<{
@@ -44,6 +46,7 @@ defineEmits<{
   remove: []
   dragstart: [e: PointerEvent]
   resizestart: [e: PointerEvent]
+  'add-to-notebook': []
 }>()
 
 const panelComponent = computed<Component>(() => {
@@ -125,6 +128,9 @@ const panelProps = computed<Record<string, unknown>>(() => {
           <button class="widget-btn widget-btn-danger" title="Remove panel" @click="$emit('remove')"><span class="widget-btn-glyph">×</span><span class="widget-btn-label">Remove</span></button>
         </div>
       </template>
+      <template v-else-if="notebookable" #actions>
+        <button class="widget-btn widget-notebook-btn" title="Add this panel to an incident notebook" @click="$emit('add-to-notebook')"><span class="widget-btn-glyph" aria-hidden="true">▤</span><span class="widget-btn-label">Add to notebook</span></button>
+      </template>
     </component>
     <div v-if="!loading && !error && !hasWidgetSamples(data) && data?.diagnostic_requests?.length" class="widget-diagnostics">
       <QueryDiagnosis v-for="(request, index) in data.diagnostic_requests.slice(0, 3)" :key="index" :request="request" />
@@ -141,4 +147,8 @@ const panelProps = computed<Record<string, unknown>>(() => {
 <style scoped src="../../styles/widgets/WidgetWrapper.css"></style>
 <style scoped>
 .widget-diagnostics { padding: 0 16px 12px; }
+/* Only on hover or focus where there is hover; touch screens always show it. */
+@media (hover: hover) {
+  .widget-wrap:not(:hover):not(:focus-within) .widget-notebook-btn { opacity: 0; }
+}
 </style>
