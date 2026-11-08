@@ -124,7 +124,9 @@
 
 .nb-page input:not([type=checkbox]):not([type=radio]),
 .nb-page select,
-.nb-page textarea {
+.nb-page textarea,
+.nb-modal input:not([type=checkbox]):not([type=radio]),
+.nb-modal select {
   min-height: 28px;
   padding: 4px 8px;
   border: 1px solid var(--border-default);

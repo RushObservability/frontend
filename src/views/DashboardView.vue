@@ -6,10 +6,11 @@ import { useAuth } from '../composables/useAuth'
 import { useWidgetData } from '../composables/useWidgetData'
 import { substitute } from '../composables/useVarSubst'
 import { provideChartHover } from '../composables/useChartHover'
-import type { DashboardWithWidgets, Widget, WidgetData, DeployMarker, DashboardVariable } from '../types'
+import type { DashboardWithWidgets, Widget, WidgetData, DeployMarker, DashboardVariable, NotebookCellDraft } from '../types'
 import { VAR_ALL } from '../types'
 import WidgetWrapper from '../components/widgets/WidgetWrapper.vue'
 import WidgetEditor from '../components/widgets/WidgetEditor.vue'
+import AddToNotebookDialog from '../components/notebook/AddToNotebookDialog.vue'
 import VariableEditor from '../components/widgets/VariableEditor.vue'
 import DashboardHistory from '../components/widgets/DashboardHistory.vue'
 import TimePicker from '../components/TimePicker.vue'
@@ -73,6 +74,21 @@ const varOptions = ref<Record<string, string[]>>({})     // name → dropdown op
 
 function varLabel(v: DashboardVariable): string { return v.label || v.name }
 function titleFor(w: Widget): string { return substitute(w.title, varValues.value) }
+
+// ── Add to notebook ──
+const notebookDraft = ref<NotebookCellDraft | null>(null)
+function addToNotebook(widget: Widget) {
+  const to = new Date()
+  notebookDraft.value = {
+    cell_type: 'panel',
+    title: titleFor(widget).slice(0, 120),
+    query_config: { ...widget.query_config } as unknown as Record<string, unknown>,
+    // The notebook resolves $variables with the values selected here.
+    display_config: { ...widget.display_config, widget_type: widget.widget_type, variables: { ...varValues.value } },
+    from: new Date(to.getTime() - dashMinutes.value * 60_000).toISOString(),
+    to: to.toISOString(),
+  }
+}
 const panelRangeLabel = computed(() => formatPanelRange(dashMinutes.value))
 
 function panelSourceLabel(widget: Widget): string {
@@ -682,6 +698,8 @@ function widgetStyle(widget: Widget) {
           :loading="widgetLoadingMap[widget.id]"
           :error="widgetErrorMap[widget.id]"
           :edit-mode="editMode"
+          :notebookable="canWrite && !tvMode"
+          @add-to-notebook="addToNotebook(widget)"
           @edit="editWidget(widget)"
           @duplicate="duplicateWidget(widget)"
           @remove="removeWidget(widget.id)"
@@ -723,6 +741,7 @@ function widgetStyle(widget: Widget) {
       @cancel="showVarEditor = false"
     />
 
+    <AddToNotebookDialog :draft="notebookDraft" @close="notebookDraft = null" />
     <DashboardHistory
       v-if="showHistory && dashboard"
       :dashboard="dashboard"

@@ -4,11 +4,13 @@ import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { relatedProfileLocation } from '../lib/profiles'
 import { useFeatures } from '../composables/useFeatures'
-import type { TraceResponse, SpanNode } from '../types'
+import type { TraceResponse, SpanNode, NotebookCellDraft } from '../types'
 import VirtualTable from '../components/VirtualTable.vue'
 import TraceWaterfall from '../components/TraceWaterfall.vue'
 import { serviceColor as traceServiceColor } from '../lib/traceWaterfall'
 import { isErrorSpan, isErrorStatus } from '../lib/spanStatus'
+import { parseUtcTimestamp } from '../lib/utcTimestamp'
+import AddToNotebookButton from '../components/notebook/AddToNotebookButton.vue'
 
 const props = defineProps<{ traceId: string }>()
 const router = useRouter()
@@ -61,6 +63,23 @@ const flatSpans = computed<FlatSpan[]>(() => {
 
 
 
+
+/** A trace search for this trace, pinned to when it ran with a minute either side. */
+function notebookDraft(): NotebookCellDraft {
+  const spans = flatSpans.value.map(item => item.span)
+  const starts = spans.map(span => parseUtcTimestamp(span.timestamp)).filter(Number.isFinite)
+  const ends = spans.map(span => parseUtcTimestamp(span.timestamp) + span.duration_ns / 1e6).filter(Number.isFinite)
+  const from = starts.length ? Math.min(...starts) : Date.now() - 3_600_000
+  const to = ends.length ? Math.max(...ends) : Date.now()
+  const root = spans[0]
+  return {
+    cell_type: 'spans',
+    title: ['Trace', root?.service_name, root?.http_method, root?.http_path].filter(Boolean).join(' ').slice(0, 120),
+    query_config: { search: `trace_id=${props.traceId}` },
+    from: new Date(from - 60_000).toISOString(),
+    to: new Date(to + 60_000).toISOString(),
+  }
+}
 
 function selectSpan(span: SpanNode) {
   selectedSpan.value = selectedSpan.value?.span_id === span.span_id ? null : span
@@ -307,6 +326,7 @@ function investigateTrace() {
           <span class="tstat-label">services</span>
         </div>
         <div class="tstat-divider" />
+        <AddToNotebookButton :build="notebookDraft" />
         <button v-if="features.sre_agent" class="btn-investigate" @click="investigateTrace">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>

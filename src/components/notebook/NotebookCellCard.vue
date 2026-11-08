@@ -7,7 +7,7 @@ import { afterPointerRelease } from '../../lib/pointer'
 import { isErrorSpan } from '../../lib/spanStatus'
 import { formatRange, resolveCellTime, rulerSegment } from '../../lib/notebookTime'
 import type {
-  LogRecord, Notebook, NotebookCell, NotebookCellTime, RushEvent, Widget, WidgetData,
+  Filter, LogRecord, Notebook, NotebookCell, NotebookCellTime, RushEvent, Widget, WidgetData,
   WidgetPosition, WidgetQueryConfig, WidgetType,
 } from '../../types'
 import WidgetWrapper from '../widgets/WidgetWrapper.vue'
@@ -41,6 +41,8 @@ const { fetchWidgetData } = useWidgetData()
 const ROW_LIMIT = 50
 
 const isQuery = computed(() => props.cell.cell_type !== 'note')
+// Filters copied from Explore that the search text can't hold (see filtersToSearch).
+const fixedFilters = computed(() => (props.cell.query_config.filters as Filter[] | undefined) ?? [])
 const range = computed(() => resolveCellTime(props.notebook, props.cell.time, props.now))
 const ruler = computed(() => rulerSegment(props.notebook, range.value, props.now))
 const typeLabel = computed(() => ({ note: 'Note', logs: 'Logs', spans: 'Traces', panel: 'Panel', promql: 'PromQL' })[props.cell.cell_type])
@@ -128,17 +130,21 @@ async function load() {
     await props.run(async () => {
       if (current.signal.aborted) return
       const timeRange = range.value
+      // The dashboard workload, like panel cells: a plain search would cancel the
+      // other cells' searches on the same route (see supersedeKey in useApi).
       if (props.cell.cell_type === 'logs') {
         const { filters, text } = parseSearchQuery(search.value)
-        const res = await api.queryLogs({ slim: true, time_range: timeRange, filters, search: text.join(' ') || undefined, limit: ROW_LIMIT }, undefined, current.signal)
+        filters.push(...fixedFilters.value)
+        const res = await api.queryLogs({ slim: true, time_range: timeRange, filters, search: text.join(' ') || undefined, limit: ROW_LIMIT }, 'dashboard', current.signal)
         logRows.value = res.rows
         expandedLog.value = null
       } else if (props.cell.cell_type === 'spans') {
         const { filters, text } = parseSearchQuery(search.value)
-        const res = await api.queryEvents({ time_range: timeRange, filters, search: text.join(' ') || undefined, limit: ROW_LIMIT, columns: 'list' }, undefined, current.signal)
+        filters.push(...fixedFilters.value)
+        const res = await api.queryEvents({ time_range: timeRange, filters, search: text.join(' ') || undefined, limit: ROW_LIMIT, columns: 'list' }, 'dashboard', current.signal)
         spanRows.value = res.rows
       } else {
-        panelData.value = await fetchWidgetData(widget.value, {}, undefined, current.signal, timeRange)
+        panelData.value = await fetchWidgetData(widget.value, (props.cell.display_config.variables as Record<string, string>) ?? {}, undefined, current.signal, timeRange)
       }
     })
   } catch (e) {
@@ -238,6 +244,7 @@ function severityClass(sev: string): string {
         />
         <button type="submit" class="nb-btn">Run</button>
       </form>
+      <p v-if="fixedFilters.length" class="nb-muted mono">Also filtered by {{ fixedFilters.map(f => `${f.field} ${f.op} ${f.value === '' ? '(empty)' : f.value}`).join(', ') }}</p>
       <p v-if="error" class="nb-error" role="alert">{{ error }}</p>
       <p v-else-if="loading && !(logRows.length || spanRows.length)" class="nb-muted">Searching…</p>
       <template v-else-if="cell.cell_type === 'logs'">

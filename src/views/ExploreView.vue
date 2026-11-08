@@ -5,13 +5,15 @@ import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { relatedProfileLocation } from '../lib/profiles'
 import { useFeatures } from '../composables/useFeatures'
-import type { RushEvent, Filter, CountBucket, QueryFilter, GroupResult, SavedQuery, TimeseriesBucket, LatencyHeatmapCell, TraceResponse, SpanNode, LogRecord, BubbleUpResponse, ExploreCountKind, ExploreSearchRequest, ExploreSearchResponse } from '../types'
+import type { RushEvent, Filter, CountBucket, QueryFilter, GroupResult, SavedQuery, TimeseriesBucket, LatencyHeatmapCell, TraceResponse, SpanNode, LogRecord, BubbleUpResponse, ExploreCountKind, ExploreSearchRequest, ExploreSearchResponse, NotebookCellDraft } from '../types'
 import SavedQueries from '../components/SavedQueries.vue'
 import { fromApiSavedQuery } from '../composables/useSavedQueries'
 import QueryHistory from '../components/QueryHistory.vue'
 import { useQueryHistory } from '../composables/useQueryHistory'
 import type { HistoryEntry } from '../composables/useQueryHistory'
 import TimePicker from '../components/TimePicker.vue'
+import AddToNotebookButton from '../components/notebook/AddToNotebookButton.vue'
+import { filtersToSearch } from '../lib/searchQuery'
 import ContextMenu from '../components/ContextMenu.vue'
 import PanelCard from '../components/PanelCard.vue'
 import VirtualTable from '../components/VirtualTable.vue'
@@ -4019,6 +4021,20 @@ const exportMaxRows = ref(1000)
 const exporting = ref(false)
 const exportError = ref<string | null>(null)
 
+/** The last search that ran (filters.value holds its filters), as a notebook cell. */
+function notebookDraft(): NotebookCellDraft {
+  const isLogs = viewMode.value === 'logs'
+  const { search, rest } = filtersToSearch(isLogs ? getLogFilters(filters.value) : filters.value)
+  const text = [search, searchText.value].filter(Boolean).join(' ')
+  const label = isLogs ? 'Logs' : 'Traces'
+  return {
+    cell_type: isLogs ? 'logs' : 'spans',
+    title: (text ? `${label}: ${text}` : label).slice(0, 120),
+    query_config: { search: text, filters: rest },
+    ...timeRange.value,
+  }
+}
+
 function currentQueryText(): string {
   const fs = getActiveFilters().map(f => `${f.field}${f.op}${f.value}`).join(' ')
   const s = searchText.value ? `${fs ? ' ' : ''}${searchText.value}` : ''
@@ -4919,6 +4935,7 @@ watch(() => route.query.log_view, (id) => {
           <TimePicker v-model="selectedPreset" v-model:custom-range="customRange" />
         </template>
         <template #saved>
+          <AddToNotebookButton :build="notebookDraft" />
           <SavedQueries
             ref="savedQueriesRef"
             :current-filters="savedQueryFilters"

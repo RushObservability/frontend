@@ -1866,3 +1866,10 @@ export interface Notebook {
 export interface NotebookWithCells extends Notebook {
   cells: NotebookCell[]
 }
+
+/** A cell copied from another view by "Add to notebook", pinned to that view's range. */
+export interface NotebookCellDraft extends Pick<NotebookCell, 'cell_type' | 'title' | 'query_config'> {
+  display_config?: Record<string, unknown>
+  from: string
+  to: string
+}
