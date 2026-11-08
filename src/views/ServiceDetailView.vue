@@ -12,6 +12,7 @@ import { HistogramPanel, TimeSeriesPanel } from '../components/panels'
 import type { TimeSeriesPanelSeries } from '../components/panels'
 import type { GraphNode, GraphEdge, TimeseriesBucket, RushEvent, Filter, Funnel, FunnelResult, FunnelStep, DeployMarker, Monitor, Slo, AnomalyRule, LatencyHistogram, EndpointRow, ErrorGroup, ServiceTimeBreakdown, ServiceTimeBreakdownTimeseries } from '../types'
 import { applyTimeRangeOverride, useTimeRangePreference } from '../composables/useTimeRangePreference'
+import { serviceQueryInterval, serviceQueryBucketSeconds } from '../lib/serviceQuery'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +26,9 @@ const serviceName = computed(() => route.params.serviceName as string)
 const graphNodes = ref<GraphNode[]>([])
 const graphEdges = ref<GraphEdge[]>([])
 const timeseries = ref<TimeseriesBucket[]>([])
+const timeseriesError = ref('')
+const graphError = ref('')
+let loadGeneration = 0
 // Previous-period series: the same-duration window immediately preceding the
 // current one (shifted back by `minutes`). Overlaid faintly on the charts when
 // the "vs previous" comparison is enabled, so spikes/regressions read against a
@@ -129,12 +133,7 @@ function relTime(ts: string): string {
 }
 
 function detailInterval(): string {
-  const m = minutes.value
-  if (m <= 15) return '1m'
-  if (m <= 60) return '2m'
-  if (m <= 360) return '10m'
-  if (m <= 1440) return '30m'
-  return '3h'
+  return serviceQueryInterval(minutes.value)
 }
 
 // Current query window + the standard service filter, shared across loaders.
@@ -241,27 +240,38 @@ function setServiceTab(t: 'endpoints' | 'errors') {
 // Critical fetch: service graph + current timeseries. Drives the stat cards,
 // health verdict, and primary chart lines — everything above the fold.
 async function loadData() {
+  const generation = ++loadGeneration
   loading.value = true
+  timeseriesError.value = ''
+  graphError.value = ''
+  timeseriesPrev.value = []
   const { from, to } = windowRange()
   const filters = svcFilters()
 
-  try {
-    const [graphRes, tsRes] = await Promise.all([
-      api.serviceGraph(minutes.value),
-      api.queryTimeseries({
-        time_range: { from, to },
-        filters,
-        interval: detailInterval(),
-      }),
-    ])
-    graphNodes.value = graphRes.nodes
-    graphEdges.value = graphRes.edges
-    timeseries.value = tsRes.buckets as TimeseriesBucket[]
-  } catch {
-    // silent
-  } finally {
-    loading.value = false
+  const [graphRes, tsRes] = await Promise.allSettled([
+    api.serviceGraph(minutes.value),
+    api.queryTimeseries({
+      time_range: { from, to },
+      filters,
+      interval: detailInterval(),
+    }),
+  ])
+  if (generation !== loadGeneration) return
+  if (graphRes.status === 'fulfilled') {
+    graphNodes.value = graphRes.value.nodes
+    graphEdges.value = graphRes.value.edges
+  } else {
+    graphNodes.value = []
+    graphEdges.value = []
+    graphError.value = 'The service map could not be loaded. Other service data is still available.'
   }
+  if (tsRes.status === 'fulfilled') {
+    timeseries.value = tsRes.value.buckets as TimeseriesBucket[]
+  } else {
+    timeseries.value = []
+    timeseriesError.value = 'Request and latency data could not be loaded. Try again.'
+  }
+  loading.value = false
 
   // Secondary chart data + deploys: off the critical path so first paint isn't
   // blocked. Charts are above the fold, so these fire immediately (not on scroll)
@@ -439,6 +449,7 @@ async function loadBriefingSignals() {
 }
 
 async function initializeService() {
+  loadGeneration++
   serviceStatus.value = 'checking'
   loading.value = true
   try {
@@ -474,7 +485,7 @@ async function initializeService() {
 }
 
 onMounted(initializeService)
-onUnmounted(() => { lazyObservers.forEach((o) => o.disconnect()); lazyObservers = [] })
+onUnmounted(() => { loadGeneration++; lazyObservers.forEach((o) => o.disconnect()); lazyObservers = [] })
 watch(serviceName, () => {
   // Vue reuses this component for /services/:serviceName navigation. Clear the
   // previous service immediately so a failed or slow tenant-scoped request can
@@ -513,6 +524,8 @@ function bubbleUpUrl(svc: string, from: string, to: string): string {
 // classes, plus a muted "nodata" state) and the contributing reasons that
 // drive the one-line "why" under the title.
 const healthVerdict = computed(() => {
+  if (loading.value) return { level: 'nodata', label: 'loading', reasons: ['loading request data'] }
+  if (timeseriesError.value) return { level: 'nodata', label: 'unavailable', reasons: ['request data could not be loaded'] }
   const total = summary.value.total
   const rate = summary.value.errorRate
   if (total === 0) {
@@ -1420,8 +1433,13 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
     <template v-else>
       <!-- ░░░░ OVERVIEW ░░░░ — health KPIs, attached signals, topology -->
       <section v-show="activeTab === 'overview'" class="svc-panel">
+      <div v-if="timeseriesError || graphError" class="empty-state card" role="alert">
+        <p v-if="timeseriesError">{{ timeseriesError }}</p>
+        <p v-if="graphError">{{ graphError }}</p>
+        <button class="refresh-btn" :disabled="loading" @click="loadData">Retry service data</button>
+      </div>
       <!-- Operational briefing: a concise answer to what changed and where to start. -->
-      <section class="svc-briefing" :class="health" aria-labelledby="svc-briefing-title">
+      <section v-if="!timeseriesError" class="svc-briefing" :class="health" aria-labelledby="svc-briefing-title">
         <div class="svc-briefing-main">
           <div class="svc-briefing-kicker">
             <span class="svc-briefing-pulse" :class="health" />
@@ -1474,7 +1492,7 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
       </section>
 
       <!-- Summary stats -->
-      <div class="svc-stats-row">
+      <div v-if="!timeseriesError" class="svc-stats-row">
         <div class="svc-stat card">
           <div class="svc-stat-label">Total Requests</div>
           <div class="svc-stat-value mono">{{ formatCount(summary.total) }}</div>
@@ -1564,6 +1582,7 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
           :range-label="humanWindow"
           unit="req"
           :series="requestChartSeries"
+          :error="timeseriesError || null"
           :deploys="serviceChartDeploys"
           :loading="loading"
           role="button"
@@ -1582,6 +1601,7 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
           :range-label="humanWindow"
           unit="errors"
           :series="errorChartSeries"
+          :error="timeseriesError || null"
           :deploys="serviceChartDeploys"
           :loading="loading"
           role="button"
@@ -1600,6 +1620,7 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
           :range-label="humanWindow"
           unit="ms"
           :series="latencyChartSeries"
+          :error="timeseriesError || null"
           :deploys="serviceChartDeploys"
           :loading="loading"
           role="button"
@@ -1641,7 +1662,7 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
           :range-label="humanWindow"
           :series="timeBreakdownChartSeries"
           display-mode="stacked-bars"
-          :bucket-seconds="({ '1m': 60, '2m': 120, '10m': 600, '30m': 1800, '3h': 10800 }[detailInterval()] || 120)"
+          :bucket-seconds="serviceQueryBucketSeconds(minutes)"
           :time-domain="{ from: parseTs(windowFrom) / 1000, to: parseTs(windowTo) / 1000 }"
           :loading="timeBreakdownLoading"
           unit="ms"

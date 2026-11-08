@@ -1,16 +1,17 @@
 import { test, expect, type Page } from '@playwright/test'
 
-async function stub(page: Page, mode: 'data' | 'empty' | 'error' = 'data') {
+async function stub(page: Page, mode: 'data' | 'empty' | 'error' = 'data', options: { noPods?: boolean; recoverAtFiveMinutes?: boolean } = {}) {
   const queries: URL[] = []
   await page.route('**/api/v1/**', async route => {
     const url = new URL(route.request().url())
     let body: unknown = {}
     if (url.pathname === '/api/v1/auth/me') body = { user: { id: 'profile-reader', username: 'reader', role: 'viewer', display_name: 'Reader' } }
     if (url.pathname === '/api/v1/tenants') body = { tenants: [{ id: 'default', name: 'default', enabled: true }, { id: 'other', name: 'other', enabled: true }] }
-    if (url.pathname === '/api/v1/profiles/series') body = { series: mode === 'empty' ? [] : [{ service: 'checkout', version: 'v1', pod: 'checkout-1' }, { service: 'checkout', version: 'v2', pod: 'checkout-2' }], truncated: false }
+    if (url.pathname === '/api/v1/profiles/series') body = { series: mode === 'empty' ? [] : [{ service: 'checkout', version: 'v1', pod: options.noPods ? '' : 'checkout-1' }, { service: 'checkout', version: 'v2', pod: options.noPods ? '' : 'checkout-2' }], truncated: false }
     if (url.pathname === '/api/v1/profiles') {
       queries.push(url)
-      if (mode === 'error') { await route.fulfill({ status: 422, body: 'internal details must not appear' }); return }
+      const duration = Date.parse(url.searchParams.get('to')!) - Date.parse(url.searchParams.get('from')!)
+      if (mode === 'error' && (!options.recoverAtFiveMinutes || duration > 300_000)) { await route.fulfill({ status: 422, body: 'internal details must not appear' }); return }
       const stacks = mode === 'empty' ? [] : [
         { frames: ['main', 'handle', 'encode'], cpu_seconds: 3 },
         { frames: ['main', 'handle', 'parse'], cpu_seconds: 1 },
@@ -177,6 +178,40 @@ test('query failures show an actionable error without stale charts', async ({ pa
   await expect(page.getByRole('alert')).toContainText('Narrow the time range')
   await expect(page.getByRole('region', { name: 'CPU flame graph' })).toHaveCount(0)
   await expect(page.getByText('internal details must not appear')).toHaveCount(0)
+})
+
+test('stack limits offer an explicit five-minute retry without suggesting missing pods', async ({ page }) => {
+  const queries = await stub(page, 'error', { noPods: true, recoverAtFiveMinutes: true })
+  await page.goto('/profiles?service=checkout&t=60&version=v2&profile_type=sampled_cpu')
+  await expect(page.getByRole('alert')).toContainText('Narrow the time range')
+  await expect(page.getByRole('alert')).not.toContainText('choose a pod')
+  expect(new URL(page.url()).searchParams.get('t')).toBe('60')
+  await page.getByRole('button', { name: 'Try last 5m' }).click()
+  await expect(page.getByRole('region', { name: 'CPU flame graph' })).toBeVisible()
+  expect(new URL(page.url()).searchParams.get('t')).toBe('5')
+  const retry = queries.at(-1)!
+  expect(Date.parse(retry.searchParams.get('to')!) - Date.parse(retry.searchParams.get('from')!)).toBe(300_000)
+  expect(retry.searchParams.get('service')).toBe('checkout')
+  expect(retry.searchParams.get('version')).toBe('v2')
+  expect(retry.searchParams.get('profile_type')).toBe('sampled_cpu')
+})
+
+test('a stack-limit retry preserves the end of a pinned incident range', async ({ page }) => {
+  const queries = await stub(page, 'error', { recoverAtFiveMinutes: true })
+  const to = '2026-11-08T16:00:00.000Z'
+  await page.goto(`/profiles?${new URLSearchParams({ service: 'checkout', from: '2026-11-08T15:00:00.000Z', to })}`)
+  await expect(page.getByRole('alert')).toContainText('choose a pod')
+  await page.getByRole('button', { name: 'Try last 5m' }).click()
+  await expect(page.getByRole('region', { name: 'CPU flame graph' })).toBeVisible()
+  expect(queries.at(-1)!.searchParams.get('to')).toBe(to)
+  expect(queries.at(-1)!.searchParams.get('from')).toBe('2026-11-08T15:55:00.000Z')
+})
+
+test('already short profile windows do not offer a larger five-minute retry', async ({ page }) => {
+  await stub(page, 'error', { noPods: true })
+  await page.goto('/profiles?service=checkout&t=1')
+  await expect(page.getByRole('alert')).toContainText('Narrow the time range')
+  await expect(page.getByRole('button', { name: 'Try last 5m' })).toHaveCount(0)
 })
 
 test('invalid URL ranges are rejected before querying', async ({ page }) => {

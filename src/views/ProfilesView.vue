@@ -18,6 +18,7 @@ const series = ref<ProfileSeries[]>([])
 const seriesTruncated = ref(false)
 const loading = ref(false)
 const error = ref('')
+const stackLimitExceeded = ref(false)
 const search = ref('')
 const layout = ref<'both' | 'flame' | 'functions'>('both')
 const focusedFunction = ref('')
@@ -78,6 +79,16 @@ const rows = computed(() => profileFunctions(result.value?.stacks ?? [], baselin
   }))
 const hasCpu = computed(() => (result.value?.total_cpu_seconds ?? 0) > 0)
 const averageCores = computed(() => result.value ? result.value.total_cpu_seconds / ((result.value.to - result.value.from) / 1000) : 0)
+const canNarrowRange = computed(() => customRange.value
+  ? Date.parse(customRange.value.to) - Date.parse(customRange.value.from) > 300_000
+  : minutes.value > 5)
+
+function tryFiveMinutes() {
+  if (!canNarrowRange.value) return
+  // Keep the end of an incident's pinned window rather than jumping to now.
+  const range = customRange.value
+  change({ t: '5', from: range ? new Date(Date.parse(range.to) - 300_000).toISOString() : undefined, to: range?.to })
+}
 
 function setSort(key: string) { descending.value = sort.value === key ? !descending.value : key !== 'name'; sort.value = key }
 async function focusFunction(name: string) {
@@ -91,7 +102,7 @@ async function load() {
   controller = new AbortController()
   const signal = controller.signal
   const current = ++generation
-  focusedFunction.value = ''; loading.value = true; error.value = ''; result.value = null; baseline.value = null; series.value = []; seriesTruncated.value = false
+  focusedFunction.value = ''; loading.value = true; error.value = ''; stackLimitExceeded.value = false; result.value = null; baseline.value = null; series.value = []; seriesTruncated.value = false
   try {
     const to = customRange.value ? Date.parse(customRange.value.to) : Date.now()
     const from = customRange.value ? Date.parse(customRange.value.from) : to - minutes.value * 60_000
@@ -109,7 +120,8 @@ async function load() {
   } catch (e) {
     if (current !== generation || signal.aborted) return
     const status = (e as { status?: number }).status
-    error.value = status === 422 ? 'Too many distinct stacks. Narrow the time range or choose a pod.' : status === 404 ? 'This API does not support profiles yet. Update query-api to a build with profiling support.' : (e instanceof Error ? e.message : 'Could not load profiles. Try again.')
+    stackLimitExceeded.value = status === 422
+    error.value = status === 422 ? `Too many distinct stacks. Narrow the time range${pods.value.length ? ' or choose a pod' : ''}.` : status === 404 ? 'This API does not support profiles yet. Update query-api to a build with profiling support.' : (e instanceof Error ? e.message : 'Could not load profiles. Try again.')
   } finally { if (current === generation) loading.value = false }
 }
 watch([() => route.fullPath, activeTenant], load, { immediate: true })
@@ -153,7 +165,7 @@ onBeforeUnmount(() => { generation++; controller?.abort() })
     <p v-if="seriesTruncated" class="notice">Only the first 2,000 service/version/pod combinations are listed. Narrow the time range to find others.</p>
     <p v-if="text('trace_id')" class="notice">Linked samples for trace <code>{{ text('trace_id') }}</code>. <button class="text-button" @click="change({ trace_id: undefined, span_id: undefined, compare: undefined })">Show related service profiles</button></p>
 
-    <div v-if="error" role="alert" class="profile-error"><span>{{ error }}</span><button class="btn" @click="load">Retry</button></div>
+    <div v-if="error" role="alert" class="profile-error"><span>{{ error }}</span><button v-if="stackLimitExceeded && canNarrowRange" class="btn" @click="tryFiveMinutes">Try last 5m</button><button class="btn" @click="load">Retry</button></div>
     <div v-else-if="loading" role="status" class="profile-loading"><span>Loading CPU profiles…</span><div class="loading-placeholder" aria-hidden="true"></div></div>
     <section v-else-if="!service && services.length" class="service-browser">
       <div class="section-heading"><div><h2>Profiled services <span class="count">{{ services.length }}</span></h2><p>Select a service to inspect its CPU hotspots.</p></div></div>

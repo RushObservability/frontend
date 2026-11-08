@@ -141,6 +141,7 @@ const filteredMetrics = computed(() => {
 const vectorResults = ref<PromVectorResult[]>([])
 const matrixResults = ref<PromMatrixResult[]>([])
 const hasResults = ref(false)
+const resultExpression = ref('')
 
 function vectorResultAt(index: number): PromVectorResult {
   return vectorResults.value[index]!
@@ -184,7 +185,7 @@ const metricTableRows = computed<Record<string, unknown>[]>(() => vectorResults.
   value: result.value,
 })))
 const resultsRangeLabel = computed(() => formatPanelRange(selectedPreset.value))
-const resultsCaption = computed(() => query.value.trim() || 'Run a PromQL expression to inspect metric data.')
+const resultsCaption = computed(() => (hasResults.value ? resultExpression.value : query.value.trim()) || 'Run a PromQL expression to inspect metric data.')
 
 // ═══ Table helpers ═══
 function labelBadges(metric: Record<string, string>): Array<{ key: string; value: string }> {
@@ -205,6 +206,7 @@ onBeforeUnmount(() => { disposed = true; cancelQuery() })
 async function executeQuery(opts?: { skipHistory?: boolean }) {
   if (disposed) return
   if (!query.value.trim()) { clearQuery(); return }
+  const expression = query.value.trim()
   cancelQuery()
   const generation = queryGeneration
   const controller = new AbortController()
@@ -235,14 +237,14 @@ async function executeQuery(opts?: { skipHistory?: boolean }) {
     const start = customRange.value ? Date.parse(customRange.value.from) / 1000 : end - selectedPreset.value * 60
     if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) throw new Error('Choose a valid time range.')
     if (activeTab.value === 'table') {
-      const data = await api.promQuery(query.value, customRange.value ? end : undefined)
+      const data = await api.promQuery(expression, customRange.value ? end : undefined)
       if (data.resultType === 'vector') {
         if (!isCurrent()) return
         vectorResults.value = data.result
       }
     } else {
       const step = Math.max(1, Math.floor((end - start) / 250))
-      const data = await api.promQueryRange(query.value, start, end, step)
+      const data = await api.promQueryRange(expression, start, end, step)
       if (data.resultType === 'matrix') {
         if (!isCurrent()) return
         matrixResults.value = data.result
@@ -250,7 +252,8 @@ async function executeQuery(opts?: { skipHistory?: boolean }) {
     }
     if (isCurrent()) {
       hasResults.value = true
-      diagnosticRequest.value = { signal: 'metrics', filters: [], promql: query.value, time_range: { from: new Date(start * 1000).toISOString(), to: new Date(end * 1000).toISOString() } }
+      resultExpression.value = expression
+      diagnosticRequest.value = { signal: 'metrics', filters: [], promql: expression, time_range: { from: new Date(start * 1000).toISOString(), to: new Date(end * 1000).toISOString() } }
     }
   } catch (e: any) {
     if (isCurrent()) errorMsg.value = e.message || 'Query failed'
@@ -292,6 +295,8 @@ function createAlertFromQuery() {
 }
 
 function seriesPromql(metric: Record<string, string>): string {
+  // Result labels cannot reconstruct an aggregate, function, or arithmetic expression.
+  if (!metric.__name__ || loneMetricName(resultExpression.value) !== metric.__name__) return resultExpression.value
   const name = metric.__name__ || ''
   const labels = Object.entries(metric)
     .filter(([k]) => k !== '__name__')
@@ -772,13 +777,14 @@ watch(viewMode, () => {
             v-for="(series, idx) in matrixResults"
             :key="`alert-${seriesLabel(series.metric)}-${idx}`"
             class="metric-series-action"
-            :title="`Create alert for ${seriesLabel(series.metric)}`"
+            :title="loneMetricName(resultExpression) === series.metric.__name__ ? `Create alert for ${seriesLabel(series.metric)}` : 'Create alert from the full query, including all returned series'"
             @click="createAlertFromSeries(series.metric)"
           >
             <span class="metric-series-action-swatch" :style="{ background: palette[idx % palette.length] }"></span>
             <span class="metric-series-action-name mono">{{ seriesLabel(series.metric) }}</span>
             <span aria-hidden="true">&#9888;</span>
           </button>
+          <span v-if="!loneMetricName(resultExpression)" class="text-muted">Uses the full query, including all returned series.</span>
         </div>
       </template>
       <template v-if="diagnosticRequest && hasResults && !errorMsg && !matrixResults.length" #footer><QueryDiagnosis :request="diagnosticRequest" /></template>

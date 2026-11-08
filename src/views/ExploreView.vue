@@ -26,6 +26,7 @@ import { isSpanError, serviceColor } from '../lib/traceWaterfall'
 import ExploreSearchToolbar from '../components/ExploreSearchToolbar.vue'
 import ExploreResultsState from '../components/ExploreResultsState.vue'
 import QueryDiagnosis from '../components/QueryDiagnosis.vue'
+import type { DiagnosticRequest } from '../lib/queryDiagnostics'
 import SignalTimelinePanel from '../components/panels/SignalTimelinePanel.vue'
 import { useTenant } from '../composables/useTenant'
 import { compareFindingStrength, compareFindingSummary, rankCompareFindings } from '../lib/compareFindings'
@@ -1069,6 +1070,9 @@ const groupResults = ref<GroupResult[]>([])
 const groupLoading = ref(false)
 
 const searchText = ref('')  // free-text portion of search input
+// Diagnostics describe the submitted query. Never parse/mutate search state
+// from a render slot, which recursively invalidates Explore's own render.
+const exploreDiagnosticRequest = ref<DiagnosticRequest | null>(null)
 
 function settleExploreRequest(request: ExploreSearchRequest, signal: AbortSignal) {
   return api.queryExplore(request, signal)
@@ -1271,6 +1275,12 @@ async function search(opts?: { skipHistory?: boolean }) {
       interval: intervalBucket,
       search: searchParam,
       group_by: groupByField.value || undefined,
+    }
+    exploreDiagnosticRequest.value = {
+      signal: request.signal,
+      time_range: { ...request.time_range },
+      filters: (request.filters ?? []).map(filter => ({ ...filter })),
+      search: request.search,
     }
     const summaryPromise = settleExploreRequest({
       ...request,
@@ -5563,7 +5573,7 @@ watch(() => route.query.log_view, (id) => {
         >
           <template #action>
             <button v-if="spanModeFallback" type="button" class="btn btn-sm" @click="tracesOnly = false">Show matching spans</button>
-            <QueryDiagnosis v-if="!searching && !api.error.value" :request="{ signal: 'spans', time_range: timeRange, filters: getActiveFilters(), search: searchText || undefined }" />
+            <QueryDiagnosis v-if="exploreDiagnosticRequest && !searching && !api.error.value" :request="exploreDiagnosticRequest" />
           </template>
         </ExploreResultsState>
 
@@ -5756,7 +5766,7 @@ watch(() => route.query.log_view, (id) => {
         <!-- ═══ Log Table (Logs mode) ═══ -->
         <div v-else-if="viewMode === 'logs'" class="event-table card" :class="{ 'log-wrap-mode': logWordWrap, 'custom-log-layout': customLogLayout }">
           <ExploreResultsState v-if="!logEntries.length" mode="logs" :loading="false" :has-results="false">
-            <template #action><QueryDiagnosis :request="{ signal: 'logs', time_range: timeRange, filters: getLogFilters(getActiveFilters()), search: searchText || undefined }" /></template>
+            <template #action><QueryDiagnosis v-if="exploreDiagnosticRequest && !searching && !api.error.value" :request="exploreDiagnosticRequest" /></template>
           </ExploreResultsState>
           <template v-else>
             <!-- Log table header -->
