@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildFlameTree, layoutFlameTree, profileFunctions, relatedProfileLocation } from './profiles'
 describe('profiles', () => {
   const stacks = [{ frames: ['main', 'parse'], cpu_seconds: 3 }, { frames: ['main', 'encode'], cpu_seconds: 1 }]
@@ -28,5 +28,18 @@ describe('profiles', () => {
     expect(relatedProfileLocation('api', NaN, 0)).toBeNull()
     expect(relatedProfileLocation('api', '2026-09-12T10:00:00Z', Infinity)).toBeNull()
     expect(relatedProfileLocation('api', Date.parse('2026-09-12T10:00:00Z') * 1e6, 1e9)?.query.to).toBe('2026-09-12T10:01:01.000Z')
+  })
+  it.each(['UTC', 'America/Los_Angeles', 'Europe/Berlin'])('keeps API timestamps in UTC in %s', timezone => {
+    vi.stubEnv('TZ', timezone)
+    try {
+      for (const timestamp of ['2026-11-08 16:52:41.435000000', '2026-11-08T16:52:41.435Z', '2026-11-08T08:52:41.435-08:00']) {
+        expect(relatedProfileLocation('articles', timestamp, 89_000_000)?.query).toEqual({
+          service: 'articles', from: '2026-11-08T16:51:41.435Z', to: '2026-11-08T16:53:41.524Z',
+        })
+      }
+      expect(relatedProfileLocation('api', '2026-11-01 01:30:00.000000000', 0)?.query.from).toBe('2026-11-01T01:29:00.000Z')
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 })

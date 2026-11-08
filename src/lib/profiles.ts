@@ -1,3 +1,5 @@
+import { parseInvestigationTimestamp } from './investigationTime'
+
 export interface ProfileStack { frames: string[]; cpu_seconds: number }
 export interface ProfileResult {
   stacks: ProfileStack[]
@@ -85,7 +87,7 @@ export function cpuTime(seconds: number): string {
 }
 
 export function relatedProfileLocation(service: string, timestamp: string | number, durationNs: number) {
-  const start = typeof timestamp === 'number' ? timestamp / 1e6 : Date.parse(timestamp)
+  const start = typeof timestamp === 'number' ? timestamp / 1e6 : parseInvestigationTimestamp(timestamp)
   const end = start + Math.max(0, durationNs / 1e6) + 60_000
   if (!service || !Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(new Date(end).getTime()) || start < 60_000) return null
   return { name: 'profiles', query: { service, from: new Date(start - 60_000).toISOString(), to: new Date(end).toISOString() } }

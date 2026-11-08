@@ -49,6 +49,26 @@ async function stubExplore(page: Page) {
   return state
 }
 
+test('log results render, scroll, and filter without recursive Vue updates', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  // The preview server does not generate Docker's runtime configuration asset.
+  await page.route('**/runtime-config.js', route => route.fulfill({ contentType: 'application/javascript', body: '' }))
+  await stubExplore(page)
+  await page.goto('/?mode=logs&t=60')
+  const results = page.getByRole('listbox', { name: 'Log results' })
+  await expect(results).toContainText('Payment event 0')
+  await results.hover()
+  await page.mouse.wheel(0, 500)
+  await expect(results.locator('[data-virtual-index="0"]')).toHaveCount(0)
+  await page.getByRole('textbox', { name: 'Search traces and logs' }).fill('service_name=payments')
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
+  await expect(results).toContainText('Payment event 0')
+  await page.getByRole('button', { name: 'About Log volume' }).focus()
+  expect(errors).toEqual([])
+})
+
 for (const mode of ['logs', 'traces', 'spans']) {
   for (const width of [1440, 390]) {
     test(`${mode} volume inspection stays outside the bars at ${width}px`, async ({ page }, testInfo) => {

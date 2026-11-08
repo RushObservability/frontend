@@ -8,7 +8,7 @@ const metric = {
 }
 const selector = 'rush_audit_outbox_events{instance="unknown", service_name="wide-self-metrics"}'
 
-async function stubMetricAlertApi(page: Page, series = metric) {
+async function stubMetricAlertApi(page: Page, series: Record<string, string> = metric) {
   const state = { previews: [] as Record<string, any>[], saves: [] as Record<string, any>[] }
   await page.route('**/api/v1/**', async route => {
     const path = queryUrl(route.request()).pathname
@@ -121,3 +121,25 @@ test('a new alert without a metric link still opens the empty visual builder', a
   await expect(page.getByRole('button', { name: 'Edit expression', exact: true })).toBeVisible()
   await expect(page.locator('.mf-expr-readonly')).toHaveText('Configure below...')
 })
+
+for (const expression of [
+  'sum by (service_name) (rate(http_requests_total[5m]))',
+  'rate(http_requests_total{service_name="articles"}[1m])',
+  'histogram_quantile(0.95, sum by (le) (rate(request_duration_bucket[5m])))',
+  'http_requests_total{service_name="articles"} > 10',
+]) {
+  test(`series alerts preserve the executed expression: ${expression}`, async ({ page }) => {
+    const state = await stubMetricAlertApi(page, expression.includes(' > ')
+      ? { __name__: 'http_requests_total', service_name: 'articles' }
+      : { service_name: 'articles' })
+    await openMetricQuery(page, expression)
+    await expect(page.locator('.metric-series-action')).toBeVisible()
+    await expect(page.getByText('Uses the full query, including all returned series.')).toBeVisible()
+    // Unexecuted editor changes must not alter the meaning of existing results.
+    await page.getByRole('combobox', { name: 'Query expression' }).fill('up')
+    await page.locator('.metric-series-action').click()
+    await expect(page.locator('.mf-expr-container input')).toHaveValue(expression)
+    await expect.poll(() => state.previews.at(-1)?.query_config?.expression).toBe(expression)
+    expect(state.saves).toHaveLength(0)
+  })
+}

@@ -55,3 +55,18 @@ test('the metrics browser diagnoses the expression that produced the empty resul
   await expect.poll(() => calls.length).toBe(1)
   expect(calls[0]).toMatchObject({ signal: 'metrics', promql: 'rate(cpu_usage[1m])' })
 })
+
+for (const mode of ['logs', 'spans']) {
+  test(`empty ${mode} diagnostics keep the submitted query while the editor changes`, async ({ page }) => {
+    const calls = await stub(page)
+    await page.goto(`/?mode=${mode}&q=service_name%3Dmissing&t=15`)
+    const diagnose = page.getByRole('button', { name: 'Explain missing data' })
+    await expect(diagnose).toBeVisible()
+    await page.getByRole('textbox', { name: 'Search traces and logs' }).fill('service_name=payments')
+    await diagnose.click()
+    await expect.poll(() => calls.length).toBe(1)
+    expect(calls[0]).toMatchObject({ signal: mode, filters: [{ field: 'service_name', op: '=', value: 'missing' }] })
+    const range = calls[0]?.time_range as { from: string; to: string }
+    expect(Date.parse(range.to) - Date.parse(range.from)).toBe(900_000)
+  })
+}
