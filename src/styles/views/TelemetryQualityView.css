@@ -74,3 +74,16 @@
   .tq-tabs { gap: var(--sp-4); }
 }
 @media (pointer: coarse) { .tq-tabs button, .tq-toolbar select, .tq-actions .btn { min-height: 44px; } .tq-toolbar select { font-size: 16px; } }
+
+.tq-history-select { padding: 4px 0; border: 0; background: transparent; color: var(--accent); text-align: left; font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.tq-history-select[aria-pressed="true"] { text-decoration: underline; }
+.tq-history-detail { margin-top: var(--sp-5); border-top: 1px solid var(--border-default); padding-top: var(--sp-4); }
+.tq-history-detail h2 { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.tq-history-detail p { font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.tq-history-detail ol { list-style: none; padding: 0; margin: var(--sp-4) 0; }
+.tq-history-detail li { display: flex; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-3) 0; border-bottom: 1px solid var(--border-default); font-size: 12px; }
+.tq-history-detail time { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.tq-history-detail strong { font-weight: 500; }
+.tq-history-detail span { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .tq-tabs { gap: var(--sp-3); } .tq-history-detail li { flex-direction: column; gap: var(--sp-1); } }
+@media (pointer: coarse) { .tq-history-select { min-height: 44px; } }

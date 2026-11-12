@@ -6,7 +6,7 @@ import { useTenant } from '../composables/useTenant'
 import DataTable from '../components/DataTable.vue'
 import EmptyState from '../components/EmptyState.vue'
 import TimePicker from '../components/TimePicker.vue'
-import { samplePercentage, serviceLabel, type QualityResponse, type QualityFinding, type QualityRule } from '../lib/telemetryQuality'
+import { samplePercentage, serviceLabel, type QualityResponse, type QualityFinding, type QualityRule, type QualityScore } from '../lib/telemetryQuality'
 
 const api = useApi()
 const route = useRoute()
@@ -15,7 +15,7 @@ const { activeTenantName } = useTenant()
 const initialMinutes = Number(route.query.minutes)
 const minutes = ref(Number.isInteger(initialMinutes) && initialMinutes >= 5 && initialMinutes <= 10080 ? initialMinutes : 1440)
 const presets = [{ label: '1h', value: 60 }, { label: '6h', value: 360 }, { label: '24h', value: 1440 }, { label: '7d', value: 10080 }]
-const tabs = ['findings', 'services', 'coverage'] as const
+const tabs = ['findings', 'services', 'history', 'coverage'] as const
 type Tab = typeof tabs[number]
 const tab = ref<Tab>(tabs.includes(route.query.view as Tab) ? route.query.view as Tab : 'findings')
 const service = ref(typeof route.query.service === 'string' ? `service:${route.query.service}` : '*')
@@ -25,6 +25,9 @@ const loading = ref(false)
 const error = ref('')
 const showVersions = ref(false)
 const servicePage = ref(0)
+const historyStatus = ref('all')
+const historyId = ref('')
+const historyPage = ref(0)
 let generation = 0
 let controller: AbortController | undefined
 let disposed = false
@@ -33,9 +36,16 @@ const ruleMap = computed(() => new Map(report.value?.rules.map(rule => [rule.id,
 const serviceOptions = computed(() => Array.from(new Set([
   ...report.value?.services.map(s => s.service) ?? [],
   ...report.value?.findings.map(f => f.service) ?? [],
+  ...report.value?.history?.map(h => h.service) ?? [],
 ])).sort())
 const filteredFindings = computed(() => report.value?.findings.filter(f => service.value === '*' || `service:${f.service}` === service.value) ?? [])
 const selected = computed(() => filteredFindings.value.find(f => f.id === selectedId.value) ?? filteredFindings.value[0])
+const history = computed(() => report.value?.history ?? [])
+const findingHistory = computed(() => history.value.find(h => h.id === selected.value?.id))
+const filteredHistory = computed(() => history.value.filter(h => (service.value === '*' || `service:${h.service}` === service.value) && (historyStatus.value === 'all' || historyStatus.value === h.status)))
+const visibleHistory = computed(() => filteredHistory.value.slice(historyPage.value * 25, (historyPage.value + 1) * 25))
+const historyPages = computed(() => Math.max(1, Math.ceil(filteredHistory.value.length / 25)))
+const selectedHistory = computed(() => filteredHistory.value.find(h => h.id === historyId.value))
 const selectedRule = computed(() => selected.value ? ruleMap.value.get(selected.value.rule_id) : undefined)
 const assessed = computed(() => (report.value?.assessed_services ?? 0) > 0)
 const unavailable = computed(() => report.value?.sources.filter(s => s.status === 'unavailable') ?? [])
@@ -51,6 +61,8 @@ function date(value: string): string {
   const parsed = new Date(value)
   return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString() : 'Not available'
 }
+function scoreLabel(value?: QualityScore): string { return value?.value == null ? 'Not evaluated' : `${value.value} / 100` }
+function changeLabel(kind: string): string { return ({ opened: 'First detected', resolved: 'Resolved', reopened: 'Reopened', versions_changed: 'Affected versions changed' } as Record<string, string>)[kind] ?? kind }
 function impactLabel(value: unknown): string { return value === 'high' ? 'High' : value === 'medium' ? 'Medium' : 'Low' }
 function ruleFor(finding: QualityFinding): QualityRule | undefined { return ruleMap.value.get(finding.rule_id) }
 function checkCount(row: Record<string, unknown>): string {
@@ -70,6 +82,11 @@ function selectFinding(finding: QualityFinding) {
   syncUrl()
   if (window.matchMedia('(max-width: 1000px)').matches) void nextTick(() => document.getElementById('tq-finding-detail')?.scrollIntoView({ block: 'start' }))
 }
+function selectHistory(id: string) {
+  historyId.value = id
+  if (window.matchMedia('(max-width: 1000px)').matches) void nextTick(() => document.getElementById('tq-history-detail')?.scrollIntoView({ block: 'start' }))
+}
+function backToHistory() { document.getElementById('tq-history-list')?.scrollIntoView({ block: 'start' }) }
 function backToFindings() { document.getElementById('tq-findings-list')?.scrollIntoView({ block: 'start' }) }
 function selectTab(value: Tab) { tab.value = value; syncUrl() }
 function tabKey(event: KeyboardEvent, index: number) {
@@ -90,6 +107,8 @@ async function load() {
   error.value = ''
   showVersions.value = false
   servicePage.value = 0
+  historyPage.value = 0
+  historyId.value = ''
   try {
     const response = await api.getTelemetryQuality(minutes.value, ownController.signal)
     if (disposed || request !== generation || ownController.signal.aborted) return
@@ -106,6 +125,7 @@ async function load() {
 }
 watch([minutes, activeTenantName], () => { void load() }, { immediate: true })
 watch(minutes, syncUrl)
+watch([service, historyStatus], () => { historyPage.value = 0; historyId.value = '' })
 watch(service, () => {
   if (!filteredFindings.value.some(f => f.id === selectedId.value)) selectedId.value = filteredFindings.value[0]?.id ?? ''
   showVersions.value = false
@@ -139,13 +159,13 @@ onBeforeUnmount(() => { disposed = true; generation++; controller?.abort() })
         <p v-if="report.omitted_findings || report.omitted_services">{{ report.omitted_findings }} findings and {{ report.omitted_services }} services are outside the response limit.</p>
       </div>
       <div class="tq-summary">
-        <div class="tq-stat"><span>Open findings in sample</span><strong>{{ assessed ? report.finding_count.toLocaleString() : '—' }}</strong><small>{{ report.high_impact_findings }} high impact</small></div>
+        <div class="tq-stat"><span>Findings in sample</span><strong>{{ assessed ? report.finding_count.toLocaleString() : '—' }}</strong><small>{{ report.high_impact_findings }} high impact</small></div>
         <div class="tq-stat"><span>Services assessed</span><strong>{{ report.assessed_services }}<small> / {{ report.assessed_services + report.unknown_services }}</small></strong><small>{{ report.unknown_services }} linked services have no sampled data</small></div>
-        <div class="tq-stat"><span>Initial rule set</span><strong>{{ report.rules.length }}<small> checks</small></strong><small>Coverage shown · no overall score</small></div>
+        <div class="tq-stat"><span>Rush sample score</span><strong>{{ report.score?.value ?? '—' }}<small v-if="report.score?.value != null"> / 100</small></strong><small>{{ report.score?.evaluated_checks ?? 0 }} service checks evaluated · {{ report.score?.not_evaluated_checks ?? 0 }} not evaluated</small></div>
       </div>
       <div class="tq-sample-note"><span>{{ sampleCount.toLocaleString() }} records sampled · up to {{ report.sample_limit_per_source.toLocaleString() }} per source</span><span>Evaluated {{ date(report.evaluated_at) }}</span></div>
       <nav class="tq-tabs" role="tablist" aria-label="Telemetry quality views">
-        <button v-for="(value, index) in tabs" :id="`tq-tab-${value}`" :key="value" type="button" role="tab" :aria-controls="`tq-panel-${value}`" :aria-selected="tab === value" @click="selectTab(value)" @keydown="tabKey($event, index)">{{ value === 'coverage' ? 'Rule coverage' : value === 'services' ? 'Services' : 'Findings' }}<span v-if="value === 'findings'">{{ report.finding_count }}</span></button>
+        <button v-for="(value, index) in tabs" :id="`tq-tab-${value}`" :key="value" type="button" role="tab" :aria-controls="`tq-panel-${value}`" :aria-selected="tab === value" @click="selectTab(value)" @keydown="tabKey($event, index)">{{ value === 'coverage' ? 'Rule coverage' : value === 'services' ? 'Services' : value === 'history' ? 'History' : 'Findings' }}<span v-if="value === 'findings'">{{ report.finding_count }}</span></button>
       </nav>
 
       <section v-show="tab === 'findings'" id="tq-panel-findings" role="tabpanel" aria-labelledby="tq-tab-findings">
@@ -166,6 +186,7 @@ onBeforeUnmount(() => { disposed = true; generation++; controller?.abort() })
             <h2>{{ selectedRule.title }}</h2><div class="tq-detail-service"><strong>{{ serviceLabel(selected.service) }}</strong><span>{{ selectedRule.signals }}</span></div>
             <p>{{ selectedRule.description }}</p>
             <section class="tq-detail-section"><h3>Evidence</h3><dl><dt>Observed</dt><dd>{{ selected.observed }}</dd><dt>Expected</dt><dd>{{ selected.expected }}</dd><dt>Sample</dt><dd>{{ selected.affected.toLocaleString() }} / {{ selected.sampled.toLocaleString() }} records affected</dd><dt>First observed</dt><dd>{{ date(selected.first_observed) }}</dd><dt>Last observed</dt><dd>{{ date(selected.last_observed) }}</dd></dl></section>
+            <section v-if="findingHistory" class="tq-detail-section"><h3>Finding history</h3><dl><dt>Tracked since</dt><dd>{{ date(findingHistory.first_detected) }}</dd><dt>Last detected</dt><dd>{{ date(findingHistory.last_detected) }}</dd><dt>Occurrences</dt><dd>{{ findingHistory.occurrences }}</dd></dl><p class="tq-version-note">Scheduled 24h scans track this finding independently of the selected sample.</p></section>
             <section class="tq-detail-section"><h3>Recommended fix</h3><p>{{ selectedRule.remediation }}</p></section>
             <div class="tq-actions"><button class="btn btn-sm" :aria-expanded="showVersions" aria-controls="tq-version-evidence" @click="showVersions = !showVersions">{{ showVersions ? 'Hide' : 'Inspect' }} version evidence</button><RouterLink v-if="selected.service" class="btn btn-sm" :to="{ name: 'service-detail', params: { serviceName: selected.service }, query: { t: String(minutes) } }">Open service</RouterLink></div>
             <section v-if="showVersions" id="tq-version-evidence" class="tq-detail-section"><h3>Observed versions</h3><p class="tq-version-note">Counts from this sample, not a causal release comparison. Up to 20 versions shown.</p><DataTable bare><thead><tr><th>Version</th><th>Affected / sampled</th></tr></thead><tbody><tr v-for="version in selected.versions" :key="version.version"><td>{{ version.version || 'Not recorded' }}</td><td>{{ version.affected.toLocaleString() }} / {{ version.sampled.toLocaleString() }}</td></tr></tbody></DataTable></section>
@@ -175,21 +196,40 @@ onBeforeUnmount(() => { disposed = true; generation++; controller?.abort() })
 
       <section v-show="tab === 'services'" id="tq-panel-services" role="tabpanel" aria-labelledby="tq-tab-services">
         <p class="tq-section-note">Passing counts include only evaluated checks. The inventory includes sampled services and services with configured repository links.</p>
-        <DataTable :rows="visibleServices" row-key="service" :columns="[{ key: 'service', label: 'Service' }, { key: 'checks', label: 'Checks passing' }, { key: 'finding_count', label: 'Findings', align: 'right' }, { key: 'sampled_records', label: 'Sampled records', align: 'right' }, { key: 'status', label: 'Observation' }]" empty-label="No services found in this window">
+        <DataTable :rows="visibleServices" row-key="service" :columns="[{ key: 'service', label: 'Service' }, { key: 'checks', label: 'Checks passing' }, { key: 'score', label: 'Sample score' }, { key: 'finding_count', label: 'Findings', align: 'right' }, { key: 'sampled_records', label: 'Sampled records', align: 'right' }, { key: 'status', label: 'Observation' }]" empty-label="No services found in this window">
           <template #cell-service="{ row }">{{ serviceLabel(String(row.service)) }}</template>
           <template #cell-checks="{ row }">{{ checkCount(row) }}</template>
+          <template #cell-score="{ row }">{{ scoreLabel(row.score as QualityScore) }}</template>
           <template #cell-status="{ row }"><span class="tq-observation">{{ row.status === 'unknown' ? 'Unknown · no sampled data' : row.status === 'findings' ? 'Findings in sample' : 'No findings in sample' }}</span></template>
         </DataTable>
         <div v-if="servicePages > 1" class="tq-pagination"><button class="btn btn-sm" :disabled="servicePage === 0" @click="servicePage--">Previous</button><span>Page {{ servicePage + 1 }} of {{ servicePages }}</span><button class="btn btn-sm" :disabled="servicePage + 1 >= servicePages" @click="servicePage++">Next</button></div>
       </section>
 
+      <section v-show="tab === 'history'" id="tq-panel-history" role="tabpanel" aria-labelledby="tq-tab-history">
+        <p class="tq-section-note">Scheduled scans use a rolling 24h window. History is retained for 90 days, with the latest 20 lifecycle and version observations per finding. Resolution requires a passing check in a complete, uncapped scan. Missing data keeps a finding open. Version observations do not establish a release as the cause.</p>
+        <div v-if="!report.history_available" class="tq-notice" role="status"><strong>Finding history unavailable</strong><p>The current sample can still be assessed. Saved history could not be loaded.</p></div>
+        <template v-else>
+          <p v-if="report.history_capped" class="tq-section-note" role="status">Showing the 500 most recently updated findings. Older findings may be outside this list.</p>
+          <div class="tq-toolbar"><label>Service <select v-model="service" aria-label="Filter history by service"><option value="*">All services</option><option v-for="name in serviceOptions" :key="name" :value="`service:${name}`">{{ serviceLabel(name) }}</option></select></label><label>Status <select v-model="historyStatus" aria-label="Filter history by status"><option value="all">All statuses</option><option value="open">Open</option><option value="resolved">Resolved</option></select></label></div>
+          <DataTable id="tq-history-list" :rows="visibleHistory" row-key="id" :columns="[{ key: 'rule_id', label: 'Finding' }, { key: 'service', label: 'Service' }, { key: 'status', label: 'Status' }, { key: 'first_detected', label: 'First detected' }, { key: 'last_detected', label: 'Last detected' }, { key: 'occurrences', label: 'Occurrences', align: 'right' }]" empty-label="No saved findings match these filters">
+            <template #cell-rule_id="{ row }"><button class="tq-history-select" :aria-pressed="historyId === row.id" @click="selectHistory(String(row.id))">{{ ruleMap.get(String(row.rule_id))?.title ?? row.rule_id }}</button></template>
+            <template #cell-service="{ value }">{{ serviceLabel(String(value)) }}</template>
+            <template #cell-status="{ value }">{{ value === 'resolved' ? 'Resolved' : 'Open' }}</template>
+            <template #cell-first_detected="{ value }">{{ date(String(value)) }}</template>
+            <template #cell-last_detected="{ value }">{{ date(String(value)) }}</template>
+          </DataTable>
+          <div v-if="historyPages > 1" class="tq-pagination"><button class="btn btn-sm" :disabled="historyPage === 0" @click="historyPage--">Previous</button><span>Page {{ historyPage + 1 }} of {{ historyPages }}</span><button class="btn btn-sm" :disabled="historyPage + 1 >= historyPages" @click="historyPage++">Next</button></div>
+          <section v-if="selectedHistory" id="tq-history-detail" class="tq-history-detail" aria-label="Finding timeline" aria-live="polite"><button class="btn btn-sm tq-mobile-back" @click="backToHistory">Back to history</button><h2>{{ ruleMap.get(selectedHistory.rule_id)?.title ?? selectedHistory.rule_id }} · {{ serviceLabel(selectedHistory.service) }}</h2><p>Last saved evidence: {{ selectedHistory.latest.observed }}</p><ol><li v-for="(change, index) in selectedHistory.changes" :key="index"><time :datetime="change.at">{{ date(change.at) }}</time><strong>{{ changeLabel(change.kind) }}</strong><span v-if="change.versions.length">Affected versions: {{ change.versions.join(', ') }}</span></li></ol></section>
+        </template>
+      </section>
+
       <section v-show="tab === 'coverage'" id="tq-panel-coverage" role="tabpanel" aria-labelledby="tq-tab-coverage">
-        <p class="tq-section-note">These are eight initial Rush checks, not a complete implementation of the Instrumentation Score specification. No overall score is calculated. Cardinality checks need sufficient observations; checks without enough data are not evaluated.</p>
+        <p class="tq-section-note">These {{ report.rules.length }} Rush checks assess the selected sample. Rush sample score v1 is 100 × passing weight / evaluated weight, rounded to the nearest integer. High impact weighs 3, medium 2, low 1. Each service/check pair counts once. Checks without sufficient data are excluded, including historical spans without retained resources. Scores can change with coverage and are not the Instrumentation Score standard.</p>
         <DataTable :rows="ruleRows" row-key="id" :columns="[{ key: 'title', label: 'Check' }, { key: 'signals', label: 'Signals' }, { key: 'evaluated', label: 'Services evaluated', align: 'right' }, { key: 'findings', label: 'Services with findings', align: 'right' }]"><template #cell-title="{ row }"><strong class="tq-rule-title">{{ row.title }}</strong><p class="tq-rule-description">{{ row.description }}</p></template></DataTable>
         <h2 class="tq-sources-title">Source coverage</h2>
         <DataTable :rows="report.sources" row-key="table" :columns="[{ key: 'table', label: 'Source' }, { key: 'status', label: 'Status' }, { key: 'sampled_records', label: 'Sampled records', align: 'right' }, { key: 'capped', label: 'Sample cap reached' }]"><template #cell-table="{ value }">{{ sourceLabel(value) }}</template><template #cell-status="{ value }">{{ value === 'available' ? 'Available' : 'Not evaluated · unavailable' }}</template><template #cell-capped="{ value }">{{ value ? 'Yes' : 'No' }}</template></DataTable>
       </section>
-      <footer class="tq-methodology"><p>{{ report.sampling }}</p><p>Window: {{ date(report.from) }} to {{ date(report.to) }}. First-observed times are from the sample, not a persistent finding history.</p></footer>
+      <footer class="tq-methodology"><p>{{ report.sampling }}</p><p>Window: {{ date(report.from) }} to {{ date(report.to) }}. Evidence timestamps describe this sample. Saved finding history uses scheduled scans and is independent of the selected window.</p><p>{{ report.cache_hit ? 'Cached assessment · ' : '' }}Latest scheduled scan: {{ report.scheduled_at ? date(report.scheduled_at) : 'Not available yet' }}. Scans run every five minutes, with up to 20 tenants per cycle.</p></footer>
     </template>
   </div>
 </template>
