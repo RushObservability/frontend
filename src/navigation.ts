@@ -71,6 +71,10 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     routeNames: ['profiles'], keywords: ['cpu', 'profiling', 'flame graph', 'performance'],
   },
   {
+    id: 'telemetry-quality', label: 'Telemetry quality', path: '/telemetry-quality', icon: '◈', group: 'observe',
+    routeNames: ['telemetry-quality'], keywords: ['instrumentation', 'quality', 'coverage', 'telemetry'],
+  },
+  {
     id: 'alerts', label: 'Alerts', path: '/alerts', icon: '!', group: 'respond',
     routeNames: ['alerts', 'monitor-create', 'monitor-detail', 'monitor-edit', 'alert-rule-add', 'alert-rule-edit', 'alert-channel-add'],
     mobilePrimary: true, keywords: ['monitors', 'notifications'],
