@@ -28,12 +28,35 @@ export interface QualityCheck {
   affected: number
 }
 
+export interface QualityScore {
+  value: number | null
+  passed_weight: number
+  evaluated_weight: number
+  evaluated_checks: number
+  not_evaluated_checks: number
+}
+
+export interface FindingHistory extends Record<string, unknown> {
+  id: string
+  service: string
+  rule_id: string
+  status: 'open' | 'resolved'
+  first_detected: string
+  last_detected: string
+  last_evaluated: string
+  resolved_at: string | null
+  occurrences: number
+  latest: QualityFinding
+  changes: Array<{ at: string; kind: 'opened' | 'resolved' | 'reopened' | 'versions_changed'; versions: string[] }>
+}
+
 export interface QualityService extends Record<string, unknown> {
   service: string
   status: 'unknown' | 'findings' | 'no_findings_in_sample'
   sampled_records: number
   finding_count: number
   checks: QualityCheck[]
+  score: QualityScore
 }
 
 export interface QualitySource extends Record<string, unknown> {
@@ -64,6 +87,12 @@ export interface QualityResponse {
   rules: QualityRule[]
   findings: QualityFinding[]
   services: QualityService[]
+  score: QualityScore
+  history: FindingHistory[]
+  history_available: boolean
+  history_capped: boolean
+  scheduled_at: string | null
+  cache_hit: boolean
 }
 
 export function samplePercentage(affected: number, sampled: number): string {
