@@ -13,11 +13,22 @@ describe('visibleNavigationGroups', () => {
 
     expect(ids).toContain('explore')
     expect(ids).toContain('profiles')
-    expect(visibleNavigationGroups(baseContext).find(group => group.id === 'observe')?.items.map(item => item.id)).toEqual(['explore', 'services', 'dashboards', 'metrics', 'rum', 'profiles', 'telemetry-quality', 'noise-waste'])
+    expect(visibleNavigationGroups(baseContext).find(group => group.id === 'observe')?.items.map(item => item.id)).toEqual(['explore', 'services', 'dashboards', 'metrics', 'rum', 'profiles'])
     expect(ids).toContain('rum')
     expect(ids).not.toContain('settings')
     expect(ids).not.toContain('sre-agent')
     expect(ids).not.toContain('integrations')
+  })
+
+  it('groups telemetry tools under Control while keeping individual permissions', () => {
+    const viewer = visibleNavigationGroups(baseContext).find(group => group.id === 'control')!
+    expect(viewer.submenus?.map(submenu => submenu.label)).toEqual(['Telemetry management'])
+    expect(viewer.items.filter(item => item.submenu === 'telemetry-management').map(item => item.id))
+      .toEqual(['noise-waste', 'telemetry-quality', 'usage'])
+    const admin = visibleNavigationGroups({ ...baseContext, isAdmin: true }).find(group => group.id === 'control')!
+    expect(admin.items.filter(item => item.submenu === 'telemetry-management').map(item => item.id))
+      .toEqual(['noise-waste', 'telemetry-quality', 'usage', 'capacity'])
+    expect(admin.items.filter(item => !item.submenu).map(item => item.id)).toEqual(['audit', 'settings'])
   })
 
   it('shows entitled and administrative destinations from the same registry', () => {
