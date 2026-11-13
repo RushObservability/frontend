@@ -36,6 +36,27 @@ export interface QualityScore {
   not_evaluated_checks: number
 }
 
+/** A rule from the open Instrumentation Score specification. */
+export interface StandardRule {
+  id: string
+  description: string
+  impact: 'Critical' | 'Important' | 'Normal' | 'Low'
+  weight: number
+  implemented: boolean
+  note: string
+}
+
+export interface InstrumentationScore {
+  value: number | null
+  category: string | null
+  passed_weight: number
+  evaluated_weight: number
+  evaluated_rules: number
+  not_evaluated_rules: number
+}
+
+export const specRuleUrl = (id: string) => `https://github.com/instrumentation-score/spec/blob/main/rules/${encodeURIComponent(id)}.md`
+
 export interface FindingHistory extends Record<string, unknown> {
   id: string
   service: string
@@ -57,6 +78,9 @@ export interface QualityService extends Record<string, unknown> {
   finding_count: number
   checks: QualityCheck[]
   score: QualityScore
+  /** Absent from reports saved before the Instrumentation Score was added. */
+  standard?: QualityCheck[]
+  instrumentation_score?: InstrumentationScore
 }
 
 export interface QualitySource extends Record<string, unknown> {
@@ -88,6 +112,9 @@ export interface QualityResponse {
   findings: QualityFinding[]
   services: QualityService[]
   score: QualityScore
+  standard_spec?: string
+  standard_rules?: StandardRule[]
+  instrumentation_score?: InstrumentationScore
   history: FindingHistory[]
   history_available: boolean
   history_capped: boolean

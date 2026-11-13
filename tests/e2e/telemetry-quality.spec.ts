@@ -200,3 +200,44 @@ test('saved finding timeline stays reachable on a phone', async ({ page }) => {
   await page.getByRole('button', { name: 'Back to history', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Missing deployment environment', exact: true })).toBeInViewport()
 })
+
+test('the Instrumentation Score is shown as incomplete, with every spec rule accounted for', async ({ page }) => {
+  const standardRules = [
+    { id: 'RES-005', description: 'service.name is present.', impact: 'Critical', weight: 40, implemented: true, note: '' },
+    { id: 'RES-007', description: 'deployment.environment.name is present.', impact: 'Important', weight: 30, implemented: true, note: '' },
+    { id: 'LOG-003', description: 'Log records do not contain sensitive data.', impact: 'Critical', weight: 40, implemented: false, note: 'Needs sensitive-data detection over values Rush\'s quality scan does not read.' },
+  ]
+  const score = (value: number | null, category: string | null) => ({ value, category, passed_weight: 40, evaluated_weight: 70, evaluated_rules: 2, not_evaluated_rules: 0 })
+  await stub(page, () => {
+    const base = report()
+    return {
+      ...base,
+      standard_spec: 'instrumentation-score/spec@ef080a8 (2026-10-30)',
+      standard_rules: standardRules,
+      instrumentation_score: score(57.14, 'Needs Improvement'),
+      services: base.services.map((s, i) => ({
+        ...s,
+        instrumentation_score: i === 2 ? score(null, null) : score(57.14, 'Needs Improvement'),
+        standard: [{ rule_id: 'RES-005', status: i === 2 ? 'not_evaluated' : 'pass', sampled: 200, affected: 0 }, { rule_id: 'RES-007', status: i === 2 ? 'not_evaluated' : 'finding', sampled: 200, affected: 200 }],
+      })),
+    }
+  })
+  await page.goto('/telemetry-quality')
+  const card = page.locator('.tq-stat').filter({ hasText: 'Instrumentation Score' })
+  await expect(card).toContainText('57.14 / 100')
+  await expect(card).toContainText('Needs Improvement · Incomplete: 2 of 3 spec rules implemented')
+  await page.getByRole('tab', { name: 'Services' }).click()
+  await expect(page.getByRole('cell', { name: '57.14 · Needs Improvement' }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'See rules' }).click()
+  await expect(page.getByRole('heading', { name: 'Instrumentation Score rules' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'LOG-003' })).toHaveAttribute('href', 'https://github.com/instrumentation-score/spec/blob/main/rules/LOG-003.md')
+  await expect(page.getByText(/Not implemented: Needs sensitive-data detection/)).toBeVisible()
+  await expect(page.getByText('Critical · 40').first()).toBeVisible()
+})
+
+test('reports saved before the Instrumentation Score keep the Rush score only', async ({ page }) => {
+  await stub(page, () => report())
+  await page.goto('/telemetry-quality')
+  await expect(page.getByText('Rush sample score', { exact: true })).toBeVisible()
+  await expect(page.getByText('Instrumentation Score', { exact: true })).toHaveCount(0)
+})
