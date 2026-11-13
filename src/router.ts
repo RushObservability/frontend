@@ -34,6 +34,11 @@ const router = createRouter({
       component: () => import('./views/ServicesView.vue'),
     },
     {
+      path: '/telemetry-quality',
+      name: 'telemetry-quality',
+      component: () => import('./views/TelemetryQualityView.vue'),
+    },
+    {
       path: '/services/:serviceName',
       name: 'service-detail',
       component: () => import('./views/ServiceDetailView.vue'),

@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import type { ProfileQuery, ProfileResult, ProfileSeries } from '../lib/profiles'
+import type { QualityResponse } from '../lib/telemetryQuality'
 import type { LogView } from '../lib/logViews'
 import { useTenant } from './useTenant'
 import { encodePathSegment } from '../lib/url'
@@ -1062,6 +1063,10 @@ export function useApi() {
   }
 
   // ── Usage API ──
+
+  function getTelemetryQuality(minutes: number, signal?: AbortSignal): Promise<QualityResponse> {
+    return request(`/telemetry-quality?${new URLSearchParams({ minutes: String(minutes) })}`, { signal })
+  }
 
   async function getUsage(params?: {
     signal_type?: string
@@ -2128,7 +2133,7 @@ export function useApi() {
     getSystemMetrics,
     getStoragePartitions,
     getIngestBuffer,
-    getUsage, getLabelBreakdown,
+    getUsage, getLabelBreakdown, getTelemetryQuality,
     getUsageMeteringSummary, getUsageMeteringBreakdown, getUsageMeteringTenantBreakdown, getUsageMeteringTenants,
     rumApps, queryRumEvents, rumVitals, rumPages, rumErrors, rumSessions, rumSession,
     promQuery, promQueryRange, promLabels, promLabelValues,
