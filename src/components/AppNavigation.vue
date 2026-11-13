@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { navigationItemIsActive, type NavigationGroup, type NavigationItem } from '../navigation'
+import NavigationSubmenu from './NavigationSubmenu.vue'
 import { useModalFocus } from '../composables/useModalFocus'
 import type { AddonDef } from '../integrations/types'
 import { SETTINGS_INTEGRATIONS, SETTINGS_TAB_GROUPS, type SettingsTabId } from '../views/settings/navigation'
@@ -134,7 +135,8 @@ watch(() => route.fullPath, () => {
         <div class="collapsed-app-menu" :class="{ open: appMenuOpen }">
           <section v-for="group in nonSettingsGroups" :key="group.id">
             <h3>{{ group.label }}</h3>
-            <router-link v-for="item in group.items" :key="item.id" :to="item.path">
+            <NavigationSubmenu v-for="submenu in group.submenus" :key="submenu.id" :submenu="submenu" :items="group.items.filter(item => item.submenu === submenu.id)" variant="compact" />
+            <router-link v-for="item in group.items.filter(item => !item.submenu)" :key="item.id" :to="item.path">
               <span aria-hidden="true">{{ item.icon }}</span>{{ item.label }}
             </router-link>
           </section>
@@ -159,8 +161,9 @@ watch(() => route.fullPath, () => {
           </router-link>
         </template>
         <template v-else>
+          <NavigationSubmenu v-for="submenu in group.submenus" :key="submenu.id" :submenu="submenu" :items="group.items.filter(item => item.submenu === submenu.id)" />
           <router-link
-            v-for="item in group.items"
+            v-for="item in group.items.filter(item => !item.submenu)"
             :key="item.id"
             :to="item.path"
             class="app-navigation-item"
@@ -237,7 +240,8 @@ watch(() => route.fullPath, () => {
                 </router-link>
               </template>
               <template v-else>
-              <div v-for="item in group.items" :key="item.id" class="mobile-menu-destination">
+              <NavigationSubmenu v-for="submenu in group.submenus" :key="submenu.id" :submenu="submenu" :items="group.items.filter(item => item.submenu === submenu.id)" variant="mobile" />
+              <div v-for="item in group.items.filter(item => !item.submenu)" :key="item.id" class="mobile-menu-destination">
                 <router-link
                   :to="item.path"
                   class="mobile-menu-item"

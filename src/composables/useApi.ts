@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import type { ProfileQuery, ProfileResult, ProfileSeries } from '../lib/profiles'
 import type { QualityResponse } from '../lib/telemetryQuality'
+import type { WasteResponse } from '../lib/noiseWaste'
 import type { LogView } from '../lib/logViews'
 import { useTenant } from './useTenant'
 import { encodePathSegment } from '../lib/url'
@@ -1068,6 +1069,10 @@ export function useApi() {
     return request(`/telemetry-quality?${new URLSearchParams({ minutes: String(minutes) })}`, { signal })
   }
 
+  function getNoiseWaste(minutes: number, signal?: AbortSignal): Promise<WasteResponse> {
+    return request(`/noise-waste?${new URLSearchParams({ minutes: String(minutes) })}`, { signal })
+  }
+
   async function getUsage(params?: {
     signal_type?: string
     days?: number
@@ -2133,7 +2138,7 @@ export function useApi() {
     getSystemMetrics,
     getStoragePartitions,
     getIngestBuffer,
-    getUsage, getLabelBreakdown, getTelemetryQuality,
+    getUsage, getLabelBreakdown, getTelemetryQuality, getNoiseWaste,
     getUsageMeteringSummary, getUsageMeteringBreakdown, getUsageMeteringTenantBreakdown, getUsageMeteringTenants,
     rumApps, queryRumEvents, rumVitals, rumPages, rumErrors, rumSessions, rumSession,
     promQuery, promQueryRange, promLabels, promLabelValues,

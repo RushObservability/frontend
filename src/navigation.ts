@@ -3,6 +3,15 @@ import { frontendEdition } from './edition/manifest'
 
 export type NavigationGroupId = 'observe' | 'respond' | 'integrations' | 'investigate' | 'control'
 
+export type NavigationSubmenuId = 'telemetry-management'
+
+export interface NavigationSubmenu {
+  id: NavigationSubmenuId
+  label: string
+  icon: string
+  group: NavigationGroupId
+}
+
 export interface NavigationItem {
   id: string
   label: string
@@ -10,6 +19,7 @@ export interface NavigationItem {
   icon: string
   group: NavigationGroupId
   routeNames: string[]
+  submenu?: NavigationSubmenuId
   adminOnly?: boolean
   feature?: keyof Features
   /** Paid destination shown only when the current license carries this entitlement. */
@@ -24,6 +34,7 @@ export interface NavigationGroup {
   id: NavigationGroupId
   label: string
   items: NavigationItem[]
+  submenus?: NavigationSubmenu[]
 }
 
 export interface NavigationContext {
@@ -39,6 +50,10 @@ export const NAVIGATION_GROUPS: Array<{ id: NavigationGroupId; label: string }> 
   { id: 'integrations', label: 'Integrations' },
   { id: 'investigate', label: 'Investigate' },
   { id: 'control', label: 'Control' },
+]
+
+export const NAVIGATION_SUBMENUS: NavigationSubmenu[] = [
+  { id: 'telemetry-management', label: 'Telemetry management', icon: '◫', group: 'control' },
 ]
 
 export const NAVIGATION_ITEMS: NavigationItem[] = [
@@ -71,10 +86,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     routeNames: ['profiles'], keywords: ['cpu', 'profiling', 'flame graph', 'performance'],
   },
   {
-    id: 'telemetry-quality', label: 'Telemetry quality', path: '/telemetry-quality', icon: '◈', group: 'observe',
-    routeNames: ['telemetry-quality'], keywords: ['instrumentation', 'quality', 'coverage', 'telemetry'],
-  },
-  {
     id: 'alerts', label: 'Alerts', path: '/alerts', icon: '!', group: 'respond',
     routeNames: ['alerts', 'monitor-create', 'monitor-detail', 'monitor-edit', 'alert-rule-add', 'alert-rule-edit', 'alert-channel-add'],
     mobilePrimary: true, keywords: ['monitors', 'notifications'],
@@ -105,11 +116,19 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     keywords: ['database', 'kubernetes', 'argocd'],
   },
   {
-    id: 'usage', label: 'Usage', path: '/usage', icon: '◫', group: 'control',
+    id: 'noise-waste', label: 'Noise & waste', path: '/noise-waste', icon: '◴', group: 'control', submenu: 'telemetry-management',
+    routeNames: ['noise-waste'], keywords: ['noise', 'waste', 'volume', 'cost', 'sampling', 'cardinality'],
+  },
+  {
+    id: 'telemetry-quality', label: 'Telemetry quality', path: '/telemetry-quality', icon: '◈', group: 'control', submenu: 'telemetry-management',
+    routeNames: ['telemetry-quality'], keywords: ['instrumentation', 'quality', 'coverage', 'telemetry'],
+  },
+  {
+    id: 'usage', label: 'Usage', path: '/usage', icon: '◫', group: 'control', submenu: 'telemetry-management',
     routeNames: ['usage'], keywords: ['storage', 'ingestion', 'stats'],
   },
   {
-    id: 'capacity', label: 'Capacity', path: '/capacity', icon: '△', group: 'control',
+    id: 'capacity', label: 'Capacity', path: '/capacity', icon: '△', group: 'control', submenu: 'telemetry-management',
     routeNames: ['capacity'], adminOnly: true, keywords: ['cluster', 'resources'],
   },
   {
@@ -135,10 +154,14 @@ export function navigationItemVisible(item: NavigationItem, context: NavigationC
 }
 
 export function visibleNavigationGroups(context: NavigationContext): NavigationGroup[] {
-  return NAVIGATION_GROUPS.map(group => ({
-    ...group,
-    items: NAVIGATION_ITEMS.filter(item => item.group === group.id && navigationItemVisible(item, context)),
-  })).filter(group => group.items.length > 0)
+  return NAVIGATION_GROUPS.map(group => {
+    const items = NAVIGATION_ITEMS.filter(item => item.group === group.id && navigationItemVisible(item, context))
+    return {
+      ...group,
+      items,
+      submenus: NAVIGATION_SUBMENUS.filter(submenu => submenu.group === group.id && items.some(item => item.submenu === submenu.id)),
+    }
+  }).filter(group => group.items.length > 0)
 }
 
 export function navigationItemIsActive(item: NavigationItem, routeName: string | null | undefined): boolean {

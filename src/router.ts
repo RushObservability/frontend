@@ -34,6 +34,11 @@ const router = createRouter({
       component: () => import('./views/ServicesView.vue'),
     },
     {
+      path: '/noise-waste',
+      name: 'noise-waste',
+      component: () => import('./views/NoiseWasteView.vue'),
+    },
+    {
       path: '/telemetry-quality',
       name: 'telemetry-quality',
       component: () => import('./views/TelemetryQualityView.vue'),
