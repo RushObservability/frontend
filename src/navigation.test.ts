@@ -13,7 +13,7 @@ describe('visibleNavigationGroups', () => {
 
     expect(ids).toContain('explore')
     expect(ids).toContain('profiles')
-    expect(visibleNavigationGroups(baseContext).find(group => group.id === 'observe')?.items.map(item => item.id)).toEqual(['explore', 'services', 'dashboards', 'metrics', 'rum', 'profiles', 'telemetry-quality'])
+    expect(visibleNavigationGroups(baseContext).find(group => group.id === 'observe')?.items.map(item => item.id)).toEqual(['explore', 'services', 'dashboards', 'metrics', 'rum', 'profiles', 'telemetry-quality', 'noise-waste'])
     expect(ids).toContain('rum')
     expect(ids).not.toContain('settings')
     expect(ids).not.toContain('sre-agent')

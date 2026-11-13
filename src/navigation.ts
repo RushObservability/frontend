@@ -75,6 +75,10 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     routeNames: ['telemetry-quality'], keywords: ['instrumentation', 'quality', 'coverage', 'telemetry'],
   },
   {
+    id: 'noise-waste', label: 'Noise & waste', path: '/noise-waste', icon: '◴', group: 'observe',
+    routeNames: ['noise-waste'], keywords: ['noise', 'waste', 'volume', 'cost', 'sampling', 'cardinality'],
+  },
+  {
     id: 'alerts', label: 'Alerts', path: '/alerts', icon: '!', group: 'respond',
     routeNames: ['alerts', 'monitor-create', 'monitor-detail', 'monitor-edit', 'alert-rule-add', 'alert-rule-edit', 'alert-channel-add'],
     mobilePrimary: true, keywords: ['monitors', 'notifications'],
