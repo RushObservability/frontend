@@ -4,7 +4,8 @@
 .tq-subtitle { margin: var(--sp-1) 0 0; color: var(--text-secondary); font-size: 12px; }
 .tq-header-controls { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 .tq-tenant { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
-.tq-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }
+.tq-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--sp-3); }
+.tq-link { padding: 0; border: 0; background: none; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
 .tq-stat { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-4) var(--sp-5); background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--r-md); }
 .tq-stat > span { font-size: 11px; color: var(--text-secondary); }
 .tq-stat > strong { font-size: 27px; line-height: 1.25; font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: -.035em; }

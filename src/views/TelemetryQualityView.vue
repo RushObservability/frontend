@@ -6,7 +6,7 @@ import { useTenant } from '../composables/useTenant'
 import DataTable from '../components/DataTable.vue'
 import EmptyState from '../components/EmptyState.vue'
 import TimePicker from '../components/TimePicker.vue'
-import { samplePercentage, serviceLabel, type QualityResponse, type QualityFinding, type QualityRule, type QualityScore } from '../lib/telemetryQuality'
+import { samplePercentage, serviceLabel, specRuleUrl, type InstrumentationScore, type QualityResponse, type QualityFinding, type QualityRule, type QualityScore } from '../lib/telemetryQuality'
 
 const api = useApi()
 const route = useRoute()
@@ -57,11 +57,19 @@ const ruleRows = computed(() => report.value?.rules.map(rule => {
   return { ...rule, evaluated: checks.filter(c => c.status !== 'not_evaluated').length, findings: checks.filter(c => c.status === 'finding').length }
 }) ?? [])
 
+const standardRules = computed(() => report.value?.standard_rules ?? [])
+const implementedRules = computed(() => standardRules.value.filter(rule => rule.implemented).length)
+const standardRows = computed(() => standardRules.value.map(rule => {
+  const checks = report.value!.services.flatMap(s => s.standard?.filter(c => c.rule_id === rule.id) ?? [])
+  return { ...rule, evaluated: checks.filter(c => c.status !== 'not_evaluated').length, findings: checks.filter(c => c.status === 'finding').length }
+}))
+
 function date(value: string): string {
   const parsed = new Date(value)
   return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString() : 'Not available'
 }
 function scoreLabel(value?: QualityScore): string { return value?.value == null ? 'Not evaluated' : `${value.value} / 100` }
+function standardLabel(value?: InstrumentationScore): string { return value?.value == null ? 'Not evaluated' : `${value.value} · ${value.category}` }
 function changeLabel(kind: string): string { return ({ opened: 'First detected', resolved: 'Resolved', reopened: 'Reopened', versions_changed: 'Affected versions changed' } as Record<string, string>)[kind] ?? kind }
 function impactLabel(value: unknown): string { return value === 'high' ? 'High' : value === 'medium' ? 'Medium' : 'Low' }
 function ruleFor(finding: QualityFinding): QualityRule | undefined { return ruleMap.value.get(finding.rule_id) }
@@ -161,6 +169,7 @@ onBeforeUnmount(() => { disposed = true; generation++; controller?.abort() })
       <div class="tq-summary">
         <div class="tq-stat"><span>Findings in sample</span><strong>{{ assessed ? report.finding_count.toLocaleString() : '—' }}</strong><small>{{ report.high_impact_findings }} high impact</small></div>
         <div class="tq-stat"><span>Services assessed</span><strong>{{ report.assessed_services }}<small> / {{ report.assessed_services + report.unknown_services }}</small></strong><small>{{ report.unknown_services }} linked services have no sampled data</small></div>
+        <div v-if="standardRules.length" class="tq-stat"><span>Instrumentation Score</span><strong>{{ report.instrumentation_score?.value ?? '—' }}<small v-if="report.instrumentation_score?.value != null"> / 100</small></strong><small><template v-if="report.instrumentation_score?.category">{{ report.instrumentation_score.category }} · </template>Incomplete: {{ implementedRules }} of {{ standardRules.length }} spec rules implemented · <button type="button" class="tq-link" @click="selectTab('coverage')">See rules</button></small></div>
         <div class="tq-stat"><span>Rush sample score</span><strong>{{ report.score?.value ?? '—' }}<small v-if="report.score?.value != null"> / 100</small></strong><small>{{ report.score?.evaluated_checks ?? 0 }} service checks evaluated · {{ report.score?.not_evaluated_checks ?? 0 }} not evaluated</small></div>
       </div>
       <div class="tq-sample-note"><span>{{ sampleCount.toLocaleString() }} records sampled · up to {{ report.sample_limit_per_source.toLocaleString() }} per source</span><span>Evaluated {{ date(report.evaluated_at) }}</span></div>
@@ -196,10 +205,11 @@ onBeforeUnmount(() => { disposed = true; generation++; controller?.abort() })
 
       <section v-show="tab === 'services'" id="tq-panel-services" role="tabpanel" aria-labelledby="tq-tab-services">
         <p class="tq-section-note">Passing counts include only evaluated checks. The inventory includes sampled services and services with configured repository links.</p>
-        <DataTable :rows="visibleServices" row-key="service" :columns="[{ key: 'service', label: 'Service' }, { key: 'checks', label: 'Checks passing' }, { key: 'score', label: 'Sample score' }, { key: 'finding_count', label: 'Findings', align: 'right' }, { key: 'sampled_records', label: 'Sampled records', align: 'right' }, { key: 'status', label: 'Observation' }]" empty-label="No services found in this window">
+        <DataTable :rows="visibleServices" row-key="service" :columns="[{ key: 'service', label: 'Service' }, { key: 'checks', label: 'Checks passing' }, { key: 'score', label: 'Sample score' }, ...(standardRules.length ? [{ key: 'instrumentation_score', label: 'Instrumentation Score' }] : []), { key: 'finding_count', label: 'Findings', align: 'right' }, { key: 'sampled_records', label: 'Sampled records', align: 'right' }, { key: 'status', label: 'Observation' }]" empty-label="No services found in this window">
           <template #cell-service="{ row }">{{ serviceLabel(String(row.service)) }}</template>
           <template #cell-checks="{ row }">{{ checkCount(row) }}</template>
           <template #cell-score="{ row }">{{ scoreLabel(row.score as QualityScore) }}</template>
+          <template #cell-instrumentation_score="{ row }">{{ standardLabel(row.instrumentation_score as InstrumentationScore | undefined) }}</template>
           <template #cell-status="{ row }"><span class="tq-observation">{{ row.status === 'unknown' ? 'Unknown · no sampled data' : row.status === 'findings' ? 'Findings in sample' : 'No findings in sample' }}</span></template>
         </DataTable>
         <div v-if="servicePages > 1" class="tq-pagination"><button class="btn btn-sm" :disabled="servicePage === 0" @click="servicePage--">Previous</button><span>Page {{ servicePage + 1 }} of {{ servicePages }}</span><button class="btn btn-sm" :disabled="servicePage + 1 >= servicePages" @click="servicePage++">Next</button></div>
@@ -226,6 +236,16 @@ onBeforeUnmount(() => { disposed = true; generation++; controller?.abort() })
       <section v-show="tab === 'coverage'" id="tq-panel-coverage" role="tabpanel" aria-labelledby="tq-tab-coverage">
         <p class="tq-section-note">These {{ report.rules.length }} Rush checks assess the selected sample. Rush sample score v1 is 100 × passing weight / evaluated weight, rounded to the nearest integer. High impact weighs 3, medium 2, low 1. Each service/check pair counts once. Checks without sufficient data are excluded, including historical spans without retained resources. Scores can change with coverage and are not the Instrumentation Score standard.</p>
         <DataTable :rows="ruleRows" row-key="id" :columns="[{ key: 'title', label: 'Check' }, { key: 'signals', label: 'Signals' }, { key: 'evaluated', label: 'Services evaluated', align: 'right' }, { key: 'findings', label: 'Services with findings', align: 'right' }]"><template #cell-title="{ row }"><strong class="tq-rule-title">{{ row.title }}</strong><p class="tq-rule-description">{{ row.description }}</p></template></DataTable>
+        <template v-if="standardRules.length">
+          <h2 class="tq-sources-title">Instrumentation Score rules</h2>
+          <p class="tq-section-note">The <a href="https://github.com/instrumentation-score/spec" target="_blank" rel="noopener">Instrumentation Score</a> is an open 0–100 standard: Σ(passed rules × weight) / Σ(evaluated rules × weight) × 100, with Critical 40, Important 30, Normal 20 and Low 10. Rush implements {{ implementedRules }} of its {{ standardRules.length }} rules, from {{ report.standard_spec }}, so this score is incomplete and may differ from a full implementation. Rules are evaluated on the same bounded sample as the Rush checks, not the spec's default 30-day window. The organization score is the mean of service scores.</p>
+          <DataTable :rows="standardRows" row-key="id" :columns="[{ key: 'id', label: 'Rule' }, { key: 'impact', label: 'Impact' }, { key: 'evaluated', label: 'Services evaluated', align: 'right' }, { key: 'findings', label: 'Services failing', align: 'right' }]">
+            <template #cell-id="{ row }"><a class="tq-rule-title" :href="specRuleUrl(String(row.id))" target="_blank" rel="noopener"><code>{{ row.id }}</code></a><p class="tq-rule-description">{{ row.description }}<template v-if="!row.implemented"> Not implemented: {{ row.note }}</template></p></template>
+            <template #cell-impact="{ row }">{{ row.impact }} · {{ row.weight }}</template>
+            <template #cell-evaluated="{ row }">{{ row.implemented ? row.evaluated : '—' }}</template>
+            <template #cell-findings="{ row }">{{ row.implemented ? row.findings : '—' }}</template>
+          </DataTable>
+        </template>
         <h2 class="tq-sources-title">Source coverage</h2>
         <DataTable :rows="report.sources" row-key="table" :columns="[{ key: 'table', label: 'Source' }, { key: 'status', label: 'Status' }, { key: 'sampled_records', label: 'Sampled records', align: 'right' }, { key: 'capped', label: 'Sample cap reached' }]"><template #cell-table="{ value }">{{ sourceLabel(value) }}</template><template #cell-status="{ value }">{{ value === 'available' ? 'Available' : 'Not evaluated · unavailable' }}</template><template #cell-capped="{ value }">{{ value ? 'Yes' : 'No' }}</template></DataTable>
       </section>
