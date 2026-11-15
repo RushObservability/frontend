@@ -48,6 +48,9 @@ function runtimeConfigDev(): Plugin {
 }
 
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_RUM_BUILD_VERSION': JSON.stringify(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version),
+  },
   plugins: [vue(), runtimeConfigDev()],
   test: {
     // The Remotion demo is a separate npm project nested under frontend. Exclude

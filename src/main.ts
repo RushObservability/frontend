@@ -14,6 +14,7 @@
 }
 
 import { createApp } from 'vue'
+import { installApplicationHealth } from './lib/applicationHealth'
 import App from './App.vue'
 import router from './router'
 import '@fontsource/figtree/latin-300.css'
@@ -32,23 +33,32 @@ import {
   setAnalyticsRequestMetricSink,
 } from './lib/analyticsRequestCache'
 import { flushPollingMetrics, setPollingMetricSink } from './composables/usePollingTask'
+import { flushOperationalMetrics, setOperationalMetricSink } from './lib/operationalTelemetry'
 import { sanitizeRumEvent } from './lib/rumPrivacy'
+import { readRumConfiguration } from './lib/rumConfig'
 
 const app = createApp(App)
-app.use(router)
-app.mount('#app')
+const applicationHealth = installApplicationHealth(app, router)
+try {
+  app.use(router)
+  app.mount('#app')
+} catch (error) {
+  applicationHealth.bootstrapFailed(error)
+  throw error
+}
 
-// Self-ingest RUM when VITE_RUM_ENABLED is set
-if (import.meta.env.VITE_RUM_ENABLED === 'true') {
+// Explicit runtime opt-in also works with the standard prebuilt image.
+const rum = readRumConfiguration()
+if (rum.enabled) {
   // @ts-ignore
   import('@rushobservability/rum-sdk').then(({ RushRUM }) => {
     RushRUM.init({
-      endpoint: import.meta.env.VITE_RUM_ENDPOINT || '/api/v1/rum/ingest',
+      endpoint: rum.endpoint,
       app: {
-        name: import.meta.env.VITE_RUM_APP_NAME || 'rush-ui',
-        version: import.meta.env.VITE_RUM_APP_VERSION || '0.1.0',
+        name: rum.appName,
+        version: rum.appVersion,
       },
-      environment: import.meta.env.VITE_RUM_ENVIRONMENT || 'development',
+      environment: rum.environment,
       sampleRate: 1.0,
       trackWebVitals: true,
       trackErrors: true,
@@ -60,11 +70,22 @@ if (import.meta.env.VITE_RUM_ENABLED === 'true') {
       trackSessionReplay: false,
       beforeSend: sanitizeRumEvent,
     })
+    RushRUM.trackEvent('frontend_started', {
+      startup_duration_ms: Math.round(performance.now()),
+    })
     // Aggregate request-cache outcomes into one low-volume RUM event. Semantic
     // request keys and query text never enter telemetry attributes.
+    setOperationalMetricSink((name, attributes) => RushRUM.trackEvent(name, attributes))
     setAnalyticsRequestMetricSink(counts => {
       RushRUM.trackEvent('query_request_cache', {
         cache_hits: counts.hit,
+        fresh_hits: counts.fresh_hit,
+        stale_hits: counts.stale_hit,
+        revalidation_failures: counts.revalidation_failure,
+        oversized_bypasses: counts.oversized_bypass,
+        cache_entries: counts.entries,
+        cache_bytes: counts.bytes,
+        in_flight: counts.inFlight,
         in_flight_deduplications: counts.dedup,
         superseded_or_aborted: counts.cancel,
         cache_misses: counts.miss,
@@ -90,8 +111,10 @@ if (import.meta.env.VITE_RUM_ENABLED === 'true') {
     window.addEventListener('pagehide', () => {
       flushAnalyticsRequestMetrics()
       flushPollingMetrics()
+      flushOperationalMetrics()
       RushRUM.flush()
     }, { once: true })
+    applicationHealth.rumReady()
     console.log('[Rush RUM] SDK initialized')
   }).catch((err) => {
     console.warn('[Rush RUM] Failed to load SDK:', err)

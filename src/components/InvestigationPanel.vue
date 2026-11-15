@@ -4,6 +4,7 @@ import { useApi } from '../composables/useApi'
 import { onSessionChanged } from '../composables/authSession'
 import { safeApiErrorMessage } from '../lib/apiError'
 import { formatInvestigationActivity } from '../lib/investigationTime'
+import { createInvestigationHealth } from '../lib/investigationHealth'
 import InvestigationDashboardDraft from './InvestigationDashboardDraft.vue'
 import type { InvestigationSession, InvestigationTemplate } from '../types'
 
@@ -268,6 +269,8 @@ async function streamInvestigation(body: Record<string, unknown>) {
   thinking.value = ''
 
   const controller = new AbortController()
+  const health = createInvestigationHealth()
+  controller.signal.addEventListener('abort', () => health.finish('cancelled'), { once: true })
   abortController.value = controller
   let streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null
 
@@ -279,6 +282,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
     }
 
     if (!resp.ok) {
+      health.finish('http_error')
       try { await resp.body?.cancel() } catch { /* best effort: release the body */ }
       errorMsg.value = safeApiErrorMessage(resp.status, 'Investigation request')
       running.value = false
@@ -301,6 +305,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
 
       buffer += decoder.decode(value, { stream: true })
       if (buffer.length > MAX_SSE_BUFFER_CHARS) {
+        health.discard('oversized'); health.finish('limit_exceeded')
         throw new Error('The investigation stream sent an oversized event.')
       }
       const lines = buffer.split('\n')
@@ -308,6 +313,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
 
       for (const line of lines) {
         if (line.length > MAX_SSE_LINE_CHARS) {
+          health.discard('oversized'); health.finish('limit_exceeded')
           throw new Error('The investigation stream sent an oversized event.')
         }
         const trimmed = line.trim()
@@ -316,16 +322,25 @@ async function streamInvestigation(body: Record<string, unknown>) {
         if (json === '[DONE]') continue
         eventCount += 1
         if (eventCount > MAX_SSE_EVENTS) {
+          health.discard('event_limit'); health.finish('limit_exceeded')
           throw new Error('The investigation stream exceeded its event limit.')
         }
 
         try {
-          const event: AgentEvent = boundedEvent(JSON.parse(json))
+          const parsed: AgentEvent = JSON.parse(json)
+          const event: AgentEvent = boundedEvent(parsed)
+          for (const field of [parsed.text, parsed.data, parsed.message]) {
+            if (typeof field === 'string' && field.length > MAX_EVENT_FIELD_CHARS) health.discard('field_truncated')
+          }
+          if (!['thinking_delta', 'tool_call', 'tool_result', 'summary', 'error', 'done', 'session_created'].includes(event.type)) health.discard('unknown_event')
+          if (event.type === 'thinking_delta' && typeof event.text === 'string' && thinking.value.length + event.text.length > MAX_EVENT_FIELD_CHARS) health.discard('field_truncated')
+          health.event(event.type)
           if (event.type === 'done' || event.type === 'error') {
             receivedTerminalEvent = true
           }
           handleEvent(event)
         } catch {
+          health.discard('malformed')
           // skip malformed
         }
       }
@@ -335,6 +350,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
     // terminal event. Surface that state instead of leaving the turn looking
     // permanently active with no explanation or retry action.
     if (!receivedTerminalEvent && !controller.signal.aborted && generation === streamGeneration) {
+      health.finish('interrupted')
       thinking.value = ''
       const turn = currentTurn()
       if (turn) turn.done = true
@@ -345,6 +361,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
     // otherwise a stalled SSE reader can remain alive after the UI has moved on.
     try { await streamReader?.cancel() } catch { /* best effort: release the stream */ }
     if (generation !== streamGeneration) return
+    health.finish(e.name === 'TimeoutError' ? 'idle_timeout' : e.name === 'AbortError' ? 'cancelled' : 'connection_error')
     if (e.name === 'TimeoutError') controller.abort()
     if (e.name !== 'AbortError') {
       errorMsg.value = e.name === 'TimeoutError'
@@ -352,6 +369,7 @@ async function streamInvestigation(body: Record<string, unknown>) {
         : e.message || 'Connection failed'
     }
   } finally {
+    health.finish(controller.signal.aborted || generation !== streamGeneration ? 'cancelled' : 'interrupted')
     try { await streamReader?.cancel() } catch { /* release on every terminal path */ }
     try { streamReader?.releaseLock() } catch { /* an abort may still be settling */ }
     if (generation === streamGeneration) {
