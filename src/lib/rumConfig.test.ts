@@ -4,11 +4,14 @@ import { readRumConfiguration } from './rumConfig'
 describe('RUM runtime configuration', () => {
   it('requires opt-in and uses the actual build version and mode', () => {
     expect(readRumConfiguration(undefined, { VITE_RUM_BUILD_VERSION: '1.2.3', MODE: 'production' }))
-      .toMatchObject({ enabled: false, appVersion: '1.2.3', environment: 'production' })
+      .toMatchObject({ enabled: false, endpoint: '/api/v1/frontend/telemetry', appVersion: '1.2.3', environment: 'production' })
   })
   it('lets runtime settings enable a prebuilt image and disable a build opt-in', () => {
     expect(readRumConfiguration({ enabled: true, environment: 'production' }, {})).toMatchObject({ enabled: true })
     expect(readRumConfiguration({ enabled: false }, { VITE_RUM_ENABLED: 'true' }).enabled).toBe(false)
+  })
+  it('keeps explicit same-origin collector endpoints available', () => {
+    expect(readRumConfiguration({ enabled: true, endpoint: '/collect/frontend' }, {}).endpoint).toBe('/collect/frontend')
   })
   it('preserves Vite development overrides', () => {
     expect(readRumConfiguration(undefined, { VITE_RUM_ENABLED: 'true', VITE_RUM_APP_NAME: 'dev-ui', MODE: 'development' }))

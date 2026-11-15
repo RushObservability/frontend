@@ -15,7 +15,7 @@ export PATH="/usr/local/bin:${PATH}"
 : "${RUSH_ENVIRONMENT:=production}"
 : "${PROXY_QUERY_API_METRICS:=false}"
 : "${RUM_ENABLED:=false}"
-: "${RUM_ENDPOINT:=/api/v1/rum/ingest}"
+: "${RUM_ENDPOINT:=/api/v1/frontend/telemetry}"
 : "${RUM_APP_NAME:=rush-ui}"
 
 fail() {

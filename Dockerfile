@@ -58,7 +58,7 @@ ENV API_PUBLIC_URL=""
 ENV RUSH_ENVIRONMENT="production"
 # Self-health collection is an explicit deployment opt-in. Values are public.
 ENV RUM_ENABLED="false"
-ENV RUM_ENDPOINT="/api/v1/rum/ingest"
+ENV RUM_ENDPOINT="/api/v1/frontend/telemetry"
 ENV RUM_APP_NAME="rush-ui"
 # Default theme for first-time visitors with no saved preference: light | dark.
 ENV DEFAULT_THEME="light"
