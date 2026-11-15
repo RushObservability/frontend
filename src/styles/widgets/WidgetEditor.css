@@ -144,6 +144,7 @@
 .we-nl { display: flex; gap: 6px; }
 .we-nl-btn { padding: 0 10px; color: var(--text-secondary); background: var(--bg-raised); border: 1px solid var(--border-default); border-radius: var(--r-sm); font-size: 10px; cursor: pointer; }
 .we-nl-btn:hover { color: var(--amber); border-color: var(--amber-muted); }
+.we-nl-error { margin: 6px 0 0; color: var(--error); font-size: 11px; }
 .we-apm-builder { display: flex; flex-direction: column; gap: var(--sp-3); }
 .we-apm-block { display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--bg-raised); border: 1px solid var(--border-default); border-radius: var(--r-sm); }
 .we-subheading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }

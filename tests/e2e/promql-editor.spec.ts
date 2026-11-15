@@ -151,3 +151,25 @@ test('Metrics natural-language mode does not show PromQL suggestions', async ({ 
   await editor.press('Escape')
   await expect(editor).toHaveValue('http_requests_total')
 })
+
+test('dashboard Generate sends the parse-promql contract and reports failures', async ({ page }) => {
+  await stub(page)
+  const requests: Record<string, unknown>[] = []
+  let available = false
+  await page.route('**/api/v1/parse-promql', async route => {
+    requests.push(route.request().postDataJSON())
+    await route.fulfill(available
+      ? { contentType: 'application/json', body: JSON.stringify({ promql: 'sum(rate(http_requests_total[5m]))', confidence: 0.9 }) }
+      : { status: 501, body: 'llm gateway disabled' })
+  })
+  const editor = await dashboard(page)
+  const description = page.getByPlaceholder('Describe the metric you want')
+  await description.fill('request rate')
+  await page.getByRole('button', { name: 'Generate', exact: true }).click()
+  await expect(page.getByRole('alert').filter({ hasText: 'no LLM provider is configured' })).toBeVisible()
+  expect(requests[0]).toEqual({ query: 'request rate', metric_names: ['http_requests_total', 'http_duration_seconds_bucket'] })
+  available = true
+  await page.getByRole('button', { name: 'Generate', exact: true }).click()
+  await expect(editor).toHaveValue('sum(rate(http_requests_total[5m]))')
+  await expect(page.getByText('no LLM provider is configured')).toHaveCount(0)
+})

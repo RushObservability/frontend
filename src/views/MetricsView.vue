@@ -9,7 +9,6 @@ import TimePicker from '../components/TimePicker.vue'
 import type { PromVectorResult, PromMatrixResult } from '../types'
 import QueryHistory from '../components/QueryHistory.vue'
 import { useQueryHistory } from '../composables/useQueryHistory'
-import { authenticatedFetch } from '../composables/authSession'
 import type { HistoryEntry } from '../composables/useQueryHistory'
 import VirtualTable from '../components/VirtualTable.vue'
 import { TablePanel, TimeSeriesPanel, formatPanelRange } from '../components/panels'
@@ -417,17 +416,11 @@ async function translateNl() {
   nlConfidence.value = 0
 
   try {
-    const res = await authenticatedFetch('/api/v1/parse-promql', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: nlInput.value, metric_names: metricNames.value.slice(0, 100) }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      nlResult.value = data.promql ?? ''
-      nlConfidence.value = data.confidence ?? 0
-      return
-    }
+    const data = await api.parsePromql(nlInput.value, metricNames.value)
+    nlResult.value = data.promql ?? ''
+    nlConfidence.value = data.confidence ?? 0
+    nlLoading.value = false
+    return
   } catch { /* fall through to rule-based */ }
 
   // Rule-based fallback

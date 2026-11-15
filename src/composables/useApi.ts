@@ -305,6 +305,19 @@ export async function apiRequest<T>(path: string, requestOptions?: ApiRequestOpt
 
 const request = apiRequest
 
+// Mirrors query-api's llm_gateway hint limits; an oversized list makes parse-promql reject the request.
+export function promqlMetricHints(names: string[]): string[] {
+  const hints: string[] = []
+  let total = 0
+  for (const name of names) {
+    if (hints.length === 50) break
+    if (name.length > 128 || total + name.length > 4096) continue
+    hints.push(name)
+    total += name.length
+  }
+  return hints
+}
+
 export function useApi() {
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -1526,10 +1539,19 @@ export function useApi() {
     await request(`/users/${encodePathSegment(id)}`, { method: 'DELETE' })
   }
 
-  async function changeUserPassword(id: string, password: string): Promise<void> {
+  // query-api requires current_password for self-service changes and for non-admin callers.
+  async function changeUserPassword(id: string, password: string, currentPassword?: string): Promise<void> {
     await request(`/users/${encodePathSegment(id)}/password`, {
       method: 'PUT',
-      body: JSON.stringify({ password }),
+      body: JSON.stringify(currentPassword ? { password, current_password: currentPassword } : { password }),
+    })
+  }
+
+  async function parsePromql(query: string, metricNames: string[] = []): Promise<{ promql: string; confidence: number }> {
+    return await request('/parse-promql', {
+      method: 'POST',
+      body: JSON.stringify({ query, metric_names: promqlMetricHints(metricNames) }),
+      invalidatesAnalytics: false,
     })
   }
 
@@ -2149,7 +2171,7 @@ export function useApi() {
     getSsoStatus, listSsoProviders, saveSsoProvider, deleteSsoProvider, listIdpGroupMappings, createIdpGroupMapping, updateIdpGroupMapping, deleteIdpGroupMapping, createSetupToken, exchangeSetupToken, validateSetupSession, completeSetupSession,
     listGroups, createGroup, updateGroup, deleteGroup, setGroupTenants, getUserGroups, setUserGroups,
     listTenants, createTenant, deleteTenant, toggleTenant, setTenantAuthRequired, setTenantIngestAuthRequired, getTenantRetention, setTenantRetention, deleteTenantRetention, getTenantSignals, setTenantSignals, getGlobalRetention, setGlobalRetention,
-    listUsers, createUser, deleteUser, changeUserPassword, toggleUser,
+    listUsers, createUser, deleteUser, changeUserPassword, toggleUser, parsePromql,
     listInvestigationSessions, getInvestigationSession, deleteInvestigationSession, listInvestigationTemplates,
     bubbleUp,
     listMonitors, getMonitor, createMonitor, updateMonitor, deleteMonitor, listMonitorEvents, previewMonitor, muteMonitor, unmuteMonitor, monitorAutocomplete, monitorSuggest,
