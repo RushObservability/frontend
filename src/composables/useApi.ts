@@ -1062,7 +1062,7 @@ export function useApi() {
   /** Process-global Prometheus self-metrics for the admin capacity view. */
   async function getSystemMetrics(signal?: AbortSignal): Promise<string> {
     const { activeTenant } = useTenant()
-    const res = await authenticatedFetch('/metrics', {
+    const res = await authenticatedFetch(`${API_BASE}/system/metrics`, {
       credentials: 'same-origin',
       headers: {
         Accept: 'text/plain',
