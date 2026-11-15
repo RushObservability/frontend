@@ -5,3 +5,5 @@ services:
       - "127.0.0.1:5180:80"
     environment:
       - QUERY_API_HOST=host.docker.internal:8080
+      # Local development only: lets the admin Capacity page read /metrics.
+      - PROXY_QUERY_API_METRICS=true
