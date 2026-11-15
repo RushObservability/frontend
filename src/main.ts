@@ -34,22 +34,24 @@ import {
 import { flushPollingMetrics, setPollingMetricSink } from './composables/usePollingTask'
 import { flushOperationalMetrics, setOperationalMetricSink } from './lib/operationalTelemetry'
 import { sanitizeRumEvent } from './lib/rumPrivacy'
+import { readRumConfiguration } from './lib/rumConfig'
 
 const app = createApp(App)
 app.use(router)
 app.mount('#app')
 
-// Self-ingest RUM when VITE_RUM_ENABLED is set
-if (import.meta.env.VITE_RUM_ENABLED === 'true') {
+// Explicit runtime opt-in also works with the standard prebuilt image.
+const rum = readRumConfiguration()
+if (rum.enabled) {
   // @ts-ignore
   import('@rushobservability/rum-sdk').then(({ RushRUM }) => {
     RushRUM.init({
-      endpoint: import.meta.env.VITE_RUM_ENDPOINT || '/api/v1/rum/ingest',
+      endpoint: rum.endpoint,
       app: {
-        name: import.meta.env.VITE_RUM_APP_NAME || 'rush-ui',
-        version: import.meta.env.VITE_RUM_APP_VERSION || '0.1.0',
+        name: rum.appName,
+        version: rum.appVersion,
       },
-      environment: import.meta.env.VITE_RUM_ENVIRONMENT || 'development',
+      environment: rum.environment,
       sampleRate: 1.0,
       trackWebVitals: true,
       trackErrors: true,
@@ -60,6 +62,9 @@ if (import.meta.env.VITE_RUM_ENABLED === 'true') {
       maskInteractionText: true,
       trackSessionReplay: false,
       beforeSend: sanitizeRumEvent,
+    })
+    RushRUM.trackEvent('frontend_started', {
+      startup_duration_ms: Math.round(performance.now()),
     })
     // Aggregate request-cache outcomes into one low-volume RUM event. Semantic
     // request keys and query text never enter telemetry attributes.
