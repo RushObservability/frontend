@@ -67,6 +67,13 @@ if (import.meta.env.VITE_RUM_ENABLED === 'true') {
     setAnalyticsRequestMetricSink(counts => {
       RushRUM.trackEvent('query_request_cache', {
         cache_hits: counts.hit,
+        fresh_hits: counts.fresh_hit,
+        stale_hits: counts.stale_hit,
+        revalidation_failures: counts.revalidation_failure,
+        oversized_bypasses: counts.oversized_bypass,
+        cache_entries: counts.entries,
+        cache_bytes: counts.bytes,
+        in_flight: counts.inFlight,
         in_flight_deduplications: counts.dedup,
         superseded_or_aborted: counts.cancel,
         cache_misses: counts.miss,
