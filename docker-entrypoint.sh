@@ -13,6 +13,7 @@ export PATH="/usr/local/bin:${PATH}"
 : "${API_PUBLIC_URL:=}"
 : "${DEFAULT_THEME:=light}"
 : "${RUSH_ENVIRONMENT:=production}"
+: "${PROXY_QUERY_API_METRICS:=false}"
 
 fail() {
     echo "docker-entrypoint: $*" >&2
@@ -56,6 +57,13 @@ if [ -n "${API_PUBLIC_URL}" ]; then
     esac
 fi
 
+# query-api's /metrics is unauthenticated; publish it through the UI only on request.
+case "${PROXY_QUERY_API_METRICS}" in
+    true) METRICS_PROXY_SED='/# [A-Z]* query-api metrics proxy$/d' ;;
+    false) METRICS_PROXY_SED='/# BEGIN query-api metrics proxy/,/# END query-api metrics proxy/d' ;;
+    *) fail "PROXY_QUERY_API_METRICS must be true or false" ;;
+esac
+
 case "${DEFAULT_THEME}" in
     light|dark) ;;
     *) fail "DEFAULT_THEME must be light or dark" ;;
@@ -80,7 +88,7 @@ mkdir -p "${RUNTIME_DIR}"
 # this boundary explicit prevents a future validation change from reintroducing
 # delimiter, ampersand, or backslash substitution bugs.
 QUERY_API_HOST_ESCAPED=$(printf '%s' "${QUERY_API_HOST}" | sed 's/[\\&|]/\\&/g')
-sed -e "s|\${QUERY_API_HOST}|${QUERY_API_HOST_ESCAPED}|g" \
+sed -e "${METRICS_PROXY_SED}" -e "s|\${QUERY_API_HOST}|${QUERY_API_HOST_ESCAPED}|g" \
     "${TEMPLATE}" > "${OUT_DIR}/default.conf"
 
 API_PUBLIC_URL_JSON=$(json_escape "${API_PUBLIC_URL}")

@@ -58,6 +58,8 @@ ENV API_PUBLIC_URL=""
 ENV RUSH_ENVIRONMENT="production"
 # Default theme for first-time visitors with no saved preference: light | dark.
 ENV DEFAULT_THEME="light"
+# Proxy query-api's unauthenticated /metrics (read by the admin Capacity page).
+ENV PROXY_QUERY_API_METRICS="false"
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
