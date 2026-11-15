@@ -32,6 +32,7 @@ import {
   setAnalyticsRequestMetricSink,
 } from './lib/analyticsRequestCache'
 import { flushPollingMetrics, setPollingMetricSink } from './composables/usePollingTask'
+import { flushOperationalMetrics, setOperationalMetricSink } from './lib/operationalTelemetry'
 import { sanitizeRumEvent } from './lib/rumPrivacy'
 
 const app = createApp(App)
@@ -62,6 +63,7 @@ if (import.meta.env.VITE_RUM_ENABLED === 'true') {
     })
     // Aggregate request-cache outcomes into one low-volume RUM event. Semantic
     // request keys and query text never enter telemetry attributes.
+    setOperationalMetricSink((name, attributes) => RushRUM.trackEvent(name, attributes))
     setAnalyticsRequestMetricSink(counts => {
       RushRUM.trackEvent('query_request_cache', {
         cache_hits: counts.hit,
@@ -97,6 +99,7 @@ if (import.meta.env.VITE_RUM_ENABLED === 'true') {
     window.addEventListener('pagehide', () => {
       flushAnalyticsRequestMetrics()
       flushPollingMetrics()
+      flushOperationalMetrics()
       RushRUM.flush()
     }, { once: true })
     console.log('[Rush RUM] SDK initialized')

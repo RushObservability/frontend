@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { API_AVAILABILITY_PATH, createApiAvailabilityMonitor } from './apiAvailability'
+import { flushOperationalMetrics, setOperationalMetricSink } from '../lib/operationalTelemetry'
+import { sanitizeRumEvent } from '../lib/rumPrivacy'
 
 describe('API availability', () => {
   let monitor: ReturnType<typeof createApiAvailabilityMonitor>
@@ -7,9 +9,11 @@ describe('API availability', () => {
   let network: { onLine: boolean }
   let browser: EventTarget
   const fetchMock = vi.fn<typeof fetch>()
+  const sink = vi.fn()
 
   beforeEach(() => {
     vi.useFakeTimers()
+    setOperationalMetricSink(sink); flushOperationalMetrics(); sink.mockClear()
     browser = new EventTarget()
     page = Object.assign(new EventTarget(), { visibilityState: 'visible' })
     network = { onLine: true }
@@ -23,6 +27,7 @@ describe('API availability', () => {
 
   afterEach(() => {
     monitor.stop()
+    flushOperationalMetrics(); setOperationalMetricSink(null)
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })
@@ -124,6 +129,34 @@ describe('API availability', () => {
     page.dispatchEvent(new Event('visibilitychange'))
     await monitor.check()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+
+  it('buffers one outage until confirmed recovery and preserves its numeric summary through privacy filtering', async () => {
+    fetchMock.mockImplementation(async () => new Response('', { status: 502 }))
+    monitor.start(); await monitor.check()
+    await vi.advanceTimersByTimeAsync(2_000)
+    flushOperationalMetrics()
+    expect(sink.mock.calls.filter(([name]) => name === 'frontend_api_outage')).toHaveLength(0)
+    fetchMock.mockImplementation(async () => new Response('', { status: 401 }))
+    await vi.advanceTimersByTimeAsync(5_000)
+    flushOperationalMetrics()
+    expect(sink).toHaveBeenCalledWith('frontend_api_outage', expect.objectContaining({ reason: 'http_5xx', count: 1, duration_ms_sum: 7000 }))
+    for (const [name, attributes] of sink.mock.calls) {
+      const event = { event_type: 'custom', event_name: name, attributes: JSON.stringify(attributes) }
+      expect(sanitizeRumEvent(event, '/settings')).toEqual(event)
+    }
+    await monitor.check(); flushOperationalMetrics()
+    expect(sink.mock.calls.filter(([name]) => name === 'frontend_api_outage')).toHaveLength(1)
+  })
+
+  it('records offline recovery without producing a probe while the browser is offline', async () => {
+    network.onLine = false; monitor.start()
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(fetchMock).not.toHaveBeenCalled()
+    network.onLine = true; browser.dispatchEvent(new Event('online')); await monitor.check()
+    flushOperationalMetrics()
+    expect(sink).toHaveBeenCalledWith('frontend_api_outage', expect.objectContaining({ reason: 'offline', duration_ms_sum: 12000 }))
   })
 
   it('deduplicates retries and ignores late results after stopping', async () => {
