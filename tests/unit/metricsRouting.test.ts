@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import config from '../../vite.config'
 import nginx from '../../nginx/nginx.conf?raw'
 import entrypoint from '../../docker-entrypoint.sh?raw'
+import useApiSource from '../../src/composables/useApi.ts?raw'
 
 describe('metrics endpoint routing', () => {
   it('proxies the exact scrape URL without intercepting the Metrics UI', () => {
@@ -27,5 +28,10 @@ describe('metrics endpoint routing', () => {
     expect(entrypoint).toContain(': "${PROXY_QUERY_API_METRICS:=false}"')
     expect(entrypoint).toContain("false) METRICS_PROXY_SED='/# BEGIN query-api metrics proxy/,/# END query-api metrics proxy/d' ;;")
     expect(entrypoint).toContain('sed -e "${METRICS_PROXY_SED}"')
+  })
+
+  it('reads capacity metrics from the admin-only API route, not the scrape URL', () => {
+    expect(useApiSource).toContain('authenticatedFetch(`${API_BASE}/system/metrics`')
+    expect(useApiSource).not.toContain("authenticatedFetch('/metrics'")
   })
 })

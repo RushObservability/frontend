@@ -1,4 +1,5 @@
 import { computed, readonly, ref } from 'vue'
+import { recordOperationalMetric } from '../lib/operationalTelemetry'
 
 // Use the app's /api proxy, not nginx's own health route or the public ingest URL.
 // With no cookie, query-api returns 401 without renewing a user's session.
@@ -18,9 +19,17 @@ export function createApiAvailabilityMonitor() {
   let timer: ReturnType<typeof setTimeout> | undefined
   let controller: AbortController | undefined
   let pending: Promise<void> | undefined
+  type Failure = 'offline' | 'network' | 'timeout' | 'http_5xx' | 'http_error' | 'invalid_response'
+  let firstFailureAt: number | null = null
+  let outageStarted: number | null = null
+  let outageReason: Failure = 'network'
 
-  function markUnavailable() {
-    if (!unavailable.value) dismissed.value = false
+  function markUnavailable(reason: Failure) {
+    if (!unavailable.value) {
+      dismissed.value = false
+      outageStarted = firstFailureAt ?? performance.now()
+      outageReason = reason
+    }
     unavailable.value = true
   }
 
@@ -35,7 +44,7 @@ export function createApiAvailabilityMonitor() {
     clearTimeout(timer)
     offline.value = typeof navigator !== 'undefined' && navigator.onLine === false
     if (offline.value) {
-      markUnavailable()
+      markUnavailable('offline')
       return Promise.resolve()
     }
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return Promise.resolve()
@@ -44,9 +53,12 @@ export function createApiAvailabilityMonitor() {
     controller = current
     checking.value = true
     // Keep the timeout active through body parsing, not only response headers.
-    const timeout = setTimeout(() => current.abort(), TIMEOUT_MS)
+    const started = performance.now()
+    let timedOut = false
+    const timeout = setTimeout(() => { timedOut = true; current.abort() }, TIMEOUT_MS)
     pending = Promise.resolve().then(async () => {
       let reachable = false
+      let reason: Failure = 'network'
       try {
         const response = await fetch(API_AVAILABILITY_PATH, {
           credentials: 'omit', cache: 'no-store', redirect: 'error',
@@ -57,10 +69,12 @@ export function createApiAvailabilityMonitor() {
           reachable = true
           await response.body?.cancel()
         } else if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
+          reason = 'invalid_response'
           const body = await response.json()
           // Reject an SPA fallback or an unrelated proxy response with HTTP 200.
           reachable = typeof body?.user?.id === 'string'
         } else {
+          reason = response.status >= 500 ? 'http_5xx' : response.ok ? 'invalid_response' : 'http_error'
           await response.body?.cancel()
         }
       } catch {
@@ -72,12 +86,21 @@ export function createApiAvailabilityMonitor() {
         controller = undefined
         pending = undefined
         checking.value = false
+        if (timedOut) reason = 'timeout'
+        recordOperationalMetric('frontend_api_probe', { outcome: reachable ? 'reachable' : reason }, Math.max(0, performance.now() - started))
         if (reachable) {
+          if (outageStarted !== null) {
+            // Hold one bounded transition in memory until recovery, when ingest can work again.
+            recordOperationalMetric('frontend_api_outage', { reason: outageReason }, Math.max(0, performance.now() - outageStarted))
+            outageStarted = null
+          }
+          firstFailureAt = null
           failures = 0
           unavailable.value = false
           dismissed.value = false
-        } else if (++failures >= 2) {
-          markUnavailable()
+        } else {
+          firstFailureAt ??= started
+          if (++failures >= 2) markUnavailable(reason)
         }
         schedule(failures === 1 ? CONFIRM_DELAY_MS : unavailable.value ? RETRY_INTERVAL_MS : HEALTHY_INTERVAL_MS)
       }

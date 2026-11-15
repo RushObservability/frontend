@@ -8,6 +8,7 @@ import { encodePathSegment } from '../lib/url'
 import { authenticatedFetch, assertCurrentSession, getSessionGeneration, onSessionChanged } from './authSession'
 import { storageUserId } from './storageScope'
 import { safeApiErrorMessage } from '../lib/apiError'
+import { apiOperation, recordApiMetric, requestOutcome } from '../lib/apiTelemetry'
 import { adaptQuery, decodeQuery, metricsQuery, QUERY_ENDPOINT } from '../lib/queryContract'
 import {
   analyticsRequestCoordinator,
@@ -228,6 +229,22 @@ export interface ApiRequestOptions extends RequestInit {
 }
 
 export async function apiRequest<T>(path: string, requestOptions?: ApiRequestOptions): Promise<T> {
+  const started = performance.now()
+  const generation = getSessionGeneration()
+  let outcome = 'success', status: number | undefined = 200, cancellation = 'none'
+  try { return await executeApiRequest<T>(path, requestOptions) }
+  catch (error) {
+    outcome = requestOutcome(error)
+    status = (error as { status?: number } | null)?.status ?? (['decode_error', 'body_error'].includes(outcome) ? 200 : undefined)
+    if (outcome === 'cancelled') cancellation = requestOptions?.signal?.aborted ? 'caller'
+      : generation !== getSessionGeneration() ? 'session_changed' : 'superseded_or_invalidated'
+    throw error
+  } finally {
+    recordApiMetric('frontend_api_request', apiOperation(path), requestOptions?.method || 'GET', outcome, performance.now() - started, status, cancellation)
+  }
+}
+
+async function executeApiRequest<T>(path: string, requestOptions?: ApiRequestOptions): Promise<T> {
   const { invalidatesAnalytics = true, ...options } = requestOptions ?? {}
   const generation = getSessionGeneration()
   const { activeTenant } = useTenant()
@@ -272,8 +289,18 @@ export async function apiRequest<T>(path: string, requestOptions?: ApiRequestOpt
       throw responseError(res)
     }
     // Tolerate empty bodies (e.g. 204 No Content from DELETE endpoints).
-    const raw = await res.text()
-    const body = unified ? JSON.stringify(decodeQuery(JSON.parse(raw), unified)) : raw
+    let raw: string
+    try { raw = await res.text() }
+    catch (error) {
+      if (error instanceof Error) Object.defineProperty(error, 'apiBodyFailure', { value: true })
+      throw error
+    }
+    let body: string
+    try { body = unified ? JSON.stringify(decodeQuery(JSON.parse(raw), unified)) : raw }
+    catch (error) {
+      if (error instanceof Error) Object.defineProperty(error, 'apiDecodeFailure', { value: true })
+      throw error
+    }
     assertCurrentSession(generation)
     return body
   }
@@ -1062,7 +1089,7 @@ export function useApi() {
   /** Process-global Prometheus self-metrics for the admin capacity view. */
   async function getSystemMetrics(signal?: AbortSignal): Promise<string> {
     const { activeTenant } = useTenant()
-    const res = await authenticatedFetch('/metrics', {
+    const res = await authenticatedFetch(`${API_BASE}/system/metrics`, {
       credentials: 'same-origin',
       headers: {
         Accept: 'text/plain',
