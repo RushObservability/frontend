@@ -395,7 +395,7 @@ async function loadSingleWidget(widget: Widget, rethrow = false, signal?: AbortS
   widgetLoadingMap.value[widget.id] = true
   widgetErrorMap.value[widget.id] = null
   try {
-    const data = await fetchWidgetData(widget, context.variables, context.minutes, signal)
+    const data = await fetchWidgetData(widget, context.variables, context.minutes, signal, undefined, { kind: 'dashboard', id: props.id })
     if (isCurrent()) widgetDataMap.value[widget.id] = data
   } catch (e: any) {
     if (!isCurrent()) return

@@ -28,15 +28,15 @@ describe('dashboard bucket times', () => {
     const panel = widget('logs'); panel.widget_type = 'log-patterns'
     panel.query_config.filters = [{ field: 'service_name', op: '=', value: '$service' }]
     const controller = new AbortController(), range = { from: '2026-11-07T13:00:00Z', to: '2026-11-07T14:00:00Z' }
-    const data = await useWidgetData().fetchWidgetData(panel, { service: 'payments' }, undefined, controller.signal, range)
-    expect(api.logPatterns).toHaveBeenCalledWith({ time_range: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, filters: [{ field: 'service_name', op: '=', value: 'payments' }], limit: 10 }, controller.signal)
+    const data = await useWidgetData().fetchWidgetData(panel, { service: 'payments' }, undefined, controller.signal, range, { kind: 'notebook', id: 'nb-1' })
+    expect(api.logPatterns).toHaveBeenCalledWith({ time_range: { from: new Date(range.from).toISOString(), to: new Date(range.to).toISOString() }, filters: [{ field: 'service_name', op: '=', value: 'payments' }], limit: 10 }, { kind: 'notebook', id: 'nb-1' }, controller.signal)
     expect(data.pattern_total).toBe(42)
   })
   it('preserves paired scatter fields and rejects unsupported metrics sources', async () => {
     api.scatterPoints.mockResolvedValue({ points: [], truncated: true })
     const panel = widget('spans'); panel.widget_type = 'scatter'; panel.query_config.x_field = 'attributes.bytes'; panel.query_config.y_field = 'duration_ms'
     const data = await useWidgetData().fetchWidgetData(panel)
-    expect(api.scatterPoints).toHaveBeenCalledWith(expect.objectContaining({ source: 'spans', x_field: 'attributes.bytes', y_field: 'duration_ms', limit: 500 }), undefined)
+    expect(api.scatterPoints).toHaveBeenCalledWith(expect.objectContaining({ source: 'spans', x_field: 'attributes.bytes', y_field: 'duration_ms', limit: 500 }), 'dashboard', undefined)
     expect(data.truncated).toBe(true)
     panel.query_config.source = 'metrics'
     await expect(useWidgetData().fetchWidgetData(panel)).rejects.toThrow('event fields')

@@ -1,4 +1,4 @@
-import { useApi } from './useApi'
+import { useApi, type Workload, type WorkloadSource } from './useApi'
 import { applyVarsToFilters, substitute } from './useVarSubst'
 import { parseUtcTimestamp } from '../lib/utcTimestamp'
 import type { DiagnosticRequest } from '../lib/queryDiagnostics'
@@ -15,7 +15,10 @@ export function useWidgetData() {
     rangeMinutes?: number,
     signal?: AbortSignal,
     exactRange?: { from: string; to: string },
+    // The saved dashboard or notebook; without one the panel still batches like a dashboard read.
+    source?: WorkloadSource,
   ): Promise<WidgetData> {
+    const workload: Workload = source ?? 'dashboard'
     const qc = widget.query_config
     const queries = effectiveQueries(qc)
     const visibleQueries = queries.filter(query => !query.hidden)
@@ -36,7 +39,7 @@ export function useWidgetData() {
     // independently, then normalized into a common [unixSec, value] series model.
     if ((widget.widget_type === 'timeseries' || widget.widget_type === 'heatmap' || widget.widget_type === 'histogram') && qc.queries?.length) {
       const settled = await Promise.allSettled(
-        visibleQueries.map(query => fetchQueryData(widget.widget_type, query, varValues, timeRange, signal)),
+        visibleQueries.map(query => fetchQueryData(widget.widget_type, query, varValues, timeRange, workload, signal)),
       )
       const series: NonNullable<WidgetData['series']> = []
       const queryErrors: NonNullable<WidgetData['query_errors']> = []
@@ -80,7 +83,7 @@ export function useWidgetData() {
 
     // Stat/bar/table panels use the first visible query for now. The editor
     // communicates that multiple overlaid queries are a time-series feature.
-    const data = await fetchQueryData(widget.widget_type, visibleQueries[0]!, varValues, timeRange, signal)
+    const data = await fetchQueryData(widget.widget_type, visibleQueries[0]!, varValues, timeRange, workload, signal)
     if ((widget.widget_type === 'heatmap' || widget.widget_type === 'histogram') && data.buckets) {
       return { type: widget.widget_type, series: [bucketsToSeries(data.buckets, visibleQueries[0]!)], time_domain: timeDomain, diagnostic_requests }
     }
@@ -92,17 +95,18 @@ export function useWidgetData() {
     query: WidgetPanelQuery,
     varValues: Record<string, string>,
     timeRange: { from: string; to: string },
+    workload: Workload,
     signal?: AbortSignal,
   ): Promise<WidgetData> {
     if (widgetType === 'log-patterns') {
       if (query.source !== 'logs') throw new Error('Log patterns require the Logs source.')
-      const result = await api.logPatterns({ time_range: timeRange, filters: applyVarsToFilters(query.filters || [], varValues), limit: query.limit ?? 10 }, signal)
+      const result = await api.logPatterns({ time_range: timeRange, filters: applyVarsToFilters(query.filters || [], varValues), limit: query.limit ?? 10 }, workload, signal)
       return { type: widgetType, patterns: result.patterns, pattern_total: result.total }
     }
     if (widgetType === 'scatter') {
       if (query.source === 'metrics') throw new Error('Scatter plots require event fields from APM or Logs.')
       const result = await api.scatterPoints({ source: query.source, time_range: timeRange,
-        filters: applyVarsToFilters(query.filters || [], varValues), x_field: query.x_field || '', y_field: query.y_field || '', limit: query.limit ?? 500 }, signal)
+        filters: applyVarsToFilters(query.filters || [], varValues), x_field: query.x_field || '', y_field: query.y_field || '', limit: query.limit ?? 500 }, workload, signal)
       return { type: widgetType, scatter_points: result.points, truncated: result.truncated, source: query.source, x_field: query.x_field, y_field: query.y_field }
     }
     if (widgetType === 'state-timeline' && query.source !== 'metrics') throw new Error('State timelines require a Metrics query.')
@@ -112,7 +116,7 @@ export function useWidgetData() {
       const startSec = Math.floor(new Date(timeRange.from).getTime() / 1000)
       const endSec = Math.floor(new Date(timeRange.to).getTime() / 1000)
       const step = Math.max(1, Math.floor((endSec - startSec) / 250))
-      const res = await api.promQueryRange(promql, startSec, endSec, step, 'dashboard', signal)
+      const res = await api.promQueryRange(promql, startSec, endSec, step, workload, signal)
       const results = res.result || []
       const series = results.map((result) => ({
         name: seriesName(result.metric),
@@ -134,21 +138,21 @@ export function useWidgetData() {
         case 'timeseries':
         case 'heatmap':
         case 'histogram': {
-          const buckets = await api.countLogs({ time_range: timeRange, filters, interval: query.interval || '1m' }, 'dashboard', signal)
+          const buckets = await api.countLogs({ time_range: timeRange, filters, interval: query.interval || '1m' }, workload, signal)
           return { type: widgetType, buckets }
         }
         case 'counter': {
-          const buckets = await api.countLogs({ time_range: timeRange, filters, interval: query.interval || '1h' }, 'dashboard', signal)
+          const buckets = await api.countLogs({ time_range: timeRange, filters, interval: query.interval || '1h' }, workload, signal)
           return { type: 'counter', count: buckets.length ? buckets.reduce((sum, bucket) => sum + bucket.count, 0) : undefined }
         }
         case 'pie':
         case 'bar': {
           const groupBy = (query.group_by || ['severity_text']).map(value => substitute(value, varValues))
-          const res = await api.groupLogs({ time_range: timeRange, filters, group_by: groupBy, limit: query.limit || 10 }, 'dashboard', signal)
+          const res = await api.groupLogs({ time_range: timeRange, filters, group_by: groupBy, limit: query.limit || 10 }, workload, signal)
           return { type: widgetType, groups: (res.groups || []).map(group => ({ key: group.key || 'unknown', count: group.count })) }
         }
         case 'table': {
-          const res = await api.queryLogs({ time_range: timeRange, filters, limit: query.limit || 20 }, 'dashboard', signal)
+          const res = await api.queryLogs({ time_range: timeRange, filters, limit: query.limit || 20 }, workload, signal)
           return { type: 'table', rows: res.rows as unknown as Record<string, unknown>[] }
         }
       }
@@ -165,7 +169,7 @@ export function useWidgetData() {
           filters,
           interval: query.interval || '1m',
           group_by: groupBy,
-        }, 'dashboard', signal)
+        }, workload, signal)
         return {
           type: widgetType,
           series: apmTimeseriesToSeries(response.buckets, query, response.grouped),
@@ -180,18 +184,18 @@ export function useWidgetData() {
           filters,
           group_by: groupBy,
           limit: query.limit || 10,
-        }, 'dashboard', signal)
+        }, workload, signal)
         return {
           type: widgetType,
           groups: (res.groups || []).map(group => ({ key: group.key || 'unknown', count: group.count })),
         }
       }
       case 'table': {
-        const res = await api.queryEvents({ time_range: timeRange, filters, limit: query.limit || 20 }, 'dashboard', signal)
+        const res = await api.queryEvents({ time_range: timeRange, filters, limit: query.limit || 20 }, workload, signal)
         return { type: 'table', rows: res.rows as unknown as Record<string, unknown>[] }
       }
       case 'counter': {
-        const buckets = await api.queryCount({ time_range: timeRange, filters, interval: query.interval || '1h' }, 'dashboard', signal)
+        const buckets = await api.queryCount({ time_range: timeRange, filters, interval: query.interval || '1h' }, workload, signal)
         return { type: 'counter', count: buckets.length ? buckets.reduce((sum, bucket) => sum + bucket.count, 0) : undefined }
       }
       default:

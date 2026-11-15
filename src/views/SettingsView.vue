@@ -290,7 +290,7 @@ async function saveExportMaxRows() {
 // ── Query workload limits ──
 const workloadClasses: Array<{ id: QueryWorkloadClass; label: string; description: string }> = [
   { id: 'interactive', label: 'Interactive', description: 'Explore, service, log, trace, and ad-hoc metric queries.' },
-  { id: 'dashboard', label: 'Dashboard', description: 'Panel refreshes, including multi-query dashboards.' },
+  { id: 'dashboard', label: 'Dashboard', description: 'Dashboard panel and notebook cell refreshes.' },
   { id: 'background', label: 'Background', description: 'Detector, monitor, anomaly, and SLO evaluations.' },
   { id: 'export', label: 'Export', description: 'CSV and JSON downloads that may scan wider windows.' },
   { id: 'integration', label: 'Integration', description: 'Jaeger, Prometheus-compatible, and integration reads.' },

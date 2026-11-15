@@ -38,7 +38,10 @@ describe('tenant-aware API transport', () => {
     }
   })
 
-  it('marks dashboard panel reads with the bounded dashboard workload class', async () => {
+  it.each([
+    [{ kind: 'dashboard', id: 'dash-1' }, 'dashboard:dash-1'],
+    [{ kind: 'notebook', id: 'nb_2' }, 'notebook:nb_2'],
+  ] as const)('names the %o source on dashboard-workload reads', async (source, expected) => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ version: 'v1', signal: 'spans', operation: 'timeseries', data: { buckets: [], grouped: false } }), { status: 200 }),
     )
@@ -50,11 +53,38 @@ describe('tenant-aware API transport', () => {
     await useApi().queryTimeseries({
       time_range: { from: '2026-01-01T00:00:00Z', to: '2026-01-01T01:00:00Z' },
       filters: [],
-    }, 'dashboard')
+    }, source)
 
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>
     expect(headers['X-Rush-Tenant']).toBe('customer-a')
     expect(headers['X-Rush-Workload']).toBe('dashboard')
+    expect(headers['X-Rush-Workload-Source']).toBe(expected)
+  })
+
+  it('sends no source for a bare dashboard workload or an unsaved id', async () => {
+    const { workloadHeaders } = await import('./useApi')
+    expect(workloadHeaders('dashboard')).toEqual({ 'X-Rush-Workload': 'dashboard' })
+    expect(workloadHeaders({ kind: 'notebook', id: '' })).toEqual({ 'X-Rush-Workload': 'dashboard' })
+    expect(workloadHeaders()).toBeUndefined()
+  })
+
+  it('does not share cached panel reads between different sources', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ version: 'v1', signal: 'spans', operation: 'timeseries', data: { buckets: [], grouped: false } }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { setStorageUserId } = await import('./storageScope')
+    setStorageUserId('user-a')
+    const { useApi } = await import('./useApi')
+    const api = useApi()
+    const req = { time_range: { from: '2026-01-01T00:00:00Z', to: '2026-01-01T01:00:00Z' }, filters: [] }
+    await api.queryTimeseries(req, { kind: 'dashboard', id: 'dash-1' })
+    await api.queryTimeseries(req, { kind: 'dashboard', id: 'dash-1' })
+    await api.queryTimeseries(req, { kind: 'notebook', id: 'nb-1' })
+
+    const sources = fetchMock.mock.calls.map(([, init]) => (init?.headers as Record<string, string>)['X-Rush-Workload-Source'])
+    expect(sources).toEqual(['dashboard:dash-1', 'notebook:nb-1'])
   })
 
   it('deduplicates identical in-flight reads within the active tenant', async () => {

@@ -131,20 +131,22 @@ async function load() {
       if (current.signal.aborted) return
       const timeRange = range.value
       // The dashboard workload, like panel cells: a plain search would cancel the
-      // other cells' searches on the same route (see supersedeKey in useApi).
+      // other cells' searches on the same route (see supersedeKey in useApi), and
+      // naming the notebook lets the server grant the dashboard pool.
+      const source = { kind: 'notebook' as const, id: props.notebook.id }
       if (props.cell.cell_type === 'logs') {
         const { filters, text } = parseSearchQuery(search.value)
         filters.push(...fixedFilters.value)
-        const res = await api.queryLogs({ slim: true, time_range: timeRange, filters, search: text.join(' ') || undefined, limit: ROW_LIMIT }, 'dashboard', current.signal)
+        const res = await api.queryLogs({ slim: true, time_range: timeRange, filters, search: text.join(' ') || undefined, limit: ROW_LIMIT }, source, current.signal)
         logRows.value = res.rows
         expandedLog.value = null
       } else if (props.cell.cell_type === 'spans') {
         const { filters, text } = parseSearchQuery(search.value)
         filters.push(...fixedFilters.value)
-        const res = await api.queryEvents({ time_range: timeRange, filters, search: text.join(' ') || undefined, limit: ROW_LIMIT, columns: 'list' }, 'dashboard', current.signal)
+        const res = await api.queryEvents({ time_range: timeRange, filters, search: text.join(' ') || undefined, limit: ROW_LIMIT, columns: 'list' }, source, current.signal)
         spanRows.value = res.rows
       } else {
-        panelData.value = await fetchWidgetData(widget.value, (props.cell.display_config.variables as Record<string, string>) ?? {}, undefined, current.signal, timeRange)
+        panelData.value = await fetchWidgetData(widget.value, (props.cell.display_config.variables as Record<string, string>) ?? {}, undefined, current.signal, timeRange, source)
       }
     })
   } catch (e) {
@@ -302,7 +304,7 @@ function severityClass(sev: string): string {
       <WidgetEditor
         v-if="editingPanel"
         :widget="panelConfigured ? widget : null"
-        dashboard-id=""
+        :dashboard-id="notebook.id"
         context="notebook"
         @save="savePanel"
         @cancel="editingPanel = false"
