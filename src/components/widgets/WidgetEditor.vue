@@ -21,6 +21,7 @@ import { buildHistogram } from '../../lib/histogram'
 
 const props = defineProps<{
   widget?: Widget | null
+  /** The dashboard or notebook (see context) the panel belongs to; previews name it as the workload source. */
   dashboardId: string
   /** Where the panel lives, for the editor's breadcrumb and save button. Defaults to dashboard. */
   context?: 'dashboard' | 'notebook'
@@ -372,7 +373,7 @@ function refreshPreview() {
         position: { col: 1, row: 1, col_span: colSpan.value, row_span: rowSpan.value },
         display_config: {}, created_at: '', updated_at: '',
       }
-      const data = await fetchWidgetData(temp, props.varValues || {}, undefined, controller.signal)
+      const data = await fetchWidgetData(temp, props.varValues || {}, undefined, controller.signal, undefined, { kind: props.context ?? 'dashboard', id: props.dashboardId })
       if (generation === previewGeneration) previewData.value = data
     } catch (e: any) {
       if (generation === previewGeneration && e?.name !== 'AbortError') {

@@ -181,6 +181,21 @@ function responseError(response: Response, context?: string): Error & { status: 
   return error
 }
 
+/** The saved dashboard or notebook a read belongs to. */
+export type WorkloadSource = { kind: 'dashboard' | 'notebook'; id: string }
+/**
+ * Panel-style reads. The server grants the dashboard pool only when the
+ * source names a dashboard/notebook the session can read; a bare 'dashboard'
+ * (or an empty id) keeps the client-side panel caching but runs as interactive.
+ */
+export type Workload = 'dashboard' | WorkloadSource
+
+export function workloadHeaders(workload?: Workload): Record<string, string> | undefined {
+  if (!workload) return undefined
+  if (typeof workload === 'string' || !workload.id) return { 'X-Rush-Workload': 'dashboard' }
+  return { 'X-Rush-Workload': 'dashboard', 'X-Rush-Workload-Source': `${workload.kind}:${workload.id}` }
+}
+
 function requestHeaders(input: HeadersInit | undefined, tenant: string): Record<string, string> {
   const headers: Record<string, string> = {}
   if (input instanceof Headers) input.forEach((value, key) => { headers[key] = value })
@@ -230,7 +245,10 @@ export async function apiRequest<T>(path: string, requestOptions?: ApiRequestOpt
   }
 
   const headers = requestHeaders(options?.headers, tenant)
-  const workload = new Headers(headers).get('X-Rush-Workload') || 'interactive'
+  const sent = new Headers(headers)
+  const workload = sent.get('X-Rush-Workload') || 'interactive'
+  // The source can change the server's pool and time-window answer, so it keys the cache too.
+  const variant = sent.get('X-Rush-Workload-Source') || workload
   const unified = method === 'POST' && typeof options.body === 'string'
     ? adaptQuery(path, JSON.parse(options.body)) : undefined
 
@@ -266,7 +284,7 @@ export async function apiRequest<T>(path: string, requestOptions?: ApiRequestOpt
       tenant,
       method,
       route: path,
-      variant: workload,
+      variant,
       body: options?.body,
     }, signal => execute(signal), {
       signal: options?.signal ?? undefined,
@@ -334,7 +352,7 @@ export function useApi() {
 
   async function queryEvents(
     req: QueryRequest,
-    workload?: 'dashboard',
+    workload?: Workload,
     signal?: AbortSignal,
   ): Promise<{ rows: RushEvent[]; total: number; next_cursor?: string }> {
     loading.value = true
@@ -342,7 +360,7 @@ export function useApi() {
     try {
       return await request(`/query`, {
         method: 'POST',
-        headers: workload ? { 'X-Rush-Workload': workload } : undefined,
+        headers: workloadHeaders(workload),
         body: JSON.stringify(req),
         signal,
       })
@@ -380,7 +398,7 @@ export function useApi() {
     req: Omit<QueryRequest, 'group_by' | 'aggregation' | 'limit' | 'offset'> & {
       interval?: string
     },
-    workload?: 'dashboard',
+    workload?: Workload,
     signal?: AbortSignal,
   ): Promise<CountBucket[]> {
     loading.value = true
@@ -388,7 +406,7 @@ export function useApi() {
     try {
       return await request(`/query/count`, {
         method: 'POST',
-        headers: workload ? { 'X-Rush-Workload': workload } : undefined,
+        headers: workloadHeaders(workload),
         body: JSON.stringify(req),
         signal,
       })
@@ -426,10 +444,10 @@ export function useApi() {
     return await request('/logs/suggest', { method: 'POST', body: JSON.stringify(data), invalidatesAnalytics: false })
   }
 
-  async function queryGroup(req: QueryRequest, workload?: 'dashboard', signal?: AbortSignal): Promise<GroupResponse> {
+  async function queryGroup(req: QueryRequest, workload?: Workload, signal?: AbortSignal): Promise<GroupResponse> {
     const raw = await request<{ groups: Array<Record<string, unknown>> }>(`/query/group`, {
       method: 'POST',
-      headers: workload ? { 'X-Rush-Workload': workload } : undefined,
+      headers: workloadHeaders(workload),
       body: JSON.stringify(req),
       signal,
     })
@@ -456,10 +474,10 @@ export function useApi() {
     group_by?: string
     search?: string
     include_heatmap?: boolean
-  }, workload?: 'dashboard', signal?: AbortSignal): Promise<TimeseriesResponse> {
+  }, workload?: Workload, signal?: AbortSignal): Promise<TimeseriesResponse> {
     return await request(`/query/timeseries`, {
       method: 'POST',
-      headers: workload ? { 'X-Rush-Workload': workload } : undefined,
+      headers: workloadHeaders(workload),
       body: JSON.stringify(req),
       signal,
     })
@@ -896,13 +914,13 @@ export function useApi() {
     search?: string
     slim?: boolean
     display_fields?: string[]
-  }, workload?: 'dashboard', signal?: AbortSignal): Promise<{ rows: LogRecord[]; total: number; has_more: boolean; next_cursor?: string }> {
+  }, workload?: Workload, signal?: AbortSignal): Promise<{ rows: LogRecord[]; total: number; has_more: boolean; next_cursor?: string }> {
     loading.value = true
     error.value = null
     try {
       return await request('/logs', {
         method: 'POST',
-        headers: workload ? { 'X-Rush-Workload': workload } : undefined,
+        headers: workloadHeaders(workload),
         body: JSON.stringify(req),
         signal,
       })
@@ -959,10 +977,10 @@ export function useApi() {
     group_by: string[]
     limit?: number
     search?: string
-  }, workload?: 'dashboard', signal?: AbortSignal): Promise<GroupResponse> {
+  }, workload?: Workload, signal?: AbortSignal): Promise<GroupResponse> {
     const raw = await request<{ groups: Array<Record<string, unknown>> }>(`/logs/group`, {
       method: 'POST',
-      headers: workload ? { 'X-Rush-Workload': workload } : undefined,
+      headers: workloadHeaders(workload),
       body: JSON.stringify(req),
       signal,
     })
@@ -978,16 +996,16 @@ export function useApi() {
     }
   }
 
-  async function logPatterns(req: { time_range: { from: string; to: string }; filters: Filter[]; limit: number }, signal?: AbortSignal) {
+  async function logPatterns(req: { time_range: { from: string; to: string }; filters: Filter[]; limit: number }, workload: Workload = 'dashboard', signal?: AbortSignal) {
     return request<{ patterns: import('../types').LogPattern[]; total: number }>('/logs/patterns', {
-      method: 'POST', headers: { 'X-Rush-Workload': 'dashboard' }, body: JSON.stringify(req), signal,
+      method: 'POST', headers: workloadHeaders(workload), body: JSON.stringify(req), signal,
       invalidatesAnalytics: false,
     })
   }
 
-  async function scatterPoints(req: { source: 'logs' | 'spans'; time_range: { from: string; to: string }; filters: Filter[]; x_field: string; y_field: string; limit: number }, signal?: AbortSignal) {
+  async function scatterPoints(req: { source: 'logs' | 'spans'; time_range: { from: string; to: string }; filters: Filter[]; x_field: string; y_field: string; limit: number }, workload: Workload = 'dashboard', signal?: AbortSignal) {
     return request<{ points: import('../types').ScatterPoint[]; truncated: boolean }>('/query/scatter', {
-      method: 'POST', headers: { 'X-Rush-Workload': 'dashboard' }, body: JSON.stringify(req), signal,
+      method: 'POST', headers: workloadHeaders(workload), body: JSON.stringify(req), signal,
       invalidatesAnalytics: false,
     })
   }
@@ -1008,13 +1026,13 @@ export function useApi() {
     filters: Filter[]
     interval?: string
     search?: string
-  }, workload?: 'dashboard', signal?: AbortSignal): Promise<CountBucket[]> {
+  }, workload?: Workload, signal?: AbortSignal): Promise<CountBucket[]> {
     loading.value = true
     error.value = null
     try {
       return await request('/logs/count', {
         method: 'POST',
-        headers: workload ? { 'X-Rush-Workload': workload } : undefined,
+        headers: workloadHeaders(workload),
         body: JSON.stringify(req),
         signal,
       })
@@ -1660,18 +1678,19 @@ export function useApi() {
 
   // ── Prometheus API ──
 
-  async function promRequest<T>(path: string, context: string, workload?: 'dashboard', signal?: AbortSignal): Promise<T> {
+  async function promRequest<T>(path: string, context: string, workload?: Workload, signal?: AbortSignal): Promise<T> {
     const generation = getSessionGeneration()
     const tenant = useTenant().activeTenant.value
     const route = `/prom/api/v1${path}`
+    const workloadHeader = workloadHeaders(workload)
     // Panels may intentionally share an expression. Share the read, with each
     // caller owning its subscription, instead of aborting another panel.
     const body = await analyticsRequestCoordinator.run({
       userId: storageUserId.value || 'anonymous', tenant, method: 'GET', route,
-      variant: workload || 'interactive',
+      variant: workloadHeader?.['X-Rush-Workload-Source'] || workloadHeader?.['X-Rush-Workload'] || 'interactive',
     }, async requestSignal => {
       const response = await authenticatedFetch(route, {
-        headers: { 'X-Rush-Tenant': tenant, ...(workload ? { 'X-Rush-Workload': workload } : {}) },
+        headers: { 'X-Rush-Tenant': tenant, ...workloadHeader },
         signal: requestSignal,
       })
       if (!response.ok) {
@@ -1694,12 +1713,12 @@ export function useApi() {
   }
 
   async function promQueryRange(
-    query: string, start: number, end: number, step: number, workload?: 'dashboard', signal?: AbortSignal
+    query: string, start: number, end: number, step: number, workload?: Workload, signal?: AbortSignal
   ): Promise<PromMatrixResponse> {
     const req = metricsQuery(query, start, end, step)
     const result = await request<unknown>(QUERY_ENDPOINT, {
       method: 'POST', body: JSON.stringify(req), signal,
-      headers: workload ? { 'X-Rush-Workload': workload } : undefined,
+      headers: workloadHeaders(workload),
     })
     return decodeQuery<{ data: PromMatrixResponse }>(result, req).data
   }
