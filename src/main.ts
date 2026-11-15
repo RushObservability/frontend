@@ -34,10 +34,17 @@ import {
 import { flushPollingMetrics, setPollingMetricSink } from './composables/usePollingTask'
 import { flushOperationalMetrics, setOperationalMetricSink } from './lib/operationalTelemetry'
 import { sanitizeRumEvent } from './lib/rumPrivacy'
+import { installApplicationHealth } from './lib/applicationHealth'
 
 const app = createApp(App)
-app.use(router)
-app.mount('#app')
+const applicationHealth = installApplicationHealth(app, router)
+try {
+  app.use(router)
+  app.mount('#app')
+} catch (error) {
+  applicationHealth.bootstrapFailed(error)
+  throw error
+}
 
 // Self-ingest RUM when VITE_RUM_ENABLED is set
 if (import.meta.env.VITE_RUM_ENABLED === 'true') {
@@ -61,6 +68,7 @@ if (import.meta.env.VITE_RUM_ENABLED === 'true') {
       trackSessionReplay: false,
       beforeSend: sanitizeRumEvent,
     })
+    applicationHealth.rumReady()
     // Aggregate request-cache outcomes into one low-volume RUM event. Semantic
     // request keys and query text never enter telemetry attributes.
     setOperationalMetricSink((name, attributes) => RushRUM.trackEvent(name, attributes))

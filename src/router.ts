@@ -1,3 +1,4 @@
+import { installRouterHealth } from './lib/applicationHealth'
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuth } from './composables/useAuth'
 import { useTenant } from './composables/useTenant'
@@ -280,6 +281,8 @@ const router = createRouter({
     ...frontendEdition.routes,
   ],
 })
+
+installRouterHealth(router)
 
 // A tenant named in a link survives the login redirect, which keeps only the path.
 const PENDING_LINK_TENANT_KEY = 'rush_link_tenant'
