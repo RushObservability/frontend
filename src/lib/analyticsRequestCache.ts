@@ -1,4 +1,6 @@
 export type AnalyticsRequestMetric = 'hit' | 'dedup' | 'cancel' | 'miss' | 'eviction'
+  | 'fresh_hit' | 'stale_hit' | 'revalidation_failure' | 'oversized_bypass'
+export type AnalyticsRequestMetricSummary = Readonly<Record<AnalyticsRequestMetric, number> & { entries: number; bytes: number; inFlight: number }>
 
 export interface AnalyticsRequestScope {
   userId: string
@@ -210,6 +212,7 @@ export class AnalyticsRequestCoordinator {
     if (cached && cached.staleUntil > now) {
       cached.lastAccess = now
       this.metric('hit')
+      this.metric(cached.freshUntil > now ? 'fresh_hit' : 'stale_hit')
       if (cached.freshUntil <= now && (options.staleMs ?? 0) > 0) {
         this.ensureOperation(key, scope, execute, options, true).promise.catch(() => {})
       }
@@ -292,6 +295,11 @@ export class AnalyticsRequestCoordinator {
         }
         return body
       })
+      .catch(error => {
+        // Count each shared background operation once, excluding expected invalidation.
+        if (entry.background && !controller.signal.aborted) this.metric('revalidation_failure')
+        throw error
+      })
       .finally(() => {
         entry.settled = true
         if (this.inFlight.get(key) === entry) this.inFlight.delete(key)
@@ -311,7 +319,7 @@ export class AnalyticsRequestCoordinator {
     // Count both retained response text and the exact semantic key so a large
     // query body cannot bypass the byte budget through Map-key storage.
     const bytes = (key.length + body.length) * 2
-    if (bytes > this.maxBytes) return
+    if (bytes > this.maxBytes) { this.metric('oversized_bypass'); return }
     const existing = this.cache.get(key)
     if (existing) this.deleteCacheEntry(key, existing)
     const now = this.now()
@@ -349,8 +357,12 @@ const metricCounts: Record<AnalyticsRequestMetric, number> = {
   cancel: 0,
   miss: 0,
   eviction: 0,
+  fresh_hit: 0,
+  stale_hit: 0,
+  revalidation_failure: 0,
+  oversized_bypass: 0,
 }
-let metricSink: ((counts: Readonly<Record<AnalyticsRequestMetric, number>>) => void) | null = null
+let metricSink: ((counts: AnalyticsRequestMetricSummary) => void) | null = null
 let metricTimer: ReturnType<typeof setTimeout> | undefined
 
 function recordMetric(metric: AnalyticsRequestMetric): void {
@@ -359,7 +371,7 @@ function recordMetric(metric: AnalyticsRequestMetric): void {
 }
 
 export function setAnalyticsRequestMetricSink(
-  sink: ((counts: Readonly<Record<AnalyticsRequestMetric, number>>) => void) | null,
+  sink: ((counts: AnalyticsRequestMetricSummary) => void) | null,
 ): void {
   metricSink = sink
   if (sink && Object.values(metricCounts).some(Boolean) && !metricTimer) {
@@ -371,7 +383,7 @@ export function flushAnalyticsRequestMetrics(): void {
   if (metricTimer) clearTimeout(metricTimer)
   metricTimer = undefined
   if (!metricSink || !Object.values(metricCounts).some(Boolean)) return
-  metricSink({ ...metricCounts })
+  metricSink({ ...metricCounts, ...analyticsRequestCoordinator.stats() })
   for (const metric of Object.keys(metricCounts) as AnalyticsRequestMetric[]) metricCounts[metric] = 0
 }
 
