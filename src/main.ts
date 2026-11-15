@@ -14,6 +14,7 @@
 }
 
 import { createApp } from 'vue'
+import { installApplicationHealth } from './lib/applicationHealth'
 import App from './App.vue'
 import router from './router'
 import '@fontsource/figtree/latin-300.css'
@@ -34,7 +35,6 @@ import {
 import { flushPollingMetrics, setPollingMetricSink } from './composables/usePollingTask'
 import { flushOperationalMetrics, setOperationalMetricSink } from './lib/operationalTelemetry'
 import { sanitizeRumEvent } from './lib/rumPrivacy'
-import { installApplicationHealth } from './lib/applicationHealth'
 
 const app = createApp(App)
 const applicationHealth = installApplicationHealth(app, router)
@@ -68,7 +68,6 @@ if (import.meta.env.VITE_RUM_ENABLED === 'true') {
       trackSessionReplay: false,
       beforeSend: sanitizeRumEvent,
     })
-    applicationHealth.rumReady()
     // Aggregate request-cache outcomes into one low-volume RUM event. Semantic
     // request keys and query text never enter telemetry attributes.
     setOperationalMetricSink((name, attributes) => RushRUM.trackEvent(name, attributes))
@@ -103,6 +102,7 @@ if (import.meta.env.VITE_RUM_ENABLED === 'true') {
       flushOperationalMetrics()
       RushRUM.flush()
     }, { once: true })
+    applicationHealth.rumReady()
     console.log('[Rush RUM] SDK initialized')
   }).catch((err) => {
     console.warn('[Rush RUM] Failed to load SDK:', err)
