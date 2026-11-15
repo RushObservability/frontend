@@ -14,6 +14,7 @@
 }
 
 import { createApp } from 'vue'
+import { installApplicationHealth } from './lib/applicationHealth'
 import App from './App.vue'
 import router from './router'
 import '@fontsource/figtree/latin-300.css'
@@ -37,8 +38,14 @@ import { sanitizeRumEvent } from './lib/rumPrivacy'
 import { readRumConfiguration } from './lib/rumConfig'
 
 const app = createApp(App)
-app.use(router)
-app.mount('#app')
+const applicationHealth = installApplicationHealth(app, router)
+try {
+  app.use(router)
+  app.mount('#app')
+} catch (error) {
+  applicationHealth.bootstrapFailed(error)
+  throw error
+}
 
 // Explicit runtime opt-in also works with the standard prebuilt image.
 const rum = readRumConfiguration()
@@ -107,6 +114,7 @@ if (rum.enabled) {
       flushOperationalMetrics()
       RushRUM.flush()
     }, { once: true })
+    applicationHealth.rumReady()
     console.log('[Rush RUM] SDK initialized')
   }).catch((err) => {
     console.warn('[Rush RUM] Failed to load SDK:', err)
