@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { sanitizeRumEvent } from './rumPrivacy'
 import {
   AnalyticsRequestCoordinator,
   analyticsRequestCoordinator,
@@ -219,6 +220,43 @@ describe('analytics request coordinator', () => {
     expect(metrics).toContain('hit')
   })
 
+
+  it('separates fresh/stale hits and counts one failed shared revalidation', async () => {
+    let now = 0
+    const metrics: AnalyticsRequestMetric[] = []
+    const coordinator = new AnalyticsRequestCoordinator({ now: () => now, metric: metric => metrics.push(metric) })
+    const background = deferred<string>()
+    const execute = vi.fn().mockResolvedValueOnce('{"generation":1}').mockImplementation(() => background.promise)
+    const options = { ttlMs: 10, staleMs: 30 }
+    await coordinator.run(scope(), execute, options)
+    await coordinator.run(scope(), execute, options)
+    now = 15
+    await coordinator.run(scope(), execute, options)
+    await coordinator.run(scope(), execute, options)
+    background.reject(new Error('private-secret'))
+    await vi.waitFor(() => expect(metrics.filter(metric => metric === 'revalidation_failure')).toHaveLength(1))
+    expect(execute).toHaveBeenCalledTimes(2)
+    expect(metrics.filter(metric => metric === 'fresh_hit')).toHaveLength(1)
+    expect(metrics.filter(metric => metric === 'stale_hit')).toHaveLength(2)
+    expect(coordinator.stats().inFlight).toBe(0)
+  })
+
+  it('reports oversized bypasses and excludes cancelled background refreshes from failures', async () => {
+    const metrics: AnalyticsRequestMetric[] = []
+    const small = new AnalyticsRequestCoordinator({ maxBytes: 10, metric: metric => metrics.push(metric) })
+    await small.run(scope(), async () => '{}', { ttlMs: 1000 })
+    expect(small.stats().entries).toBe(0)
+    expect(metrics).toContain('oversized_bypass')
+    let now = 0
+    const coordinator = new AnalyticsRequestCoordinator({ now: () => now, metric: metric => metrics.push(metric) })
+    await coordinator.run(scope(), async () => '{}', { ttlMs: 1, staleMs: 20 })
+    now = 5
+    await coordinator.run(scope(), signal => new Promise<string>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason))), { ttlMs: 1, staleMs: 20 })
+    coordinator.invalidate()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(metrics).not.toContain('revalidation_failure')
+  })
+
   it('classifies query POSTs without treating mutations as cacheable', () => {
     for (const route of [
       '/query', '/query/count', '/query/timeseries', '/query/group', '/explore/search', '/logs',
@@ -242,6 +280,11 @@ describe('analytics request coordinator', () => {
 
     expect(sink).toHaveBeenCalledTimes(1)
     expect(sink).toHaveBeenCalledWith(expect.objectContaining({ hit: 1, miss: 1 }))
-    expect(Object.keys(sink.mock.calls[0]![0])).toEqual(['hit', 'dedup', 'cancel', 'miss', 'eviction'])
+    expect(Object.keys(sink.mock.calls[0]![0])).toEqual(['hit', 'dedup', 'cancel', 'miss', 'eviction', 'fresh_hit', 'stale_hit', 'revalidation_failure', 'oversized_bypass', 'entries', 'bytes', 'inFlight'])
+    expect(sink.mock.calls[0]![0]).toMatchObject({ fresh_hit: 1, stale_hit: 0, entries: 1, inFlight: 0 })
+    const event = { event_type: 'custom', event_name: 'query_request_cache', attributes: JSON.stringify(sink.mock.calls[0]![0]) }
+    expect(sanitizeRumEvent(event, '/dashboards/private')).toEqual(event)
+    expect(event.attributes).not.toContain('user-1')
+    expect(event.attributes).not.toContain('gateway')
   })
 })
