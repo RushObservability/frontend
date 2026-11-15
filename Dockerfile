@@ -56,6 +56,10 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 ENV QUERY_API_HOST=localhost:8080
 ENV API_PUBLIC_URL=""
 ENV RUSH_ENVIRONMENT="production"
+# Self-health collection is an explicit deployment opt-in. Values are public.
+ENV RUM_ENABLED="false"
+ENV RUM_ENDPOINT="/api/v1/rum/ingest"
+ENV RUM_APP_NAME="rush-ui"
 # Default theme for first-time visitors with no saved preference: light | dark.
 ENV DEFAULT_THEME="light"
 # Proxy query-api's unauthenticated /metrics (read by the admin Capacity page).

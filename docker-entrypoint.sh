@@ -14,6 +14,9 @@ export PATH="/usr/local/bin:${PATH}"
 : "${DEFAULT_THEME:=light}"
 : "${RUSH_ENVIRONMENT:=production}"
 : "${PROXY_QUERY_API_METRICS:=false}"
+: "${RUM_ENABLED:=false}"
+: "${RUM_ENDPOINT:=/api/v1/rum/ingest}"
+: "${RUM_APP_NAME:=rush-ui}"
 
 fail() {
     echo "docker-entrypoint: $*" >&2
@@ -69,6 +72,24 @@ case "${DEFAULT_THEME}" in
     *) fail "DEFAULT_THEME must be light or dark" ;;
 esac
 
+# These values are public browser configuration, never credentials.
+case "${RUM_ENABLED}" in
+    true|false) ;;
+    *) fail "RUM_ENABLED must be true or false" ;;
+esac
+case "${RUM_ENDPOINT}" in
+    //*) fail "RUM_ENDPOINT must be a same-origin absolute path" ;;
+    /*) ;;
+    *) fail "RUM_ENDPOINT must be a same-origin absolute path" ;;
+esac
+case "${RUM_ENDPOINT}" in
+    *[!A-Za-z0-9_./-]*|*/../*|*/./*|*/..|*/.) fail "RUM_ENDPOINT contains unsupported path characters" ;;
+esac
+case "${RUM_APP_NAME}" in
+    ""|*[!A-Za-z0-9_.-]*) fail "RUM_APP_NAME must contain only letters, numbers, dots, underscores, or hyphens" ;;
+esac
+[ "${#RUM_APP_NAME}" -le 64 ] || fail "RUM_APP_NAME must be at most 64 characters"
+
 json_escape() {
     # The generated file is written directly, so escape JSON characters rather
     # than interpolating values into an nginx quoted `return` directive.
@@ -94,7 +115,7 @@ sed -e "${METRICS_PROXY_SED}" -e "s|\${QUERY_API_HOST}|${QUERY_API_HOST_ESCAPED}
 API_PUBLIC_URL_JSON=$(json_escape "${API_PUBLIC_URL}")
 DEFAULT_THEME_JSON=$(json_escape "${DEFAULT_THEME}")
 printf '%s\n' \
-    "window.__RUSH_CONFIG__={\"apiBaseUrl\":\"${API_PUBLIC_URL_JSON}\",\"defaultTheme\":\"${DEFAULT_THEME_JSON}\"};" \
+    "window.__RUSH_CONFIG__={\"apiBaseUrl\":\"${API_PUBLIC_URL_JSON}\",\"defaultTheme\":\"${DEFAULT_THEME_JSON}\",\"rum\":{\"enabled\":${RUM_ENABLED},\"endpoint\":\"${RUM_ENDPOINT}\",\"appName\":\"${RUM_APP_NAME}\",\"environment\":\"${RUSH_ENVIRONMENT}\"}};" \
     > "${RUNTIME_DIR}/runtime-config.js"
 
 exec nginx -c /etc/nginx/nginx.conf -g 'daemon off;'
