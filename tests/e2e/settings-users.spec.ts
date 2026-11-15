@@ -107,6 +107,36 @@ test('failed group loading is visible and can be retried', async ({ page }) => {
   await expect(page.locator('#user-directory-table tbody tr').first()).toContainText('Admin')
 })
 
+test('self password change asks for the current password and shows rejections', async ({ page }) => {
+  await stubUsers(page, 2)
+  const bodies: Record<string, unknown>[] = []
+  await page.route('**/api/v1/users/*/password', async route => {
+    const body = route.request().postDataJSON()
+    bodies.push(body)
+    await route.fulfill(body.current_password === 'wrong'
+      ? { status: 403, body: 'current password is incorrect' }
+      : { contentType: 'application/json', body: '{"ok":true}' })
+  })
+  const rows = page.locator('#user-directory-table tbody tr')
+  const modal = page.locator('.delete-modal')
+
+  await rows.nth(1).getByRole('button', { name: 'Password', exact: true }).click()
+  await expect(modal.getByLabel('Current password')).toHaveCount(0)
+  await modal.getByRole('button', { name: 'Cancel' }).click()
+
+  await rows.first().getByRole('button', { name: 'Password', exact: true }).click()
+  await modal.getByLabel('New password').fill('next-Secret-123')
+  await modal.getByLabel('Confirm password').fill('next-Secret-123')
+  await expect(modal.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await modal.getByLabel('Current password').fill('wrong')
+  await modal.getByRole('button', { name: 'Save' }).click()
+  await expect(modal.getByRole('alert')).toHaveText('Current password is incorrect.')
+  await modal.getByLabel('Current password').fill('right')
+  await modal.getByRole('button', { name: 'Save' }).click()
+  await expect(modal).toHaveCount(0)
+  expect(bodies.at(-1)).toEqual({ password: 'next-Secret-123', current_password: 'right' })
+})
+
 for (const width of [1280, 390]) {
   test(`user search and pagination fit at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })

@@ -2264,7 +2264,7 @@ async function runBubbleUp() {
       exclude_selection_from_baseline: sel.excludeFromBaseline,
     })
     if (result.selection_count === 0) {
-      bubbleUpError.value = 'No spans matched this cohort. Drag a slightly larger area and analyze again.'
+      bubbleUpError.value = `No ${viewMode.value === 'logs' ? 'log events' : 'spans'} matched this cohort. Drag a slightly larger area and analyze again.`
       return
     }
     bubbleUpResult.value = result
@@ -2293,6 +2293,8 @@ function closeCompareMode() {
   syncUrlState()
 }
 
+// Logs mode has no scatter quick-starts, so its rail only appears once a Shift+drag selection exists.
+const showCompareRail = computed(() => compareModeActive.value && (viewMode.value === 'spans' || bubbleUpSelection.value !== null))
 const compareSelectionLabel = computed(() => bubbleUpSelection.value?.label || 'Selected cohort')
 
 const compareFindings = computed(() => bubbleUpResult.value ? rankCompareFindings(bubbleUpResult.value) : [])
@@ -5071,7 +5073,7 @@ watch(() => route.query.log_view, (id) => {
     </div>
 
     <!-- ═══ Main layout: Sidebar + Content ═══ -->
-    <div class="explore-body" :class="{ 'compare-active': compareModeActive && viewMode === 'spans' }">
+    <div class="explore-body" :class="{ 'compare-active': showCompareRail }">
 
       <!-- ═══ Facets Sidebar ═══ -->
       <aside class="facet-sidebar">
@@ -6073,7 +6075,7 @@ watch(() => route.query.log_view, (id) => {
       </div><!-- /explore-main -->
 
       <aside
-        v-if="compareModeActive && viewMode === 'spans'"
+        v-if="showCompareRail"
         class="compare-findings-rail fade-in"
         aria-label="Cohort comparison findings"
       >

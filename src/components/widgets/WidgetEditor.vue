@@ -4,7 +4,7 @@ import type { Widget, WidgetType, WidgetPosition, WidgetQueryConfig, WidgetPanel
 import QueryBuilder from '../QueryBuilder.vue'
 import PromqlEditor from '../PromqlEditor.vue'
 import { useWidgetData } from '../../composables/useWidgetData'
-import { authenticatedFetch } from '../../composables/authSession'
+import { useApi } from '../../composables/useApi'
 import CounterWidget from './CounterWidget.vue'
 import BarWidget from './BarWidget.vue'
 import TableWidget from './TableWidget.vue'
@@ -49,6 +49,8 @@ const widgetType = ref<WidgetType>('timeseries')
 const timeRangeMinutes = ref(60)
 const nlText = ref('')
 const nlBusy = ref(false)
+const nlError = ref('')
+const api = useApi()
 const colSpan = ref(6)
 const rowSpan = ref(2)
 const description = ref('')
@@ -408,16 +410,21 @@ function insertVar(token: string) {
 }
 
 async function applyNl() {
-  if (!nlText.value.trim()) return
+  const text = nlText.value.trim()
+  if (!text || nlBusy.value) return
   nlBusy.value = true
+  nlError.value = ''
   try {
-    const res = await authenticatedFetch('/api/v1/parse-promql', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: nlText.value }),
-    })
-    const data = await res.json()
-    if (data.promql) promql.value = data.promql
-  } catch { /* ignore */ } finally { nlBusy.value = false }
+    // Metric names only sharpen the result; generate without them if the lookup fails.
+    const metricNames = await api.promLabelValues('__name__').catch(() => [] as string[])
+    const data = await api.parsePromql(text, metricNames)
+    if (data?.promql) promql.value = data.promql
+    else nlError.value = 'No query could be generated from that description.'
+  } catch (error: any) {
+    nlError.value = error?.status === 501
+      ? 'Query generation is not available: no LLM provider is configured.'
+      : error?.message || 'Query generation failed.'
+  } finally { nlBusy.value = false }
 }
 
 function save() {
@@ -611,6 +618,7 @@ function save() {
                 <input v-model="nlText" class="we-input" placeholder="Describe the metric you want" @keyup.enter="applyNl" />
                 <button class="we-nl-btn" :disabled="nlBusy" @click="applyNl">{{ nlBusy ? 'Working…' : 'Generate' }}</button>
               </div>
+              <p v-if="nlError" class="we-nl-error" role="alert">{{ nlError }}</p>
             </template>
             <template v-else-if="source === 'spans'">
               <div class="we-apm-builder">

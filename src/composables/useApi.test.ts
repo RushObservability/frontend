@@ -253,4 +253,40 @@ describe('tenant-aware API transport', () => {
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     expect(forwardedSignal.aborted).toBe(true)
   })
+
+  it('sends current_password only when the password change needs step-up', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response('{"ok":true}', { status: 200 })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { setStorageUserId } = await import('./storageScope')
+    setStorageUserId('user-a')
+    const { useApi } = await import('./useApi')
+    const api = useApi()
+    await api.changeUserPassword('user-a', 'new-secret', 'old-secret')
+    await api.changeUserPassword('user-b', 'reset-secret')
+
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/v1/users/user-a/password')
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual({ password: 'new-secret', current_password: 'old-secret' })
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual({ password: 'reset-secret' })
+  })
+
+  it('sends parse-promql the query field with hints inside the server limits', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"promql":"up","confidence":0.9}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { setStorageUserId } = await import('./storageScope')
+    setStorageUserId('user-a')
+    const { useApi, promqlMetricHints } = await import('./useApi')
+    const names = ['x'.repeat(129), ...Array.from({ length: 60 }, (_, i) => `metric_${i}`)]
+    await expect(useApi().parsePromql('request rate', names)).resolves.toEqual({ promql: 'up', confidence: 0.9 })
+
+    const [path, init] = fetchMock.mock.calls[0]!
+    expect(path).toBe('/api/v1/parse-promql')
+    const body = JSON.parse(init.body as string)
+    expect(body.query).toBe('request rate')
+    expect(body).not.toHaveProperty('text')
+    expect(body.metric_names).toHaveLength(50)
+    expect(body.metric_names[0]).toBe('metric_0')
+    expect(promqlMetricHints(Array.from({ length: 40 }, () => 'm'.repeat(120))).join('').length).toBeLessThanOrEqual(4096)
+  })
 })

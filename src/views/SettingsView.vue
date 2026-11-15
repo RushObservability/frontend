@@ -1798,6 +1798,8 @@ function toggleNewUserGroup(gid: string) {
 const changePasswordUserId = ref<string | null>(null)
 const changePasswordValue = ref('')
 const changePasswordConfirm = ref('')
+const changePasswordCurrent = ref('')
+const changePasswordError = ref('')
 const passwordMismatch = computed(() =>
   changePasswordConfirm.value.length > 0 && changePasswordValue.value !== changePasswordConfirm.value
 )
@@ -1807,6 +1809,13 @@ const changePasswordUsername = computed(() => {
 })
 
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
+const changingOwnPassword = computed(() => changePasswordUserId.value === currentUser.value?.id)
+// Mirrors query-api: self-service changes and non-admin callers must re-enter the current password.
+const changePasswordNeedsCurrent = computed(() => changingOwnPassword.value || !isAdmin.value)
+const canSubmitPasswordChange = computed(() =>
+  !!changePasswordValue.value && !!changePasswordConfirm.value && !passwordMismatch.value
+  && (!changePasswordNeedsCurrent.value || !!changePasswordCurrent.value)
+)
 
 async function loadUsers() {
   usersLoading.value = true
@@ -1940,14 +1949,35 @@ async function removeUser(id: string) {
   } catch { /* error in api.error */ }
 }
 
-async function changePassword(id: string) {
-  if (!changePasswordValue.value) return
+function openChangePassword(id: string | null) {
+  changePasswordUserId.value = id
+  changePasswordValue.value = ''
+  changePasswordConfirm.value = ''
+  changePasswordCurrent.value = ''
+  changePasswordError.value = ''
+}
+
+function passwordChangeErrorMessage(error: any): string {
+  // The API layer hides response bodies, so map the statuses this endpoint documents.
+  if (error?.status === 400) return 'The new password does not meet the password policy.'
+  if (error?.status === 403 && changingOwnPassword.value) return 'Current password is incorrect.'
+  if (error?.status === 409) return 'This account is managed by SSO. Change its password at the identity provider.'
+  return error?.message || 'Could not change the password.'
+}
+
+async function changePassword() {
+  const id = changePasswordUserId.value
+  if (!id || !canSubmitPasswordChange.value) return
+  const self = changingOwnPassword.value
+  changePasswordError.value = ''
   try {
-    await api.changeUserPassword(id, changePasswordValue.value)
-    changePasswordUserId.value = null
-    changePasswordValue.value = ''
-    changePasswordConfirm.value = ''
-  } catch { /* error in api.error */ }
+    await api.changeUserPassword(id, changePasswordValue.value, changePasswordNeedsCurrent.value ? changePasswordCurrent.value : undefined)
+    openChangePassword(null)
+    // The server revokes the target's sessions, including this one on a self change.
+    if (self) await useAuth().refreshSession(false)
+  } catch (error: any) {
+    changePasswordError.value = passwordChangeErrorMessage(error)
+  }
 }
 
 async function toggleUserEnabled(id: string, enabled: boolean) {
@@ -5290,7 +5320,7 @@ function formatDate(ts: string): string {
               <td>
                 <div class="user-directory-actions">
                   <button v-if="isAdmin" class="action-btn" @click="openEditUserGroups(u.id)">Groups</button>
-                  <button class="action-btn" @click="changePasswordUserId = u.id; changePasswordValue = ''">Password</button>
+                  <button class="action-btn" @click="openChangePassword(u.id)">Password</button>
                   <button v-if="u.username !== 'admin' && isAdmin" class="action-btn action-btn-danger" @click="askDelete('user', u.id, u.username)">Delete</button>
                 </div>
               </td>
@@ -5841,7 +5871,7 @@ function formatDate(ts: string): string {
     <!-- ═══ Change password modal ═══ -->
     <Teleport to="body">
       <Transition name="modal">
-        <div v-if="changePasswordUserId" class="delete-modal-overlay" @click.self="changePasswordUserId = null">
+        <div v-if="changePasswordUserId" class="delete-modal-overlay" @click.self="openChangePassword(null)">
           <div class="delete-modal">
             <div class="delete-modal-icon icon-amber">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
@@ -5854,12 +5884,23 @@ function formatDate(ts: string): string {
             </div>
             <div class="modal-stack">
               <input
+                v-if="changePasswordNeedsCurrent"
+                v-model="changePasswordCurrent"
+                type="password"
+                autocomplete="current-password"
+                maxlength="1024"
+                class="form-input mono"
+                placeholder="Current password"
+                aria-label="Current password"
+              />
+              <input
                 v-model="changePasswordValue"
                 type="password"
                 autocomplete="new-password"
                 maxlength="1024"
                 class="form-input mono"
                 placeholder="New password"
+                aria-label="New password"
               />
               <input
                 v-model="changePasswordConfirm"
@@ -5868,14 +5909,16 @@ function formatDate(ts: string): string {
                 maxlength="1024"
                 class="form-input mono"
                 placeholder="Confirm password"
+                aria-label="Confirm password"
                 :class="{ 'input-error': passwordMismatch }"
-                @keyup.enter="!passwordMismatch && changePasswordValue && changePassword(changePasswordUserId!)"
+                @keyup.enter="changePassword()"
               />
               <div v-if="passwordMismatch" class="pw-mismatch">Passwords do not match</div>
+              <div v-if="changePasswordError" class="pw-mismatch" role="alert">{{ changePasswordError }}</div>
             </div>
             <div class="delete-modal-actions">
-              <button class="btn btn-secondary" @click="changePasswordUserId = null; changePasswordValue = ''; changePasswordConfirm = ''">Cancel</button>
-              <button class="btn btn-primary" :disabled="!changePasswordValue || passwordMismatch || !changePasswordConfirm" @click="changePassword(changePasswordUserId!)">Save</button>
+              <button class="btn btn-secondary" @click="openChangePassword(null)">Cancel</button>
+              <button class="btn btn-primary" :disabled="!canSubmitPasswordChange" @click="changePassword()">Save</button>
             </div>
           </div>
         </div>

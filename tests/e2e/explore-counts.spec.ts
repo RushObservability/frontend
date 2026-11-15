@@ -276,3 +276,36 @@ test('log volume consolidates full-range stats without a separate banner and wra
   }
   await page.screenshot({ path: testInfo.outputPath('log-volume-mobile.png'), fullPage: true })
 })
+
+test('Shift+drag on the logs volume shows BubbleUp results in Logs mode', async ({ page }) => {
+  const state = await stubExplore(page)
+  const now = Math.floor(Date.now() / 60_000) * 60_000
+  state.histogram = Array.from({ length: 60 }, (_, index) => ({
+    bucket: new Date(now - (59 - index) * 60_000).toISOString().slice(0, 19).replace('T', ' '),
+    count: 1_000, error_count: 0,
+  }))
+  const requests: Record<string, unknown>[] = []
+  await page.route('**/api/v1/bubbleup', async route => {
+    requests.push(route.request().postDataJSON())
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      selection_count: 120, baseline_count: 4_000,
+      dimensions: [{ name: 'Severity', values: [{ value: 'ERROR', selection_count: 80, baseline_count: 200, selection_pct: 66, baseline_pct: 5, lift: 13 }] }],
+    }) })
+  })
+  await page.goto('/?mode=logs&t=60')
+  const plot = page.locator('.signal-timeline .timeline-bars')
+  await expect(plot).toBeVisible()
+  await plot.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }))
+  const box = (await plot.boundingBox())!
+  await page.keyboard.down('Shift')
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2, { steps: 4 })
+  await page.mouse.up()
+  await page.keyboard.up('Shift')
+  const rail = page.getByRole('complementary', { name: 'Cohort comparison findings' })
+  await expect(rail).toBeVisible()
+  await expect(rail).toContainText('Severity')
+  await expect(rail).toContainText('ERROR')
+  expect(requests[0]).toMatchObject({ signal: 'logs', exclude_selection_from_baseline: true })
+})
