@@ -38,13 +38,6 @@ import { sanitizeRumEvent } from './lib/rumPrivacy'
 
 const app = createApp(App)
 const applicationHealth = installApplicationHealth(app, router)
-try {
-  app.use(router)
-  app.mount('#app')
-} catch (error) {
-  applicationHealth.bootstrapFailed(error)
-  throw error
-}
 
 // Self-ingest RUM when VITE_RUM_ENABLED is set
 if (import.meta.env.VITE_RUM_ENABLED === 'true') {
@@ -107,4 +100,13 @@ if (import.meta.env.VITE_RUM_ENABLED === 'true') {
   }).catch((err) => {
     console.warn('[Rush RUM] Failed to load SDK:', err)
   })
+}
+
+// Schedule SDK loading first so fatal plugin/mount errors can still be delivered.
+try {
+  app.use(router)
+  app.mount('#app')
+} catch (error) {
+  applicationHealth.bootstrapFailed(error)
+  throw error
 }
