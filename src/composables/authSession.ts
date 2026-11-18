@@ -1,3 +1,5 @@
+import { apiOperation, recordApiMetric, requestOutcome } from '../lib/apiTelemetry'
+
 type SessionExpiredListener = () => void
 
 export interface AuthenticatedFetchOptions {
@@ -107,15 +109,16 @@ function timeoutError(): Error {
 }
 
 /** Keep cancellation and keyed ownership until the response body ends. */
-function responseWithLifecycle(response: Response, signal: AbortSignal, release: () => void): Response {
-  if (!response.body) { release(); return response }
+function responseWithLifecycle(response: Response, signal: AbortSignal, release: () => void, recordBody: (outcome: string) => void): Response {
+  if (!response.body) { recordBody('completed'); release(); return response }
   const reader = response.body.getReader()
   let finished = false
   let bodyController: ReadableStreamDefaultController<Uint8Array>
   const releaseReader = () => { try { reader.releaseLock() } catch { /* an abort may still be settling */ } }
-  const finish = () => {
+  const finish = (outcome: string) => {
     if (finished) return
     finished = true
+    recordBody(outcome)
     signal.removeEventListener('abort', onAbort)
     release()
   }
@@ -123,7 +126,7 @@ function responseWithLifecycle(response: Response, signal: AbortSignal, release:
     if (finished) return
     const reason = signal.reason ?? abortError()
     bodyController.error(reason)
-    finish()
+    finish('cancelled')
     void reader.cancel(reason).catch(() => {}).finally(releaseReader)
   }
   const body = new ReadableStream<Uint8Array>({
@@ -136,16 +139,16 @@ function responseWithLifecycle(response: Response, signal: AbortSignal, release:
       try {
         const chunk = await reader.read()
         if (finished) { releaseReader(); return }
-        if (chunk.done) { controller.close(); finish(); releaseReader() }
+        if (chunk.done) { controller.close(); finish('completed'); releaseReader() }
         else controller.enqueue(chunk.value)
       } catch (error) {
         if (!finished) controller.error(error)
-        finish()
+        finish('stream_error')
         releaseReader()
       }
     },
     async cancel(reason) {
-      finish()
+      finish('cancelled')
       try { await reader.cancel(reason) } finally { releaseReader() }
     },
   })
@@ -168,6 +171,7 @@ export async function authenticatedFetch(
   const generation = getSessionGeneration()
   const sessionSignal = sessionController.signal
   const method = (init?.method || 'GET').toUpperCase()
+  const operation = apiOperation(input)
   const canRetry = isIdempotent(method)
   const retries = canRetry ? Math.max(0, options?.retries ?? DEFAULT_RETRIES) : 0
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS
@@ -200,6 +204,7 @@ export async function authenticatedFetch(
       }, timeoutMs) : undefined
 
       let response: Response
+      const attemptStarted = performance.now()
       try {
         response = await fetch(input, {
           ...init,
@@ -208,10 +213,12 @@ export async function authenticatedFetch(
           signal,
         })
       } catch (error) {
+        recordApiMetric('frontend_api_attempt', operation, method, timedOut ? 'timeout' : requestOutcome(error), performance.now() - attemptStarted)
         if (timer) clearTimeout(timer)
         assertCurrentSession(generation)
         if (parentSignal?.aborted || latestController?.signal.aborted) throw error
         if ((timedOut || isRetryableError(error)) && attempt < retries) {
+          recordApiMetric('frontend_api_retry', operation, method, timedOut ? 'timeout' : 'network_error')
           await waitForRetry(retryDelayMs * (attempt + 1), [parentSignal, latestController?.signal, sessionSignal])
           continue
         }
@@ -219,12 +226,14 @@ export async function authenticatedFetch(
         throw error
       }
 
+      recordApiMetric('frontend_api_attempt', operation, method, signal.aborted ? 'cancelled' : response.ok ? 'success' : 'http_error', performance.now() - attemptStarted, response.status)
       // This deadline covers headers only. SSE readers own their idle deadline.
       if (timer) clearTimeout(timer)
       if (signal.aborted) {
         try { await response.body?.cancel() } catch { /* release a raced response */ }
         assertCurrentSession(generation)
         if (timedOut && attempt < retries) {
+          recordApiMetric('frontend_api_retry', operation, method, 'timeout')
           await waitForRetry(retryDelayMs * (attempt + 1), [parentSignal, latestController?.signal, sessionSignal])
           continue
         }
@@ -232,12 +241,16 @@ export async function authenticatedFetch(
       }
 
       if (RETRYABLE_STATUSES.has(response.status) && attempt < retries) {
+        recordApiMetric('frontend_api_retry', operation, method, 'http_error', undefined, response.status)
         try { await response.body?.cancel() } catch { /* release the retry body */ }
         await waitForRetry(retryDelayMs * (attempt + 1), [parentSignal, latestController?.signal, sessionSignal])
         continue
       }
       if (response.status === 401 && !options?.ignoreUnauthorized) reportSessionExpired()
-      const wrapped = responseWithLifecycle(response, signal, release)
+      const bodyStarted = performance.now()
+      const wrapped = responseWithLifecycle(response, signal, release, outcome => {
+        if (response.ok) recordApiMetric('frontend_api_body', operation, method, outcome, performance.now() - bodyStarted, response.status)
+      })
       bodyOwnsRequest = true
       return wrapped
     }

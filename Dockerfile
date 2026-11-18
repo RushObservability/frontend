@@ -3,7 +3,7 @@
 # discarded, so its footprint doesn't affect the final image's CVE posture).
 # The Vue bundle is architecture-independent. Keep this stage on the BuildKit
 # host so multi-platform builds do not run Node, vue-tsc, or Vite through QEMU.
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/node@sha256:6a066f8decea77c67ef2772a78fad81df7a78a346d0b22a05fc9dac14537f2b0 AS builder
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/node@sha256:efeb9fd6c61fd20b7c634531e0a746d26204bdc2df13e7ea57ab69aad349a900 AS builder
 # Chainguard node runs as non-root by default; the build writes to /app and the
 # npm cache, so run this (discarded) stage as root to avoid permission errors.
 USER root
@@ -26,7 +26,7 @@ RUN npm run build
 # The runtime image (Chainguard nginx) is distroless — no shell, and we can't RUN
 # in it. Stage a busybox multi-call binary + the applet symlinks the entrypoint
 # needs (sh, sed, mkdir, grep) so it can validate and render config at start.
-FROM cgr.dev/chainguard/busybox@sha256:6590218b01ae8feb8272f07c5ec59e5306eb4d586d4eab2ff9e72ed3bd5429db AS tools
+FROM cgr.dev/chainguard/busybox@sha256:f051b3d301e122b956747646c8a19048cc77d3a572e1bad5c3756fda8d128ad2 AS tools
 # The busybox image also runs non-root, so assemble the tools under /tmp (writable).
 RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/busybox; for a in sh sed mkdir grep; do ln -s busybox /tmp/tools/$a; done"]
 
@@ -34,7 +34,7 @@ RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/b
 # Chainguard nginx: 0-CVE, distroless, runs as non-root (uid 65532) and listens
 # on 8080. Its entrypoint is bare `nginx` (no docker-entrypoint.sh / envsubst),
 # so we supply our own entrypoint to render the runtime template.
-FROM cgr.dev/chainguard/nginx@sha256:0352063c168740414d8caf7cbcc2b386506dba82ba3955cfaee2b8582a1a93a8
+FROM cgr.dev/chainguard/nginx@sha256:ff2a257e03689363e7dabc3456030c58b790604c3a8f91902fe89a604ec05ce3
 
 # busybox tools for the entrypoint (sh/sed/mkdir at /usr/local/bin).
 COPY --from=tools /tmp/tools/ /usr/local/bin/
@@ -56,6 +56,10 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 ENV QUERY_API_HOST=localhost:8080
 ENV API_PUBLIC_URL=""
 ENV RUSH_ENVIRONMENT="production"
+# Self-health collection is an explicit deployment opt-in. Values are public.
+ENV RUM_ENABLED="false"
+ENV RUM_ENDPOINT="/api/v1/frontend/telemetry"
+ENV RUM_APP_NAME="rush-ui"
 # Default theme for first-time visitors with no saved preference: light | dark.
 ENV DEFAULT_THEME="light"
 # Proxy query-api's unauthenticated /metrics (read by the admin Capacity page).
