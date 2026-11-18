@@ -39,13 +39,6 @@ import { readRumConfiguration } from './lib/rumConfig'
 
 const app = createApp(App)
 const applicationHealth = installApplicationHealth(app, router)
-try {
-  app.use(router)
-  app.mount('#app')
-} catch (error) {
-  applicationHealth.bootstrapFailed(error)
-  throw error
-}
 
 // Explicit runtime opt-in also works with the standard prebuilt image.
 const rum = readRumConfiguration()
@@ -120,3 +113,15 @@ if (rum.enabled) {
     console.warn('[Rush RUM] Failed to load SDK:', err)
   })
 }
+
+// The SDK chunk shares Vite helpers with this module. Let module evaluation finish
+// before booting: an uncaught mount error must not invalidate that dependency.
+queueMicrotask(() => {
+  try {
+    app.use(router)
+    app.mount('#app')
+  } catch (error) {
+    applicationHealth.bootstrapFailed(error)
+    throw error
+  }
+})
