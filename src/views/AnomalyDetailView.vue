@@ -1075,7 +1075,7 @@ onMounted(async () => {
           <path :d="linePath(m.bands.lower, m.maxVal)" class="band-edge" />
           <path :d="linePath(m.bands.ewma, m.maxVal)" class="baseline-line" />
           <path :d="areaPath(m.values, m.maxVal)" :style="{ fill: seriesColor(mi, 0.10) }" />
-          <path :d="linePath(m.values, m.maxVal)" class="metric-line" :style="{ stroke: seriesColor(mi) }" />
+          <path :d="linePath(m.values, m.maxVal)" class="ch-line" :style="{ stroke: seriesColor(mi) }" />
           <!-- Event marker -->
           <template v-if="eventMarkerX(m.timestamps) !== null">
             <line
@@ -1173,7 +1173,7 @@ onMounted(async () => {
             </template>
             <!-- Metric line -->
             <path :d="cAreaPath(svc.values, svc.maxVal)" :style="{ fill: seriesColor(si, 0.10) }" />
-            <path :d="cLinePath(svc.values, svc.maxVal)" class="metric-line" :style="{ stroke: seriesColor(si) }" />
+            <path :d="cLinePath(svc.values, svc.maxVal)" class="ch-line" :style="{ stroke: seriesColor(si) }" />
             <!-- Crosshair -->
             <template v-if="corrCursorX !== null">
               <line :x1="corrCursorX" :y1="cPad.top" :x2="corrCursorX" :y2="cPad.top + ciH" class="crosshair" />

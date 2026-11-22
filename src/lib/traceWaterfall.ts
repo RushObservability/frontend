@@ -71,25 +71,22 @@ export function buildWaterfallRows(
   return rows
 }
 
-/** Left edge of a span's bar, as a percentage of the trace duration. */
-export function barOffsetPercent(
-  span: SpanNode,
-  orderedSpans: readonly SpanNode[],
-  traceDurationNs: number,
-): string {
-  if (orderedSpans.length === 0 || traceDurationNs <= 0) return '0%'
-  const firstUs = parseTraceTimestamp(orderedSpans[0]!.timestamp)
-  const spanUs = parseTraceTimestamp(span.timestamp)
-  const diffNs = (spanUs - firstUs) * 1000
-  const pct = Math.max((diffNs / traceDurationNs) * 100, 0)
-  // Capped so a span starting at the very end still shows a sliver of bar.
-  return `${Math.min(pct, 95)}%`
+export interface TraceWindow {
+  from: number
+  to: number
 }
 
-/** Width of a span's bar, floored so sub-millisecond spans stay visible. */
-export function barWidthPercent(span: SpanNode, traceDurationNs: number): string {
-  if (traceDurationNs <= 0) return '1%'
-  return `${Math.max(0.5, (span.duration_ns / traceDurationNs) * 100)}%`
+/** Relative nanoseconds; subtract epoch timestamps before converting to ns. */
+export function spanTraceWindow(span: SpanNode, originUs: number): TraceWindow {
+  const from = Math.max(0, (parseTraceTimestamp(span.timestamp) - originUs) * 1000)
+  return { from, to: from + Math.max(0, span.duration_ns) }
+}
+
+export function clipTraceWindow(span: TraceWindow, range: TraceWindow): TraceWindow | null {
+  const from = Math.max(span.from, range.from)
+  const to = Math.min(span.to, range.to)
+  if (to < from || (to === from && span.to > span.from)) return null
+  return { from, to }
 }
 
 export function isSpanError(span: SpanNode): boolean {

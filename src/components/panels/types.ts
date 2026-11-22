@@ -23,6 +23,8 @@ export interface TimeSeriesPanelSeries {
   color?: string
   ref_id?: string
   axis?: 'left' | 'right'
+  /** Draw as a line over the bars in stacked-bar mode. */
+  barOverlay?: boolean
   legendValue?: number
   lineStyle?: 'solid' | 'dashed'
   opacity?: number
@@ -43,6 +45,7 @@ export interface TimeSeriesPanelProps extends PanelFrameProps {
   showChartWhenEmpty?: boolean
   unit?: string
   seriesName?: string
+  linkedReadout?: boolean
 }
 
 export interface HeatmapPanelProps extends PanelFrameProps {

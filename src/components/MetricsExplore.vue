@@ -426,6 +426,7 @@ onUnmounted(() => {
                   fill="none"
                   :stroke="metricType(metric) === 'counter' ? 'var(--amber)' : 'var(--ok)'"
                   stroke-width="1"
+                  vector-effect="non-scaling-stroke"
                   stroke-linejoin="round"
                   stroke-linecap="round"
                 />
@@ -434,7 +435,7 @@ onUnmounted(() => {
                   <line
                     :x1="sparkCrosshairX()!" :y1="0"
                     :x2="sparkCrosshairX()!" :y2="sparkH"
-                    stroke="var(--text-muted)" stroke-width="0.5" stroke-dasharray="2 1"
+                    stroke="var(--text-muted)" stroke-width="0.5" stroke-dasharray="2 1" vector-effect="non-scaling-stroke"
                   />
                 </template>
               </svg>

@@ -964,7 +964,7 @@ onMounted(() => {
                 <path :d="linePath(m.bands.lower, m.maxVal)" class="band-edge" />
                 <path :d="linePath(m.bands.ewma, m.maxVal)" class="baseline-line" />
                 <path :d="areaPath(m.values, m.maxVal)" :style="{ fill: seriesColor(mi, 0.10) }" />
-                <path :d="linePath(m.values, m.maxVal)" class="metric-line" :style="{ stroke: seriesColor(mi) }" />
+                <path :d="linePath(m.values, m.maxVal)" class="ch-line" :style="{ stroke: seriesColor(mi) }" />
                 <template v-if="cursorX !== null">
                   <line :x1="cursorX" :y1="pad.top" :x2="cursorX" :y2="pad.top + iH" class="crosshair" />
                   <circle :cx="cursorX" :cy="dotY(m.values, m.maxVal)" r="3.5" class="crosshair-dot" :style="{ fill: seriesColor(mi), stroke: 'var(--bg-surface)' }" />
@@ -1006,7 +1006,7 @@ onMounted(() => {
             <path :d="linePath(m.bands.lower, m.maxVal)" class="band-edge" />
             <path :d="linePath(m.bands.ewma, m.maxVal)" class="baseline-line" />
             <path :d="areaPath(m.values, m.maxVal)" :style="{ fill: metricColor(m.name, previewData, 0.10) }" />
-            <path :d="linePath(m.values, m.maxVal)" class="metric-line" :style="{ stroke: metricColor(m.name, previewData) }" />
+            <path :d="linePath(m.values, m.maxVal)" class="ch-line" :style="{ stroke: metricColor(m.name, previewData) }" />
             <template v-if="cursorX !== null">
               <line :x1="cursorX" :y1="pad.top" :x2="cursorX" :y2="pad.top + iH" class="crosshair" />
               <circle :cx="cursorX" :cy="dotY(m.values, m.maxVal)" r="3.5" class="crosshair-dot" :style="{ fill: metricColor(m.name, previewData), stroke: 'var(--bg-surface)' }" />

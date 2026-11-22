@@ -5,7 +5,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { relatedProfileLocation } from '../lib/profiles'
 import { useFeatures } from '../composables/useFeatures'
-import type { RushEvent, Filter, CountBucket, QueryFilter, GroupResult, SavedQuery, TimeseriesBucket, LatencyHeatmapCell, TraceResponse, SpanNode, LogRecord, BubbleUpResponse, ExploreCountKind, ExploreSearchRequest, ExploreSearchResponse, NotebookCellDraft } from '../types'
+import type { RushEvent, Filter, CountBucket, QueryFilter, GroupResult, SavedQuery, TimeseriesBucket, LatencyHeatmapCell, TraceResponse, LogRecord, BubbleUpResponse, ExploreCountKind, ExploreSearchRequest, ExploreSearchResponse, NotebookCellDraft } from '../types'
 import SavedQueries from '../components/SavedQueries.vue'
 import { fromApiSavedQuery } from '../composables/useSavedQueries'
 import QueryHistory from '../components/QueryHistory.vue'
@@ -22,7 +22,7 @@ import { searchTokens, searchTokenAt, completionPrefix, filterValue, logSearchFi
 import { DEFAULT_LOG_COLUMNS, logColumnValue, logViewFilters, logViewKey, logViewScope, validateLogColumns, type LogView, type LogViewColumn } from '../lib/logViews'
 import { useAuth } from '../composables/useAuth'
 import TraceWaterfall from '../components/TraceWaterfall.vue'
-import { isSpanError, serviceColor } from '../lib/traceWaterfall'
+import { flattenSpans, parseTraceTimestamp, serviceColor } from '../lib/traceWaterfall'
 import ExploreSearchToolbar from '../components/ExploreSearchToolbar.vue'
 import ExploreResultsState from '../components/ExploreResultsState.vue'
 import QueryDiagnosis from '../components/QueryDiagnosis.vue'
@@ -3167,29 +3167,6 @@ function dpServiceColor(name: string): string {
   return serviceColor(name, expandedTrace.value?.services)
 }
 
-// Parse "YYYY-MM-DD HH:MM:SS.nnnnnnnnn" from trace timestamps into ms
-function parseTraceTimestamp(ts: string): number {
-  // Returns microseconds since epoch for sub-ms precision (safe in JS Number up to ~285 years from epoch)
-  const m = ts.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})\.?(\d*)/)
-  if (!m) return 0
-  const epochMs = new Date(`${m[1]}T${m[2]}Z`).getTime()
-  const frac = (m[3] || '0').padEnd(6, '0').slice(0, 6) // microseconds
-  return epochMs * 1000 + parseInt(frac, 10)
-}
-
-function flattenSpans(spans: SpanNode[]): SpanNode[] {
-  const flat: SpanNode[] = []
-  function walk(nodes: SpanNode[]) {
-    for (const n of nodes) {
-      flat.push(n)
-      if (n.children?.length) walk(n.children)
-    }
-  }
-  walk(spans)
-  return flat.sort((a, b) => parseTraceTimestamp(a.timestamp) - parseTraceTimestamp(b.timestamp))
-}
-
-
 // ═══ APM chart helpers (mirrors ApmView patterns) ═══
 /** Parse a ClickHouse timestamp string (no tz suffix) as UTC */
 function parseBucketUtc(bucket: string): number {
@@ -3606,22 +3583,6 @@ async function toggleInlineTraceForLog(logIndex: number, traceId: string) {
   } finally {
     inlineTraceLoading.value = false
   }
-}
-
-function inlineSpanLeft(span: SpanNode, trace: TraceResponse): string {
-  if (!trace.duration_ns || trace.duration_ns <= 0) return '0%'
-  const allSpans = flattenSpans(trace.spans)
-  const traceStartUs = allSpans.length
-    ? Math.min(...allSpans.map(s => parseTraceTimestamp(s.timestamp)))
-    : 0
-  const spanStartUs = parseTraceTimestamp(span.timestamp)
-  const offsetNs = (spanStartUs - traceStartUs) * 1000
-  return Math.max(0, Math.min(100, (offsetNs / trace.duration_ns) * 100)) + '%'
-}
-
-function inlineSpanWidth(span: SpanNode, trace: TraceResponse): string {
-  if (!trace.duration_ns || trace.duration_ns <= 0) return '1%'
-  return Math.max(0.5, (span.duration_ns / trace.duration_ns) * 100) + '%'
 }
 
 // ═══ Autocomplete ═══
@@ -5703,33 +5664,7 @@ watch(() => route.query.log_view, (id) => {
                 <span class="loading-more-spinner">&#9676;</span> Loading trace...
               </div>
               <template v-else-if="inlineTraceData">
-                <div class="inline-trace-header">
-                  <span class="mono text-muted">{{ inlineTraceData.trace_id.slice(0, 16) }}</span>
-                  <span class="mono">{{ inlineTraceData.span_count }} spans</span>
-                  <span class="mono">{{ formatDuration(inlineTraceData.duration_ns) }}</span>
-                  <span class="mono text-muted">{{ inlineTraceData.services.join(', ') }}</span>
-                </div>
-                <div class="inline-trace-waterfall">
-                  <div
-                    v-for="span in flattenSpans(inlineTraceData.spans).slice(0, 20)"
-                    :key="span.span_id"
-                    class="inline-wf-row"
-                    :class="{ 'inline-wf-error': isSpanError(span) }"
-                  >
-                    <span class="inline-wf-svc">{{ span.service_name }}</span>
-                    <div class="inline-wf-bar-track">
-                      <div
-                        class="inline-wf-bar"
-                        :style="{
-                          left: inlineSpanLeft(span, inlineTraceData!),
-                          width: inlineSpanWidth(span, inlineTraceData!),
-                          background: isSpanError(span) ? 'var(--error)' : serviceColor(span.service_name, inlineTraceData.services),
-                        }"
-                      />
-                    </div>
-                    <span class="inline-wf-dur mono">{{ formatDuration(span.duration_ns) }}</span>
-                  </div>
-                </div>
+                <TraceWaterfall :trace="inlineTraceData" title="" compact />
                 <router-link :to="`/trace/${inlineTraceData.trace_id}`" class="inline-trace-full-link" @click.stop>
                   View Full Trace &rarr;
                 </router-link>
@@ -6018,33 +5953,7 @@ watch(() => route.query.log_view, (id) => {
                   <span class="loading-more-spinner">&#9676;</span> Loading trace...
                 </div>
                 <template v-else-if="inlineTraceData">
-                  <div class="inline-trace-header">
-                    <span class="mono text-muted">{{ inlineTraceData.trace_id.slice(0, 16) }}</span>
-                    <span class="mono">{{ inlineTraceData.span_count }} spans</span>
-                    <span class="mono">{{ formatDuration(inlineTraceData.duration_ns) }}</span>
-                    <span class="mono text-muted">{{ inlineTraceData.services.join(', ') }}</span>
-                  </div>
-                  <div class="inline-trace-waterfall">
-                    <div
-                      v-for="span in flattenSpans(inlineTraceData.spans).slice(0, 20)"
-                      :key="span.span_id"
-                      class="inline-wf-row"
-                      :class="{ 'inline-wf-error': isSpanError(span) }"
-                    >
-                      <span class="inline-wf-svc">{{ span.service_name }}</span>
-                      <div class="inline-wf-bar-track">
-                        <div
-                          class="inline-wf-bar"
-                          :style="{
-                            left: inlineSpanLeft(span, inlineTraceData!),
-                            width: inlineSpanWidth(span, inlineTraceData!),
-                            background: isSpanError(span) ? 'var(--error)' : serviceColor(span.service_name, inlineTraceData.services),
-                          }"
-                        />
-                      </div>
-                      <span class="inline-wf-dur mono">{{ formatDuration(span.duration_ns) }}</span>
-                    </div>
-                  </div>
+                  <TraceWaterfall :trace="inlineTraceData" title="" compact />
                   <router-link :to="`/trace/${inlineTraceData.trace_id}`" class="inline-trace-full-link" @click.stop>
                     View Full Trace &rarr;
                   </router-link>

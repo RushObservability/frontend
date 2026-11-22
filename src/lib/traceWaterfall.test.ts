@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { SpanNode } from '../types'
 import {
-  barOffsetPercent,
-  barWidthPercent,
+  clipTraceWindow,
+  spanTraceWindow,
   buildWaterfallRows,
   durationClass,
   flattenSpans,
@@ -71,23 +71,20 @@ describe('trace waterfall', () => {
     expect(parseTraceTimestamp('')).toBe(0)
   })
 
-  it('offsets bars against the first span and caps at 95%', () => {
+  it('keeps elapsed offsets after clipping a parent span to the focused window', () => {
     const ordered = flattenSpans(tree)
-    expect(barOffsetPercent(ordered[0]!, ordered, 1_000_000_000)).toBe('0%')
-    // child-a starts 100ms into a 1s trace.
-    const childA = ordered.find(s => s.span_id === 'child-a')!
-    expect(barOffsetPercent(childA, ordered, 1_000_000_000)).toBe('10%')
+    const originUs = parseTraceTimestamp(ordered[0]!.timestamp)
+    const windows = ordered.map(item => spanTraceWindow(item, originUs))
+    const target = { from: 100_000_000, to: 101_000_000 }
+    expect(windows[1]).toEqual(target)
+    expect(clipTraceWindow(windows[0]!, target)).toEqual(target)
+    expect(clipTraceWindow(windows[2]!, target)).toBeNull()
   })
 
-  it('never divides by a zero trace duration', () => {
-    const ordered = flattenSpans(tree)
-    expect(barOffsetPercent(ordered[1]!, ordered, 0)).toBe('0%')
-    expect(barWidthPercent(ordered[1]!, 0)).toBe('1%')
-  })
-
-  it('floors bar width so a fast span stays visible', () => {
-    const tiny = span({ span_id: 't', timestamp: '2026-01-01 10:00:00.000000000', duration_ns: 1 })
-    expect(barWidthPercent(tiny, 1_000_000_000)).toBe('0.5%')
+  it('keeps an instantaneous span at a range boundary', () => {
+    const range = { from: 100, to: 200 }
+    expect(clipTraceWindow({ from: 200, to: 200 }, range)).toEqual({ from: 200, to: 200 })
+    expect(clipTraceWindow({ from: 200, to: 300 }, range)).toBeNull()
   })
 
   it('treats 4xx and ERROR status as errors', () => {

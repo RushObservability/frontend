@@ -1072,7 +1072,7 @@ onUnmounted(() => {
               <path :d="linePath(m.bands.lower, m.maxVal)" class="band-edge" />
               <path :d="linePath(m.bands.ewma, m.maxVal)" class="baseline-line" />
               <path :d="areaPath(m.values, m.maxVal)" :style="{ fill: config.splitLabels?.length ? seriesColor(mi, 0.10) : metricColor(m.name, configData[config.id] || [], 0.10) }" />
-              <path :d="linePath(m.values, m.maxVal)" class="metric-line" :style="{ stroke: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []) }" />
+              <path :d="linePath(m.values, m.maxVal)" class="ch-line" :style="{ stroke: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []) }" />
               <template v-if="cursorX !== null">
                 <line :x1="cursorX" :y1="pad.top" :x2="cursorX" :y2="pad.top + iH" class="crosshair" />
                 <circle :cx="cursorX" :cy="dotY(m.values, m.maxVal)" r="3.5" class="crosshair-dot" :style="{ fill: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []), stroke: 'var(--bg-surface)' }" />
@@ -1411,7 +1411,7 @@ onUnmounted(() => {
             <path :d="linePath(m.bands.lower, m.maxVal)" class="band-edge" />
             <path :d="linePath(m.bands.ewma, m.maxVal)" class="baseline-line" />
             <path :d="areaPath(m.values, m.maxVal)" :style="{ fill: config.splitLabels?.length ? seriesColor(mi, 0.10) : metricColor(m.name, configData[config.id] || [], 0.10) }" />
-            <path :d="linePath(m.values, m.maxVal)" class="metric-line" :style="{ stroke: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []) }" />
+            <path :d="linePath(m.values, m.maxVal)" class="ch-line" :style="{ stroke: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []) }" />
             <template v-if="cursorX !== null">
               <line :x1="cursorX" :y1="pad.top" :x2="cursorX" :y2="pad.top + iH" class="crosshair" />
               <circle :cx="cursorX" :cy="dotY(m.values, m.maxVal)" r="3.5" class="crosshair-dot" :style="{ fill: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []), stroke: 'var(--bg-surface)' }" />

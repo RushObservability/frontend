@@ -197,7 +197,6 @@
 .band-fill { fill: rgba(59, 130, 246, 0.06); }
 .band-edge { fill: none; stroke: var(--amber); stroke-width: 0.6; opacity: 0.3; stroke-dasharray: 3 2; }
 .baseline-line { fill: none; stroke: var(--amber); stroke-width: 1; opacity: 0.5; }
-.metric-line { fill: none; stroke-width: 1.5; }
 .crosshair { stroke: var(--text-muted); stroke-width: 0.5; stroke-dasharray: 3 2; }
 .crosshair-dot { stroke-width: 2; }
 
@@ -855,3 +854,5 @@
   white-space: nowrap;
   color: var(--text-primary);
 }
+
+.grid-line, .band-edge, .baseline-line, .crosshair, .crosshair-dot { vector-effect: non-scaling-stroke; }

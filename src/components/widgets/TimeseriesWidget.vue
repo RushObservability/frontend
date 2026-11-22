@@ -4,7 +4,7 @@ let chartIdSeq = 0
 </script>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { CountBucket, DeployMarker, TimeDomain } from '../../types'
 import type { TimeSeriesPanelSeries } from '../panels/types'
 import { straightLinePath, straightAreaPath, straightBandPath, fmtAxis, resolveTimeDomain, type Pt } from '../../lib/chart'
@@ -31,7 +31,11 @@ const props = withDefaults(defineProps<{
   unit?: string
   /** Label for the single-series legend entry (defaults to "value"). */
   seriesName?: string
+  linkedReadout?: boolean
+  zoomable?: boolean
 }>(), { fill: null })
+
+const emit = defineEmits<{ rangeSelect: [range: TimeDomain] }>()
 
 // Distinct line colors for split/grouped series. The palette is intentionally
 // longer than the editor's query palette because a single APM or PromQL query
@@ -61,15 +65,26 @@ function fmtAxisU(n: number): string {
   return withUnit(fmtAxis(n))
 }
 
-const svgWidth = 600
+const plotElement = ref<HTMLElement | null>(null)
+const svgWidth = ref(600)
 const svgHeight = 140
 const padTop = 12
 const padBottom = 20
-const padLeft = 40
-const padRight = 42
+const padLeft = 60
+const padRight = 58
 
-const plotWidth = svgWidth - padLeft - padRight
+const plotWidth = computed(() => svgWidth.value - padLeft - padRight)
 const plotHeight = svgHeight - padTop - padBottom
+
+let resizeObserver: ResizeObserver | undefined
+onMounted(() => {
+  if (!plotElement.value) return
+  resizeObserver = new ResizeObserver(([entry]) => {
+    if (entry && entry.contentRect.width > 0) svgWidth.value = Math.max(140, entry.contentRect.width)
+  })
+  resizeObserver.observe(plotElement.value)
+})
+onBeforeUnmount(() => resizeObserver?.disconnect())
 
 const maxCount = computed(() =>
   props.buckets.reduce((max, b) => Math.max(max, b.count), 1)
@@ -93,7 +108,7 @@ const seriesPoints = computed<Pt[]>(() => {
   const { from, to } = bucketBounds.value
   const span = to - from
   return bucketSamples.value.map(([time, count]) => [
-    padLeft + ((time - from) / span) * plotWidth,
+    padLeft + ((time - from) / span) * plotWidth.value,
     padTop + plotHeight - (count / maxCount.value) * plotHeight,
   ] as Pt)
 })
@@ -120,7 +135,9 @@ const xLabels = computed(() => {
 const stackedMode = computed(() => props.displayMode === 'stacked-bars')
 const stackedLinesMode = computed(() => props.displayMode === 'stacked-lines' && seriesMode.value)
 const showFill = computed(() => !stackedMode.value && (props.fill ?? (stackedLinesMode.value || !seriesMode.value)))
-const stacks = computed(() => stackedMode.value ? stackTimeSeries(props.series || []) : [])
+const stacks = computed(() => stackedMode.value
+  ? stackTimeSeries((props.series || []).map(series => series.barOverlay ? { ...series, points: [] } : series))
+  : [])
 const stackedLineLayers = computed(() => stackedLinesMode.value ? stackTimeLines(props.series || []) : [])
 const barInterval = computed(() => {
   if (props.bucketSeconds && props.bucketSeconds > 0) return props.bucketSeconds
@@ -131,6 +148,7 @@ const seriesBounds = computed(() => {
   let minT = Infinity, maxT = -Infinity, maxLeft = 0, maxRight = 0
   for (const s of props.series || []) {
     for (const [t, v] of s.points) {
+      if (!Number.isFinite(t) || !Number.isFinite(v)) continue
       if (t < minT) minT = t
       if (t > maxT) maxT = t
       if (s.axis === 'right') maxRight = Math.max(maxRight, v)
@@ -138,8 +156,10 @@ const seriesBounds = computed(() => {
     }
   }
   if (stackedMode.value) {
-    maxLeft = Math.max(0, ...stacks.value.filter(bar => bar.axis === 'left').map(bar => bar.top))
-    maxRight = Math.max(0, ...stacks.value.filter(bar => bar.axis === 'right').map(bar => bar.top))
+    for (const bar of stacks.value) {
+      if (bar.axis === 'right') maxRight = Math.max(maxRight, bar.top)
+      else maxLeft = Math.max(maxLeft, bar.top)
+    }
     maxT += barInterval.value
   }
   if (stackedLinesMode.value) {
@@ -179,7 +199,7 @@ const thresholdLines = computed(() => {
 })
 
 const seriesPaths = computed(() => {
-  if (!seriesMode.value || stackedMode.value) return []
+  if (!seriesMode.value) return []
   const { minT, maxT, maxLeft, maxRight } = seriesBounds.value
   const span = maxT - minT || 1
   if (stackedLinesMode.value) {
@@ -188,15 +208,16 @@ const seriesPaths = computed(() => {
       const axisMax = layer.axis === 'right' ? maxRight : maxLeft
       return layer.segments.map(segment => {
         const top: Pt[] = segment.map(point => [
-          padLeft + ((point.time - minT) / span) * plotWidth,
+          padLeft + ((point.time - minT) / span) * plotWidth.value,
           padTop + plotHeight - (point.top / axisMax) * plotHeight,
         ])
         const bottom: Pt[] = segment.map(point => [
-          padLeft + ((point.time - minT) / span) * plotWidth,
+          padLeft + ((point.time - minT) / span) * plotWidth.value,
           padTop + plotHeight - (point.bottom / axisMax) * plotHeight,
         ])
         return {
           d: straightLinePath(top),
+          point: top.length === 1 ? top[0] : undefined,
           area: straightBandPath(top, bottom),
           color: series.color || SERIES_COLORS[layer.seriesIndex % SERIES_COLORS.length]!,
           name: series.name,
@@ -207,21 +228,37 @@ const seriesPaths = computed(() => {
       })
     })
   }
-  return (props.series || []).map((s, i) => {
+  return (props.series || []).flatMap((s, i) => {
+    if (stackedMode.value && !s.barOverlay) return []
     const axisMax = s.axis === 'right' ? maxRight : maxLeft
-    const pts: Pt[] = s.points.map(([t, v]) => [
-      padLeft + ((t - minT) / span) * plotWidth,
-      padTop + plotHeight - (v / axisMax) * plotHeight,
-    ] as Pt)
-    return {
-      d: straightLinePath(pts),
-      area: straightAreaPath(pts, padTop + plotHeight),
+    const segments: Pt[][] = []
+    let segment: Pt[] | undefined
+    let previousTime = -Infinity
+    for (const [time, value] of s.points) {
+      if (!Number.isFinite(time) || !Number.isFinite(value)) {
+        segment = undefined
+        continue
+      }
+      if (!segment || (props.bucketSeconds && time - previousTime > props.bucketSeconds * 1.01)) {
+        segment = []
+        segments.push(segment)
+      }
+      segment.push([
+        padLeft + ((time - minT) / span) * plotWidth.value,
+        padTop + plotHeight - (value / axisMax) * plotHeight,
+      ])
+      previousTime = time
+    }
+    return segments.map(points => ({
+      d: straightLinePath(points),
+      area: straightAreaPath(points, padTop + plotHeight),
+      point: points.length === 1 ? points[0] : undefined,
       color: s.color || SERIES_COLORS[i % SERIES_COLORS.length]!,
       name: s.name,
       axis: s.axis || 'left',
       lineStyle: s.lineStyle || 'solid',
       opacity: s.opacity ?? 1,
-    }
+    }))
   })
 })
 
@@ -232,13 +269,13 @@ const stackedBars = computed(() => {
     const start = Math.max(minT, bar.time)
     const end = Math.min(maxT, bar.time + barInterval.value)
     if (end <= start || bar.value === 0) return []
-    const width = (end - start) / span * plotWidth
+    const width = (end - start) / span * plotWidth.value
     const gap = Math.min(1.5, width * .15)
     const max = bar.axis === 'right' ? maxRight : maxLeft
     const series = props.series![bar.seriesIndex]!
     return [{
       ...bar,
-      x: padLeft + (start - minT) / span * plotWidth + gap / 2,
+      x: padLeft + (start - minT) / span * plotWidth.value + gap / 2,
       y: padTop + plotHeight - bar.top / max * plotHeight,
       width: width - gap,
       height: bar.value / max * plotHeight,
@@ -275,13 +312,14 @@ const seriesXLabels = computed(() => {
 function timeAxisLabels(from: number, to: number) {
   if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return []
   const span = to - from
-  return [0, 0.5, 1].map(ratio => ({
-    x: padLeft + ratio * plotWidth,
-    label: formatTimeTick(from + span * ratio, span),
+  const intervals = plotWidth.value >= 560 ? 4 : plotWidth.value >= 200 ? 2 : 1
+  return Array.from({ length: intervals + 1 }, (_, index) => ({
+    x: padLeft + (index / intervals) * plotWidth.value,
+    label: formatTimeTick(from + (index / intervals) * span, span, span / intervals < 60),
   }))
 }
 
-function formatTimeTick(epochSeconds: number, spanSeconds: number): string {
+function formatTimeTick(epochSeconds: number, spanSeconds: number, includeSeconds: boolean): string {
   const date = new Date(epochSeconds * 1000)
   if (spanSeconds >= 2 * 86_400) {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
@@ -290,7 +328,7 @@ function formatTimeTick(epochSeconds: number, spanSeconds: number): string {
     const day = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
     return `${day} ${formatClock(date, false)}`
   }
-  return formatClock(date, false)
+  return formatClock(date, includeSeconds)
 }
 
 function formatClock(date: Date, includeSeconds: boolean): string {
@@ -317,7 +355,7 @@ const deployLines = computed(() => {
       const ratio = (t - firstTime) / range
       if (ratio < 0 || ratio > 1) return null
       return {
-        x: padLeft + ratio * plotWidth,
+        x: padLeft + ratio * plotWidth.value,
         label: d.version || d.service_name,
       }
     })
@@ -365,7 +403,7 @@ const hoverModel = computed<{ minT: number; maxT: number; series: HSeries[] }>((
 // ── Always-on compact legend (single- and multi-series) ──
 // Each entry: ● name  lastValue<unit>, using the same colors as the lines.
 const legendItems = computed(() => {
-  return hoverModel.value.series.slice(0, 8).map((s) => {
+  return hoverModel.value.series.map((s) => {
     const last = s.legendValue ?? (s.pts.length ? s.pts[s.pts.length - 1]![1] : null)
     return {
       name: s.name,
@@ -376,8 +414,8 @@ const legendItems = computed(() => {
 })
 
 // Plot box as fractions of the full SVG (the SVG fills .ts-plot 1:1).
-const plotLeftFrac = padLeft / svgWidth
-const plotSpanFrac = (svgWidth - padRight - padLeft) / svgWidth
+const plotLeftFrac = computed(() => padLeft / svgWidth.value)
+const plotSpanFrac = computed(() => plotWidth.value / svgWidth.value)
 const plotTopPct = (padTop / svgHeight) * 100
 const plotHeightPct = (plotHeight / svgHeight) * 100
 
@@ -393,65 +431,159 @@ const hoverP = computed(() => {
 })
 
 const crosshairLeftPct = computed(() =>
-  hoverP.value == null ? null : (plotLeftFrac + hoverP.value * plotSpanFrac) * 100
+  hoverP.value == null ? null : (plotLeftFrac.value + hoverP.value * plotSpanFrac.value) * 100
 )
 
-const tooltip = computed(() => {
-  const t = hover.time.value
-  const p = hoverP.value
+const samples = computed(() => hoverModel.value.series.map(series =>
+  new Map(series.pts.filter(([time, value]) => Number.isFinite(time) && Number.isFinite(value))),
+))
+const sampleTimes = computed(() => {
   const { minT, maxT } = hoverModel.value
-  // Only the chart the cursor is actually over renders a tooltip.
-  if (t == null || p == null || hover.activeId.value !== chartId) return null
-  const rows = hoverModel.value.series
-    .map((s) => {
-      if (!s.pts.length) return null
-      let best = s.pts[0]!, bestD = Math.abs(s.pts[0]![0] - t)
-      let firstSample = best[0], lastSample = best[0]
-      for (const pt of s.pts) {
-        const d = Math.abs(pt[0] - t)
-        if (d < bestD) { bestD = d; best = pt }
-        if (pt[0] < firstSample) firstSample = pt[0]
-        if (pt[0] > lastSample) lastSample = pt[0]
-      }
-      if (stackedMode.value) {
-        const interval = s.pts.find(([start]) => t >= start && t < start + barInterval.value)
-        if (!interval) return null
-        best = interval
-      } else if (t < firstSample || t > lastSample) return null
-      return { name: s.name, color: s.color, value: fmtAxisU(best[1]), t: best[0] }
-    })
-    .filter(Boolean) as Array<{ name: string; color: string; value: string; t: number }>
-  if (!rows.length) return null
-  const headT = rows[0]!.t
-  const d = new Date(headT * 1000)
-  const clock = formatClock(d, true)
-  const label = maxT - minT >= 86_400
-    ? `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${clock}`
-    : clock
-  // Flip to the left of the crosshair once past the midpoint, so the tooltip
-  // always opens toward the side with more room and stays within view.
-  return { rows: rows.slice(0, 8), label, leftPct: crosshairLeftPct.value!, flip: p > 0.5 }
+  return [...new Set(samples.value.flatMap(series => [...series.keys()]))]
+    .filter(time => time >= minT && time <= maxT)
+    .sort((a, b) => a - b)
 })
 
-function onHover(e: PointerEvent) {
-  const svg = e.currentTarget as SVGSVGElement
-  const rect = svg.getBoundingClientRect()
-  if (rect.width <= 0) return
+const readout = computed(() => {
+  const time = hover.time.value
+  if (time == null || hoverP.value == null || !(props.linkedReadout || hover.activeId.value === chartId)) return null
+  const date = new Date(time * 1000)
   const { minT, maxT } = hoverModel.value
-  if (!isFinite(minT) || maxT <= minT) return
-  const rx = (e.clientX - rect.left) / rect.width
-  let p = (rx - plotLeftFrac) / plotSpanFrac
-  p = Math.max(0, Math.min(1, p))
-  hover.set(minT + p * (maxT - minT), chartId)
+  const clock = formatClock(date, true)
+  const label = maxT - minT >= 86_400
+    ? `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${clock}`
+    : clock
+  return { label, values: samples.value.map(series => series.get(time)) }
+})
+
+const markers = computed(() => {
+  if (!readout.value || stackedMode.value || stackedLinesMode.value) return []
+  const { maxLeft, maxRight } = seriesBounds.value
+  return readout.value.values.flatMap((value, i) => {
+    if (value == null) return []
+    const max = !seriesMode.value ? maxCount.value : props.series?.[i]?.axis === 'right' ? maxRight : maxLeft
+    return [{
+      color: hoverModel.value.series[i]!.color,
+      top: (padTop + plotHeight * (1 - value / max)) / svgHeight * 100,
+    }]
+  })
+})
+
+const drag = ref<{ pointerId: number; start: number; end: number; clientX: number } | null>(null)
+
+function pointerRatio(event: PointerEvent): number {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const ratio = ((event.clientX - rect.left) / (rect.width || 1) - plotLeftFrac.value) / plotSpanFrac.value
+  return Math.max(0, Math.min(1, ratio))
 }
-function onLeave() { hover.set(null) }
+
+function timeAt(ratio: number) {
+  const { minT, maxT } = hoverModel.value
+  return minT + ratio * (maxT - minT)
+}
+
+function onHover(event: PointerEvent) {
+  const ratio = pointerRatio(event)
+  if (drag.value) {
+    if (event.pointerId === drag.value.pointerId) drag.value.end = ratio
+    return
+  }
+  const time = timeAt(ratio)
+  const times = sampleTimes.value
+  const first = times[0]
+  const last = times[times.length - 1]
+  if (first == null || last == null) return
+  let low = 0
+  let high = times.length - 1
+  while (low < high) {
+    const mid = (low + high) >>> 1
+    if (times[mid]! < time) low = mid + 1
+    else high = mid
+  }
+  const next = times[low]!
+  const previous = times[low - 1]
+  if (stackedMode.value) {
+    const bucket = next <= time ? next : previous
+    hover.set(bucket != null && time < bucket + barInterval.value ? bucket : time, chartId)
+    return
+  }
+  const nearest = previous != null && time - previous < next - time ? previous : next
+  const canSnap = props.bucketSeconds
+    ? Math.abs(time - nearest) <= props.bucketSeconds / 2
+    : time >= first && time <= last
+  hover.set(canSnap ? nearest : time, chartId)
+}
+
+function onLeave() {
+  if (hover.activeId.value === chartId) hover.set(null)
+}
+onBeforeUnmount(onLeave)
+
+function onInspectKey(event: KeyboardEvent) {
+  const times = sampleTimes.value
+  if (!times.length) return
+  const current = hover.time.value
+  const first = times[0]!
+  const last = times[times.length - 1]!
+  switch (event.key) {
+    case 'Home': hover.set(first, chartId); break
+    case 'End': hover.set(last, chartId); break
+    case 'ArrowLeft': hover.set(current == null ? last : [...times].reverse().find(time => time < current) ?? first, chartId); break
+    case 'ArrowRight': hover.set(current == null ? first : times.find(time => time > current) ?? last, chartId); break
+    case 'Escape':
+      if (hover.activeId.value !== chartId) return
+      onLeave()
+      break
+    default: return
+  }
+  event.preventDefault()
+  event.stopPropagation()
+}
+
+function startZoom(event: PointerEvent) {
+  if (!props.zoomable || !event.isPrimary || event.button !== 0 || !hasSamples.value) return
+  const start = pointerRatio(event)
+  drag.value = { pointerId: event.pointerId, start, end: start, clientX: event.clientX }
+  onLeave()
+  const plot = event.currentTarget as HTMLElement
+  plot.setPointerCapture(event.pointerId)
+}
+
+function finishZoom(event: PointerEvent) {
+  const selection = drag.value
+  if (!selection || event.pointerId !== selection.pointerId) return
+  drag.value = null
+  const end = pointerRatio(event)
+  const from = timeAt(Math.min(selection.start, end))
+  const to = timeAt(Math.max(selection.start, end))
+  if (Math.abs(event.clientX - selection.clientX) >= 8 && to > from) {
+    emit('rangeSelect', { from, to })
+  } else onHover(event)
+}
+
+function cancelZoom(event: PointerEvent) {
+  if (drag.value?.pointerId === event.pointerId) drag.value = null
+}
 </script>
 
 <template>
-  <div class="ts-widget">
-    <div class="ts-plot">
+  <div class="ts-widget" @pointerleave="onLeave">
+    <div
+      ref="plotElement"
+      class="ts-plot"
+      :tabindex="hasSamples ? 0 : undefined"
+      :role="hasSamples ? 'group' : undefined"
+      :aria-label="hasSamples ? 'Chart. Use arrow keys to inspect samples.' : undefined"
+      @pointermove="onHover"
+      @pointerdown="startZoom"
+      @pointerup="finishZoom"
+      @pointercancel="cancelZoom"
+      @lostpointercapture="cancelZoom"
+      @keydown="onInspectKey"
+      @blur="onLeave"
+    >
       <!-- ── Multi-series (metrics/PromQL) mode ── -->
-      <svg v-if="seriesMode" :viewBox="`0 0 ${svgWidth} ${svgHeight}`" preserveAspectRatio="none" class="ch-svg ch-animate ts-svg" @pointermove="onHover" @pointerleave="onLeave">
+      <svg v-if="seriesMode" :viewBox="`0 0 ${svgWidth} ${svgHeight}`" preserveAspectRatio="none" class="ch-svg ch-animate ts-svg" aria-hidden="true">
         <line v-for="tick in seriesYTicks" :key="'sy' + tick.value" :x1="padLeft" :y1="tick.y" :x2="svgWidth - padRight" :y2="tick.y" :class="['ch-grid', { 'ch-grid--baseline': tick.value === 0 }]" />
         <line v-for="xl in seriesXLabels" :key="'sv' + xl.x" :x1="xl.x" :y1="padTop" :x2="xl.x" :y2="padTop + plotHeight" class="ch-grid" />
         <rect
@@ -476,6 +608,11 @@ function onLeave() { hover.set(null) }
           :stroke-dasharray="sp.lineStyle === 'dashed' ? '4 3' : undefined"
           :style="{ color: sp.color, opacity: sp.opacity }"
         />
+        <template v-for="(sp, i) in seriesPaths" :key="'point' + i">
+          <path v-if="sp.point" :d="`M${sp.point[0]},${sp.point[1]}h0`"
+            :stroke="sp.color" :opacity="sp.opacity"
+            stroke-width="4" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+        </template>
         <!-- Threshold reference lines -->
         <g v-for="(th, i) in thresholdLines" :key="'th' + i">
           <line :x1="padLeft" :y1="th.y" :x2="svgWidth - padRight" :y2="th.y" :stroke="th.color" stroke-width="1" stroke-dasharray="5,4" vector-effect="non-scaling-stroke" />
@@ -490,7 +627,7 @@ function onLeave() { hover.set(null) }
       </svg>
 
       <!-- ── Single-series (spans count) mode ── -->
-      <svg v-if="!seriesMode" :viewBox="`0 0 ${svgWidth} ${svgHeight}`" preserveAspectRatio="none" class="ch-svg ch-animate ts-svg" @pointermove="onHover" @pointerleave="onLeave">
+      <svg v-if="!seriesMode" :viewBox="`0 0 ${svgWidth} ${svgHeight}`" preserveAspectRatio="none" class="ch-svg ch-animate ts-svg" aria-hidden="true">
         <!-- Y grid lines -->
         <line
           v-for="tick in yTicks"
@@ -510,6 +647,8 @@ function onLeave() { hover.set(null) }
         <!-- Area fill + line -->
         <path v-if="showFill && areaPath" :d="areaPath" class="ch-area" style="color: var(--amber)" />
         <path v-if="linePath" :d="linePath" class="ch-line ts-line" style="color: var(--amber)" />
+        <path v-if="seriesPoints.length === 1" :d="linePath + 'h0'" stroke="var(--amber)"
+          stroke-width="4" stroke-linecap="round" vector-effect="non-scaling-stroke" />
         <!-- Threshold reference lines -->
         <g v-for="(th, i) in thresholdLines" :key="'th' + i">
           <line :x1="padLeft" :y1="th.y" :x2="svgWidth - padRight" :y2="th.y" :stroke="th.color" stroke-width="1" stroke-dasharray="5,4" vector-effect="non-scaling-stroke" />
@@ -578,20 +717,15 @@ function onLeave() { hover.set(null) }
         :style="{ left: crosshairLeftPct + '%', top: plotTopPct + '%', height: plotHeightPct + '%' }"
       ></div>
 
-      <!-- Hover tooltip (this chart's value(s) at the hovered time) -->
-      <div
-        v-if="tooltip"
-        class="ts-tooltip"
-        :class="{ 'ts-tooltip--flip': tooltip.flip }"
-        :style="{ left: tooltip.leftPct + '%', top: plotTopPct + '%' }"
-      >
-        <div class="ts-tt-time mono">{{ tooltip.label }}</div>
-        <div v-for="(r, i) in tooltip.rows" :key="i" class="ts-tt-row">
-          <span class="ts-tt-dot" :style="{ background: r.color }"></span>
-          <span class="ts-tt-name">{{ r.name }}</span>
-          <span class="ts-tt-val mono">{{ r.value }}</span>
-        </div>
-      </div>
+      <template v-if="crosshairLeftPct != null">
+        <span v-for="(marker, index) in markers" :key="index" class="ts-marker"
+          :style="{ left: crosshairLeftPct + '%', top: marker.top + '%', background: marker.color }" />
+      </template>
+      <div v-if="drag" class="ts-selection" :style="{
+        left: (plotLeftFrac + Math.min(drag.start, drag.end) * plotSpanFrac) * 100 + '%',
+        width: Math.abs(drag.end - drag.start) * plotSpanFrac * 100 + '%',
+        top: plotTopPct + '%', height: plotHeightPct + '%',
+      }" aria-hidden="true" />
 
       <span v-if="!hasSamples && thresholdLines.length" class="ts-no-samples mono">No samples</span>
       <EmptyState
@@ -603,11 +737,14 @@ function onLeave() { hover.set(null) }
       />
     </div>
 
-    <div v-if="legendItems.length" class="ts-legend">
+    <div v-if="legendItems.length" class="ts-legend" :class="{ 'ts-legend--inspecting': readout }"
+      tabindex="0" aria-label="Chart values" @blur="onLeave">
+      <time v-if="readout" class="ts-readout-time">{{ readout.label }}</time>
       <span v-for="(lg, i) in legendItems" :key="'lg' + i" class="ts-legend-item">
         <span class="ts-legend-dot" :style="{ background: lg.color }"></span>
-        <span class="ts-legend-name">{{ lg.name }}</span>
-        <span v-if="lg.last" class="ts-legend-val mono">{{ lg.last }}</span>
+        <span class="ts-legend-name" :title="lg.name">{{ lg.name }}</span>
+        <span v-if="readout" class="ts-legend-val mono">{{ readout.values[i] == null ? '—' : fmtAxisU(readout.values[i]!) }}</span>
+        <span v-else-if="lg.last" class="ts-legend-val mono">{{ lg.last }}</span>
       </span>
     </div>
   </div>

@@ -255,15 +255,15 @@
 .sd-grid-line { stroke: var(--border-subtle); }
 .sd-axis-label { fill: var(--text-muted); font-family: var(--font-mono); }
 .sd-area.sd-c-rate { fill: rgba(59, 130, 246, 0.12); }
-.sd-line.sd-c-rate { fill: none; stroke: var(--amber); stroke-width: 1.5; }
+.sd-line.sd-c-rate { fill: none; stroke: var(--amber); }
 .sd-area.sd-c-error { fill: rgba(229, 88, 79, 0.12); }
-.sd-line.sd-c-error { fill: none; stroke: var(--error); stroke-width: 1.5; }
-.sd-line.sd-c-avg { fill: none; stroke: #3b82f6; stroke-width: 1.5; }
-.sd-line.sd-c-p50 { fill: none; stroke: var(--ok); stroke-width: 1.5; }
-.sd-line.sd-c-p95 { fill: none; stroke: var(--amber); stroke-width: 1.5; }
-.sd-line.sd-c-p99 { fill: none; stroke: var(--error); stroke-width: 1.5; }
+.sd-line.sd-c-error { fill: none; stroke: var(--error); }
+.sd-line.sd-c-avg { fill: none; stroke: #3b82f6; }
+.sd-line.sd-c-p50 { fill: none; stroke: var(--ok); }
+.sd-line.sd-c-p95 { fill: none; stroke: var(--amber); }
+.sd-line.sd-c-p99 { fill: none; stroke: var(--error); }
 .sd-area.sd-c-sli { fill: rgba(74, 222, 128, 0.08); }
-.sd-line.sd-c-sli { fill: none; stroke: var(--ok); stroke-width: 1.5; }
+.sd-line.sd-c-sli { fill: none; stroke: var(--ok); }
 .sd-target-line {
   stroke: var(--amber);
   stroke-width: 1;

@@ -83,7 +83,7 @@ for (const mode of ['logs', 'traces', 'spans']) {
       await page.goto(`/?mode=${mode}&t=60`)
       const panel = page.locator('.signal-timeline')
       const plot = panel.locator('.timeline-bars')
-      const readout = panel.locator('.timeline-tooltip')
+      const readout = panel.locator('.timeline-readout-time')
       await expect(plot).toBeVisible()
       await plot.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }))
       const plotBox = (await plot.boundingBox())!
@@ -92,7 +92,7 @@ for (const mode of ['logs', 'traces', 'spans']) {
         await expect(readout).toBeVisible()
         await expect(panel.locator('.timeline-column--active')).toHaveCount(1)
         const detailsBox = (await readout.boundingBox())!
-        expect(detailsBox.y + detailsBox.height <= plotBox.y || detailsBox.y >= plotBox.y + plotBox.height).toBe(true)
+        expect(detailsBox.y).toBeGreaterThanOrEqual(plotBox.y + plotBox.height)
         expect(detailsBox.y).toBeGreaterThanOrEqual(0)
         const panelBox = (await panel.boundingBox())!
         expect(detailsBox.x).toBeGreaterThanOrEqual(panelBox.x)
@@ -101,33 +101,24 @@ for (const mode of ['logs', 'traces', 'spans']) {
       }
       const spike = panel.locator('.timeline-column').filter({ has: page.locator('.timeline-stack') }).nth(30)
       await spike.hover()
-      await expect(readout).toContainText('9,500')
-      await expect(readout).toContainText('500')
+      await expect(panel.locator('.timeline-readout')).toContainText('9,500')
+      await expect(panel.locator('.timeline-readout')).toContainText('500')
       await page.screenshot({ path: testInfo.outputPath(`${mode}-volume-inspection-${width}.png`) })
       await page.mouse.move(plotBox.x, plotBox.y - 10)
       await expect(readout).toBeHidden()
       await plot.focus()
       await page.keyboard.press('Home')
       await expect(readout).toBeVisible()
-      const firstTime = await readout.locator('.timeline-tooltip-time').innerText()
+      const firstTime = await readout.innerText()
       await page.keyboard.press('ArrowRight')
-      await expect(readout.locator('.timeline-tooltip-time')).not.toHaveText(firstTime)
+      await expect(readout).not.toHaveText(firstTime)
       await page.keyboard.press('Escape')
       await expect(readout).toBeHidden()
       await page.keyboard.press('End')
       await expect(readout).toBeVisible()
       await page.keyboard.press('Tab')
       await expect(readout).toBeHidden()
-      // Near the viewport top, put the popup below the plot instead of clipping it.
-      await plot.focus()
-      await plot.evaluate(el => el.scrollIntoView({ block: 'start', behavior: 'instant' }))
-      await page.keyboard.press('Home')
-      await expect(readout).toHaveClass(/timeline-tooltip--below/)
-      const topPlot = (await plot.boundingBox())!
-      const belowPopup = (await readout.boundingBox())!
-      expect(belowPopup.y).toBeGreaterThanOrEqual(topPlot.y + topPlot.height)
-      await page.keyboard.press('Escape')
-      // The floating tooltip must not intercept zoom selection.
+      // Inspecting a bucket must leave the drag target unobstructed.
       await plot.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }))
       const dragBox = (await plot.boundingBox())!
       await page.mouse.move(dragBox.x + dragBox.width * 0.2, dragBox.y + 30)
@@ -160,12 +151,12 @@ for (const mode of ['traces', 'logs']) {
     // Open the row preview without first opening the separate detail panel.
     await page.locator('.et-trace-link').first().click()
     const preview = page.locator('.inline-trace-preview')
-    const bars = preview.locator('.inline-wf-bar')
+    const bars = preview.locator('.tw-bar')
     await expect(bars).toHaveCount(6)
     await expect(bars.nth(0)).toHaveCSS('background-color', 'rgb(59, 130, 246)')
     await expect(bars.nth(1)).toHaveCSS('background-color', 'rgb(71, 184, 129)')
     await expect(bars.nth(2)).toHaveCSS('background-color', 'rgb(91, 141, 217)')
-    await expect(preview.locator('.inline-wf-error')).toHaveCount(3)
+    await expect(preview.locator('.tw-row-error')).toHaveCount(3)
     const inlineColors = await bars.evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor))
     expect(new Set(inlineColors.slice(3)).size).toBe(1)
     expect(inlineColors[3]).not.toBe(inlineColors[1])
@@ -176,6 +167,15 @@ for (const mode of ['traces', 'logs']) {
     const fullBars = page.locator('.tw-bar')
     await expect(fullBars).toHaveCount(6)
     expect(await fullBars.evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor))).toEqual(inlineColors)
+    const waterfall = page.locator('.waterfall-panel .tw')
+    const overview = waterfall.getByRole('img', { name: 'Whole trace overview' })
+    await expect(overview).toBeVisible()
+    await waterfall.getByRole('row').filter({ hasText: 'GET /work/1' }).click()
+    await waterfall.getByRole('button', { name: 'Focus selected span' }).click()
+    await expect(overview.locator('.tw-overview-range')).toBeVisible()
+    await expect(waterfall.locator('.tw-readout')).toContainText('hidden')
+    await waterfall.getByRole('button', { name: 'Full trace', exact: true }).click()
+    await expect(fullBars).toHaveCount(6)
   })
 }
 

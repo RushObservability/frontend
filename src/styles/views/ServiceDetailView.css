@@ -220,7 +220,7 @@
 .svc-attach-tile.warn .svc-attach-sub { color: var(--warning); }
 
 /* Charts grid */
-.svc-charts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-4); }
+.svc-charts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
 .svc-chart-card-wide { grid-column: span 2; }
 /* svc-chart-card is now a PanelCard; tighten its body and lay out its content
    as a column (chart-body, legend, time axis). */
@@ -230,31 +230,6 @@
   flex-direction: column;
 }
 .svc-charts-grid .svc-chart-card :deep(.ts-widget) { min-height: 168px; }
-.svc-chart-svg { width: 100%; height: 100px; }
-.svc-chart-time { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 4px; }
-
-/* Interactive chart layout */
-.chart-body { display: flex; gap: 0; cursor: crosshair; }
-.chart-y { display: flex; flex-direction: column; justify-content: space-between; width: 38px; flex-shrink: 0; padding: 2px 0; }
-.y-label { font-size: 9px; font-family: var(--font-mono); color: var(--text-muted); text-align: right; padding-right: 6px; line-height: 1; }
-.chart-area { flex: 1; position: relative; min-width: 0; }
-.grid-line { stroke: var(--border-subtle); stroke-width: 1; stroke-dasharray: 4 3; }
-/* Deploy markers: neutral vertical line + top flag, so they read as annotations
-   rather than competing with the amber/red series. vector-effect keeps the
-   1px stroke crisp despite preserveAspectRatio="none" x-scaling. */
-.deploy-marker-line { stroke: var(--text-secondary); stroke-width: 1; stroke-dasharray: 2 2; opacity: 0.55; vector-effect: non-scaling-stroke; }
-.deploy-marker-flag { fill: var(--text-secondary); opacity: 0.7; }
-.svc-chart-svg g rect[fill="transparent"] { cursor: help; }
-.crosshair { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text-muted); opacity: 0.4; pointer-events: none; transform: translateX(-50%); }
-.chart-tip { position: absolute; bottom: calc(100% + 6px); transform: translateX(-50%); background: var(--bg-overlay); border: 1px solid var(--border-default); border-radius: var(--r-sm, 4px); padding: 4px 8px; pointer-events: none; white-space: nowrap; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 1px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
-.tip-val { font-size: 12px; font-weight: 600; font-family: var(--font-mono); color: var(--text-primary); }
-.tip-time { font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); }
-.chart-tip-multi { align-items: flex-start; gap: 2px; padding: 5px 10px; }
-.chart-tip-multi .tip-time { margin-bottom: 2px; }
-.tip-row { display: flex; align-items: center; gap: 5px; font-size: 11px; font-family: var(--font-mono); color: var(--text-primary); }
-.latency-legend { display: flex; gap: 12px; padding: 0 var(--sp-3); margin-top: -2px; margin-bottom: 4px; }
-.latency-legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-muted); }
-.latency-dot { width: 8px; height: 3px; border-radius: 1px; flex-shrink: 0; }
 
 /* Mini service map */
 .svc-map-empty { font-size: 11px; padding: var(--sp-4) 0; text-align: center; }
@@ -955,21 +930,6 @@
   border-top: 1.5px dashed var(--text-muted); opacity: 0.5;
 }
 .cmp-toggle.active .cmp-swatch { opacity: 0.9; }
-/* Ghost overlay line for the prior period on the bar charts. non-scaling-stroke
-   keeps the dash crisp under preserveAspectRatio="none". */
-.cmp-line {
-  fill: none; stroke: var(--text-secondary); stroke-width: 1.25;
-  stroke-dasharray: 3 2; opacity: 0.45; vector-effect: non-scaling-stroke;
-}
-/* Tooltip prev value + delta */
-.tip-prev { font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); }
-.tip-delta { font-size: 10px; font-weight: 600; font-family: var(--font-mono); }
-.tip-delta.up { color: var(--error); }
-.tip-delta.down { color: var(--ok); }
-.tip-delta.flat { color: var(--text-muted); }
-.tip-row-prev { color: var(--text-muted); margin-left: 4px; opacity: 0.75; }
-.tip-prev-note { font-size: 8px; color: var(--text-muted); margin-top: 2px; font-family: var(--font-mono); }
-
 /* ═══ Dependency RED — service-map health legend + table ═══ */
 .svc-map-legend { display: flex; gap: 10px; justify-content: center; margin-top: 4px; }
 .mlg { display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--text-muted); }
@@ -990,11 +950,6 @@ button.dep-red-row:hover { background: var(--bg-hover, rgba(255,255,255,0.04)); 
 .dep-red-hdr:hover { background: transparent; color: var(--text-muted); }
 .dep-svc { display: flex; align-items: center; gap: 6px; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dep-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-
-/* ═══ Latency distribution (histogram) ═══ */
-.hist-axis { align-items: center; }
-.hist-legend { display: flex; gap: 10px; }
-.hist-legend-item { display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--text-muted); }
 
 /* ═══ Endpoint / Operation breakdown ═══ */
 .svc-endpoints { padding: var(--sp-3) var(--sp-4); margin-top: var(--sp-4); }
@@ -1178,4 +1133,24 @@ button.dep-red-row:hover { background: var(--bg-hover, rgba(255,255,255,0.04)); 
   .svc-time-series-meta { gap: 5px 12px; }
   .svc-time-database-head, .svc-time-database-row { grid-template-columns: minmax(0, 1fr) 54px 70px; }
   .svc-time-database-head span:last-child, .svc-time-database-row > span:last-child { display: none; }
+}
+
+.svc-chart-expand {
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.svc-chart-expand:hover:not(:disabled) { border-color: var(--accent); color: var(--text-primary); }
+.svc-chart-expand:disabled { opacity: .55; cursor: default; }
+.svc-chart-card-wide :deep(.ts-widget) { height: clamp(190px, 27vh, 290px); }
+
+@media (max-width: 720px) {
+  .svc-charts-grid { grid-template-columns: minmax(0, 1fr); }
+  .svc-chart-card-wide { grid-column: 1; }
 }
