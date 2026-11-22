@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
 import { PanelCard, TablePanel, TimeSeriesPanel } from '../components/panels'
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal.vue'
 import DataTable from '../components/DataTable.vue'
+import MonitorEventEvidence from '../components/MonitorEventEvidence.vue'
+import { formatEvidenceReading, formatEvidenceThreshold, formatRuleVersion } from '../lib/alertEvidence'
+import { parseUtcTimestamp } from '../lib/utcTimestamp'
 import type { Monitor, MonitorEvent, MonitorPreview } from '../types'
 
 const props = defineProps<{
@@ -15,9 +18,11 @@ const props = defineProps<{
 const api = useApi()
 const { features } = useFeatures()
 const router = useRouter()
+const route = useRoute()
 
 const monitor = ref<Monitor | null>(null)
 const events = ref<MonitorEvent[]>([])
+const expandedEventId = computed(() => typeof route.query.event === 'string' ? route.query.event : null)
 const preview = ref<MonitorPreview | null>(null)
 const loading = ref(false)
 const showDeleteConfirm = ref(false)
@@ -103,7 +108,7 @@ function typeLabel(type: string): string {
 function formatDate(ts: string | null): string {
   if (!ts) return '-'
   try {
-    return new Date(ts).toLocaleString('en-US', {
+    return new Date(parseUtcTimestamp(ts)).toLocaleString('en-US', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
     })
   } catch { return ts }
@@ -111,6 +116,22 @@ function formatDate(ts: string | null): string {
 
 function formatEventNumber(value: number | null): string {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '—'
+}
+
+function eventValue(event: MonitorEvent): string {
+  return event.evidence ? formatEvidenceReading(event.value, event.evidence.query) : formatEventNumber(event.value)
+}
+
+function eventThreshold(event: MonitorEvent): string {
+  return event.evidence ? formatEvidenceThreshold(event) : formatEventNumber(event.threshold)
+}
+
+function canShowEvidence(event: MonitorEvent): boolean {
+  return Boolean(event.evidence) || event.new_state === 'alert' || event.new_state === 'warn'
+}
+
+function toggleEvidence(event: MonitorEvent) {
+  router.replace({ query: { ...route.query, event: expandedEventId.value === event.id ? undefined : event.id } })
 }
 
 const groupEntries = computed(() => {
@@ -162,18 +183,18 @@ const eventPanelRows = computed<Record<string, unknown>[]>(() => events.value.ma
 // State timeline segments
 const timelineSegments = computed(() => {
   if (!events.value.length) return []
-  const sorted = [...events.value].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+  const sorted = [...events.value].sort((a, b) => parseUtcTimestamp(a.created_at) - parseUtcTimestamp(b.created_at))
   const segments: { state: string; startPct: number; widthPct: number }[] = []
   if (sorted.length === 0) return segments
 
-  const earliest = new Date(sorted[0]!.created_at).getTime()
+  const earliest = parseUtcTimestamp(sorted[0]!.created_at)
   const latest = Date.now()
   const range = latest - earliest || 1
 
   for (let i = 0; i < sorted.length; i++) {
     const ev = sorted[i]!
-    const start = new Date(ev.created_at).getTime()
-    const end = i < sorted.length - 1 ? new Date(sorted[i + 1]!.created_at).getTime() : latest
+    const start = parseUtcTimestamp(ev.created_at)
+    const end = i < sorted.length - 1 ? parseUtcTimestamp(sorted[i + 1]!.created_at) : latest
     segments.push({
       state: ev.new_state,
       startPct: ((start - earliest) / range) * 100,
@@ -278,6 +299,7 @@ function closeDeleteConfirm() {
               <span>Created {{ formatDate(monitor.created_at) }}</span>
               <span v-if="monitor.last_eval_at"> &middot; Last evaluated {{ formatDate(monitor.last_eval_at) }}</span>
               <span v-if="monitor.priority"> &middot; P{{ monitor.priority }}</span>
+              <span v-if="monitor.rule_version !== undefined" :title="String(monitor.rule_version)"> &middot; Rule version {{ formatRuleVersion(monitor.rule_version) }}</span>
             </div>
           </div>
         </div>
@@ -425,11 +447,25 @@ function closeDeleteConfirm() {
                 {{ formatGroupKey(ev.group_key) }}
               </div>
               <div class="event-values mono text-muted">
-                value <span>{{ formatEventNumber(ev.value) }}</span>
+                value <span>{{ eventValue(ev) }}</span>
                 <span class="event-value-divider">/</span>
-                threshold <span>{{ formatEventNumber(ev.threshold) }}</span>
+                threshold <span>{{ eventThreshold(ev) }}</span>
               </div>
               <p v-if="ev.message" class="event-message" :title="ev.message">{{ ev.message }}</p>
+              <button
+                v-if="canShowEvidence(ev)"
+                type="button"
+                class="btn btn-sm event-evidence-button"
+                :aria-expanded="expandedEventId === ev.id"
+                :aria-label="`Evidence for ${formatDate(ev.created_at)}, ${formatGroupKey(ev.group_key)}`"
+                @click="toggleEvidence(ev)"
+              >Evidence <span aria-hidden="true">{{ expandedEventId === ev.id ? '▴' : '▾' }}</span></button>
+              <MonitorEventEvidence
+                v-if="expandedEventId === ev.id && canShowEvidence(ev)"
+                class="rail-evidence"
+                :event="ev"
+                :current-version="monitor.rule_version"
+              />
             </article>
           </div>
         </PanelCard>
@@ -457,23 +493,41 @@ function closeDeleteConfirm() {
                 <th>Threshold</th>
                 <th>Group</th>
                 <th>Message</th>
+                <th aria-label="Actions"></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="ev in events" :key="ev.id">
-                <td class="mono text-muted">{{ formatDate(ev.created_at) }}</td>
-                <td>
-                  <span class="transition-badge">
-                    <span :style="{ color: stateColor(ev.prev_state) }">{{ stateLabel(ev.prev_state) }}</span>
-                    <span class="transition-arrow">&rarr;</span>
-                    <span :style="{ color: stateColor(ev.new_state) }">{{ stateLabel(ev.new_state) }}</span>
-                  </span>
-                </td>
-                <td class="mono">{{ formatEventNumber(ev.value) }}</td>
-                <td class="mono text-muted">{{ formatEventNumber(ev.threshold) }}</td>
-                <td class="mono text-muted">{{ ev.group_key || '-' }}</td>
-                <td class="event-message-cell text-secondary">{{ ev.message || '-' }}</td>
-              </tr>
+              <template v-for="ev in events" :key="ev.id">
+                <tr :class="{ 'event-selected': expandedEventId === ev.id }">
+                  <td class="mono text-muted">{{ formatDate(ev.created_at) }}</td>
+                  <td>
+                    <span class="transition-badge">
+                      <span :style="{ color: stateColor(ev.prev_state) }">{{ stateLabel(ev.prev_state) }}</span>
+                      <span class="transition-arrow">&rarr;</span>
+                      <span :style="{ color: stateColor(ev.new_state) }">{{ stateLabel(ev.new_state) }}</span>
+                    </span>
+                  </td>
+                  <td class="mono">{{ eventValue(ev) }}</td>
+                  <td class="mono text-muted">{{ eventThreshold(ev) }}</td>
+                  <td class="mono text-muted">{{ ev.group_key || '-' }}</td>
+                  <td class="event-message-cell text-secondary">{{ ev.message || '-' }}</td>
+                  <td class="event-action">
+                    <button
+                      v-if="canShowEvidence(ev)"
+                      type="button"
+                      class="btn btn-sm event-evidence-button"
+                      :aria-expanded="expandedEventId === ev.id"
+                      :aria-label="`Evidence for ${formatDate(ev.created_at)}`"
+                      @click="toggleEvidence(ev)"
+                    >Evidence <span aria-hidden="true">{{ expandedEventId === ev.id ? '▴' : '▾' }}</span></button>
+                  </td>
+                </tr>
+                <tr v-if="expandedEventId === ev.id && canShowEvidence(ev)" class="event-evidence-row">
+                  <td colspan="7">
+                    <MonitorEventEvidence :event="ev" :current-version="monitor.rule_version" />
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </DataTable>
         </div>
@@ -810,6 +864,16 @@ function closeDeleteConfirm() {
   margin-bottom: 0;
   border-bottom: 0;
 }
+.event-evidence-button {
+  color: var(--accent);
+  white-space: nowrap;
+}
+.event-evidence-button[aria-expanded="true"],
+.events-table tr.event-selected { background: var(--accent-soft); }
+.events-table td.event-action { width: 1%; }
+.events-table tr.event-evidence-row td { padding: var(--sp-2); }
+.event-rail .event-evidence-button,
+.rail-evidence { margin-top: var(--sp-2); }
 .event-rail-meta {
   display: flex;
   align-items: center;

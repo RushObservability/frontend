@@ -1548,11 +1548,13 @@ export interface Monitor {
   created_by: string
   created_at: string
   updated_at: string
+  rule_version?: number
 }
 
 export interface MonitorEvent {
   id: string
   monitor_id: string
+  tenant_id?: string
   group_key: string
   prev_state: string
   new_state: string
@@ -1560,6 +1562,24 @@ export interface MonitorEvent {
   threshold: number | null
   message: string
   created_at: string
+  evidence?: MonitorEvidence | null
+}
+
+export type MonitorEvidenceQuery =
+  | { kind: 'apm'; service: string; metric: string; endpoint_filter?: string | null }
+  | { kind: 'log'; search: string; service: string; severities: string[]; filters: Array<{ field: string; op: string; value: string }> }
+  | { kind: 'promql'; expression: string; series: Record<string, string> | null }
+  | { kind: 'metric'; metric_name: string; aggregation: string; filters: Array<{ key: string; value: string }> }
+  | { kind: 'composite'; formula: string; members: Record<string, boolean> }
+
+export interface MonitorEvidence {
+  rule_version: number
+  rule_name: string
+  comparator: MonitorComparator
+  window_start: string | null
+  evaluated_at: string
+  group_by: string[]
+  query: MonitorEvidenceQuery
 }
 
 export interface MonitorPreview {
