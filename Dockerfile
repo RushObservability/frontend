@@ -3,7 +3,7 @@
 # discarded, so its footprint doesn't affect the final image's CVE posture).
 # The Vue bundle is architecture-independent. Keep this stage on the BuildKit
 # host so multi-platform builds do not run Node, vue-tsc, or Vite through QEMU.
-FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/node@sha256:efeb9fd6c61fd20b7c634531e0a746d26204bdc2df13e7ea57ab69aad349a900 AS builder
+FROM --platform=$BUILDPLATFORM cgr.dev/chainguard/node@sha256:3fb5318a58807dec0f2ece547efbe8d62c67b7b2fd91a16795b98651d6385dbe AS builder
 # Chainguard node runs as non-root by default; the build writes to /app and the
 # npm cache, so run this (discarded) stage as root to avoid permission errors.
 USER root
@@ -26,7 +26,7 @@ RUN npm run build
 # The runtime image (Chainguard nginx) is distroless — no shell, and we can't RUN
 # in it. Stage a busybox multi-call binary + the applet symlinks the entrypoint
 # needs (sh, sed, mkdir, grep) so it can validate and render config at start.
-FROM cgr.dev/chainguard/busybox@sha256:f051b3d301e122b956747646c8a19048cc77d3a572e1bad5c3756fda8d128ad2 AS tools
+FROM cgr.dev/chainguard/busybox@sha256:9ea14a743061993ca9fbf5f5ad7215ede3646d142754398f456250e51c23175a AS tools
 # The busybox image also runs non-root, so assemble the tools under /tmp (writable).
 RUN ["/bin/sh", "-c", "set -e; mkdir -p /tmp/tools; cp /bin/busybox /tmp/tools/busybox; for a in sh sed mkdir grep; do ln -s busybox /tmp/tools/$a; done"]
 

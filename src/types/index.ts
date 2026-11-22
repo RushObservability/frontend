@@ -1698,6 +1698,39 @@ export interface MetricFirewallInput {
   match_label_value_regex: boolean
   drop_label_pattern: string
   drop_label_regex: boolean
+  expected_policy_revision?: string
+}
+
+export interface MetricFirewallSample {
+  metric_name: string
+  service_name?: string
+  labels?: Record<string, string>
+}
+
+export interface MetricFirewallOutcome {
+  labels: Record<string, string> | null
+  matched_rules: string[]
+}
+
+export interface MetricFirewallPreviewResult {
+  policy_revision: string
+  sampled: number
+  duplicates: number
+  changed: number
+  blocked: number
+  output_identities: number
+  rows: Array<{
+    input: MetricFirewallSample
+    current: MetricFirewallOutcome
+    proposed: MetricFirewallOutcome
+    collision_id: number | null
+  }>
+  collisions: Array<{
+    id: number
+    identity: Record<string, string>
+    series_count: number
+    introduced: boolean
+  }>
 }
 
 // ── Audit log (admin-only, tamper-evident) ──
