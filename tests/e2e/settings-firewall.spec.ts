@@ -32,7 +32,7 @@ test('previews a firewall draft and retests after a concurrent policy change', a
         rows: body.samples.slice(0, 2).map((input: MetricFirewallSample) => ({
           input,
           current: { labels: input.labels ?? {}, matched_rules: [] },
-          proposed: { labels: { route: '/charge' }, matched_rules: [body.rule.name] },
+          proposed: { labels: { service_name: 'payments', route: '/charge' }, matched_rules: [body.rule.name] },
           collision_id: 1,
         })),
       }
@@ -66,6 +66,8 @@ test('previews a firewall draft and retests after a concurrent policy change', a
   await expect(drawer.getByText('Collision 1', { exact: true })).toHaveCount(2)
   expect(previews[0].rule.drop_label_pattern).toBe('pod_uid')
   expect(previews[0].samples).toHaveLength(6)
+  expect(previews[0].samples[0].labels?.service_name).toBe('payments')
+  expect(previews[0].samples[0].service_name).toBeUndefined()
   expect(saves).toHaveLength(0)
   await page.setViewportSize({ width: 390, height: 844 })
   await expect.poll(() => drawer.locator('.fw-test-table').evaluate(

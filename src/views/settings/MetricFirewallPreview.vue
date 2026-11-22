@@ -21,12 +21,12 @@ const api = useApi()
 const { activeTenant } = useTenant()
 
 const examples = [
-  { metric_name: 'http_requests_total', service_name: 'payments', labels: { route: '/charge', pod_uid: 'p-15' } },
-  { metric_name: 'http_requests_total', service_name: 'payments', labels: { route: '/charge', pod_uid: 'p-47' } },
-  { metric_name: 'http_requests_total', service_name: 'payments', labels: { route: '/refund', pod_uid: 'p-15' } },
-  { metric_name: 'http_requests_total', service_name: 'orders', labels: { route: '/orders', pod_uid: 'o-31' } },
-  { metric_name: 'http_requests_total', service_name: 'gateway', labels: { route: '/health' } },
-  { metric_name: 'process_cpu_seconds_total', service_name: 'payments', labels: { pod_uid: 'p-15' } },
+  { metric_name: 'http_requests_total', labels: { service_name: 'payments', route: '/charge', pod_uid: 'p-15' } },
+  { metric_name: 'http_requests_total', labels: { service_name: 'payments', route: '/charge', pod_uid: 'p-47' } },
+  { metric_name: 'http_requests_total', labels: { service_name: 'payments', route: '/refund', pod_uid: 'p-15' } },
+  { metric_name: 'http_requests_total', labels: { service_name: 'orders', route: '/orders', pod_uid: 'o-31' } },
+  { metric_name: 'http_requests_total', labels: { service_name: 'gateway', route: '/health' } },
+  { metric_name: 'process_cpu_seconds_total', labels: { service_name: 'payments', pod_uid: 'p-15' } },
 ]
 const exampleText = JSON.stringify(examples, null, 2)
 const sampleText = ref(exampleText)
@@ -147,8 +147,9 @@ const newCollisions = computed(() => result.value?.collisions.filter(collision =
       </summary>
       <div class="fw-test-sample-fields">
         <label for="fw-sample-input">
-          Paste up to 100 pre-firewall series. Each needs <code>metric_name</code> and can include
-          <code>service_name</code> and a <code>labels</code> object.
+          Paste up to 100 pre-firewall series with <code>metric_name</code> and an optional <code>labels</code> object.
+          Put a Prometheus <code>service_name</code> label inside <code>labels</code>.
+          Use the optional top-level <code>service_name</code> for service metadata stored separately, such as Prometheus <code>job</code>.
         </label>
         <textarea id="fw-sample-input" v-model="sampleText" class="form-input mono" rows="8" spellcheck="false" />
         <button type="button" class="fw-test-button" @click="sampleText = exampleText">Load example sample</button>
