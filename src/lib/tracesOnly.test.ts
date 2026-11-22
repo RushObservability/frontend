@@ -27,7 +27,7 @@ describe('traces-only span-mode fallback', () => {
 
   it('shows the hint and a span-mode action when Traces only is empty', () => {
     expect(view).toContain('if (!isLogs && !results.value.length) void checkSpanModeFallback(activeFilters, searchParam)')
-    expect(view).toContain(':hint="spanModeFallback ? spanModeHint(spanModeFallback.count, spanModeFallback.capped) : null"')
+    expect(view).toContain(':hint="spanModeFallback ? spanModeHint(spanModeFallback.count, spanModeFallback.capped)')
     expect(view).toContain('@click="tracesOnly = false">Show matching spans</button>')
     expect(state).toContain('if (props.hint) return props.hint')
   })
@@ -61,6 +61,6 @@ describe('traces-only rows and chips', () => {
 
   it('renders the marker in the result row status cell', () => {
     expect(view).toContain('v-if="failedInsideTrace(row)"')
-    expect(view).toContain('return visibleFilters(filters.value).map(')
+    expect(view).toContain('return visibleFilters(filters.value)')
   })
 })

@@ -39,6 +39,7 @@ import type { ContextMenuEntry } from '../types/contextMenu'
 import { isErrorStatus } from '../lib/spanStatus'
 import { logStatusFacetFilters } from '../lib/logStatusFacets'
 import { failedInsideTrace, rowHasError, spanModeFilters, spanModeHint, visibleFilters } from '../lib/tracesOnly'
+import { ALERT_SCOPE_FIELD, alertTelemetryHint, evidenceFilters, readAlertScope, type AlertScope } from '../lib/alertEvidence'
 
 interface ExploreHistoryQuery {
   logViewId?: string
@@ -179,6 +180,9 @@ const expandedTraceSpans = computed(() => {
 
 // ═══ View mode: spans vs logs ═══
 const viewMode = ref<'spans' | 'logs'>('spans')
+const alertScope = ref<AlertScope | null>(null)
+const alertScopeFilters = computed(() => alertScope.value ? evidenceFilters(alertScope.value.query) : [])
+const alertScopeError = ref(false)
 // Start Explore at the request/trace level. Users can still switch to all
 // spans with the sidebar toggle (or the "a" keyboard shortcut).
 const tracesOnly = ref(true)
@@ -267,6 +271,10 @@ const liveNewIds = ref(new Set<string>())
 let livePrevIds = new Set<string>()
 
 function setViewMode(mode: 'spans' | 'logs') {
+  if (mode !== viewMode.value) {
+    alertScope.value = null
+    alertScopeError.value = false
+  }
   viewMode.value = mode
   const query = { ...route.query }
   if (mode === 'logs') {
@@ -277,6 +285,13 @@ function setViewMode(mode: 'spans' | 'logs') {
   router.replace({ query })
   // Always re-search when switching modes — refreshes both the list
   // AND the histogram (which uses a different endpoint per mode).
+  search({ skipHistory: true })
+}
+
+function clearAlertScope() {
+  if (alertScopeError.value) customRange.value = null
+  alertScope.value = null
+  alertScopeError.value = false
   search({ skipHistory: true })
 }
 
@@ -1189,6 +1204,8 @@ function getActiveFilters(): Filter[] {
     base = filters.value
   }
   const all = [...base, ...getQuickFilters()]
+  const scope = alertScope.value
+  if (scope) all.push({ field: ALERT_SCOPE_FIELD, op: '=', value: JSON.stringify(scope) })
   if (tracesOnly.value && viewMode.value === 'spans') {
     all.push({ field: 'parent_span_id', op: '=', value: '' })
   }
@@ -1213,7 +1230,8 @@ async function checkSpanModeFallback(activeFilters: Filter[], search: string | u
 }
 
 async function search(opts?: { skipHistory?: boolean }) {
-  if (logViewsLoading.value) return
+  if (logViewsLoading.value || alertScopeError.value
+    || (alertScope.value && (alertScope.value.query.kind === 'log') !== (viewMode.value === 'logs'))) return
   if (viewMode.value === 'logs' && logViewUnavailable.value) {
     stopLive(); activeSearchController?.abort()
     otelLogs.value = []; histogram.value = []; total.value = 0; nextCursor.value = null
@@ -1238,7 +1256,7 @@ async function search(opts?: { skipHistory?: boolean }) {
   const searchParam = searchText.value || undefined
 
   syncUrlState()
-  if (!opts?.skipHistory && (activeFilters.length > 0 || searchParam)) {
+  if (!opts?.skipHistory && !alertScope.value && (activeFilters.length > 0 || searchParam)) {
     pushHistory({
       filters: activeFilters,
       groupBy: groupByField.value || undefined,
@@ -1468,6 +1486,8 @@ async function restoreSavedQueryLink() {
 
 function loadHistoryEntry(entry: HistoryEntry<ExploreHistoryQuery>) {
   const q = entry.query
+  alertScope.value = null
+  alertScopeError.value = false
   selectedLogViewId.value = q.logViewId || ''
   customLogColumns.value = null
   // Restore filters into the search bar
@@ -3434,7 +3454,7 @@ function addExcludeFilter(field: string, value: string | number) {
 
 // Adapt the active (text-parsed) filters into QueryFilter shape for SavedQueries.
 const savedQueryFilters = computed<QueryFilter[]>(() =>
-  filters.value.map((f, i) => ({
+  filters.value.filter(f => f.field !== ALERT_SCOPE_FIELD).map((f, i) => ({
     id: `f-${i}`,
     field: f.field,
     op: f.op,
@@ -3455,7 +3475,7 @@ const activeFilterChips = computed(() => {
         value: f.value,
       }))
   }
-  return visibleFilters(filters.value).map((f, i) => ({
+  return visibleFilters(filters.value).filter(f => f.field !== ALERT_SCOPE_FIELD).map((f, i) => ({
     id: `filter-${i}`,
     label: `${f.field} ${f.op} ${f.value}`,
     field: f.field,
@@ -3834,6 +3854,7 @@ function buildQueryParams(): Record<string, string> {
   else p.mode = 'spans'
   if (viewMode.value === 'logs' && selectedLogViewId.value) p.log_view = selectedLogViewId.value
   if (viewMode.value === 'logs' && customLogColumns.value) p.log_columns = JSON.stringify(customLogColumns.value)
+  if (alertScope.value) p.alert_scope = JSON.stringify(alertScope.value)
   if (customRange.value) {
     p.from = customRange.value.from
     p.to = customRange.value.to
@@ -3894,6 +3915,7 @@ let restoringUrlState = true
 
 function syncUrlState() {
   if (restoringUrlState) return
+  if (alertScopeError.value) return
   const query = buildQueryParams()
   router.replace({ query })
 }
@@ -3930,6 +3952,12 @@ function restoreFromUrl() {
     customRange.value = { from: String(q.from), to: String(q.to) }
   } else if (q.t) {
     selectedPreset.value = Number(q.t) || 60
+  }
+  if (q.alert_scope !== undefined) {
+    alertScope.value = readAlertScope(q.alert_scope, viewMode.value)
+    alertScopeError.value = !alertScope.value
+      || ((q.from !== undefined || q.to !== undefined)
+        && (!customRange.value || !(Date.parse(customRange.value.from) < Date.parse(customRange.value.to))))
   }
   if (q.service) quickService.value = String(q.service)
   if (q.method) quickMethod.value = String(q.method)
@@ -4908,8 +4936,9 @@ watch(() => route.query.log_view, (id) => {
           <TimePicker v-model="selectedPreset" v-model:custom-range="customRange" />
         </template>
         <template #saved>
-          <AddToNotebookButton :build="notebookDraft" />
+          <AddToNotebookButton v-if="!alertScope" :build="notebookDraft" />
           <SavedQueries
+            v-if="!alertScope"
             ref="savedQueriesRef"
             :current-filters="savedQueryFilters"
             :current-group-by="groupByField"
@@ -4938,6 +4967,17 @@ watch(() => route.query.log_view, (id) => {
         </template>
       </ExploreSearchToolbar>
 
+      <div v-if="alertScopeError" class="log-view-warning" role="alert">
+        This alert link has an invalid time range or filter.
+        <button type="button" class="btn btn-sm" @click="clearAlertScope">Clear alert filter</button>
+      </div>
+      <div v-else-if="alertScope" class="log-view-context" aria-label="Saved alert filters">
+        <router-link :to="{ name: 'monitor-detail', params: { id: alertScope.monitor_id }, query: { event: alertScope.event_id } }">Alert evidence</router-link>
+        <code v-for="(filter, index) in alertScopeFilters" :key="index">{{ filter }}</code>
+        <code v-if="alertScope.group_key !== null">{{ alertScope.group_by.join(', ') }} = {{ alertScope.group_key || 'Empty value' }}</code>
+        <span v-if="(alertScope.query.kind === 'log') !== (viewMode === 'logs')" class="text-muted">This signal is unavailable in the current tenant.</span>
+        <button type="button" class="btn btn-sm" @click="clearAlertScope">Clear alert filter</button>
+      </div>
       <div v-if="viewMode === 'logs' && logViewsError" class="log-view-warning" role="alert">{{ logViewsError }} <button type="button" class="btn btn-sm" @click="loadLogViews().then(() => search({ skipHistory: true }))">Retry</button></div>
       <div v-if="savedQueryError" class="log-view-warning" role="alert">{{ savedQueryError }} <button type="button" class="btn btn-sm" @click="savedQueryError = ''">Dismiss</button></div>
       <div v-if="viewMode === 'logs' && selectedLogView" class="log-view-context">
@@ -5532,7 +5572,7 @@ watch(() => route.query.log_view, (id) => {
           :loading="searching"
           :error="viewMode !== 'logs' ? api.error.value : null"
           :has-results="viewMode === 'logs' ? logEntries.length > 0 : results.length > 0"
-          :hint="spanModeFallback ? spanModeHint(spanModeFallback.count, spanModeFallback.capped) : null"
+          :hint="spanModeFallback ? spanModeHint(spanModeFallback.count, spanModeFallback.capped) : alertScope ? alertTelemetryHint : null"
         >
           <template #action>
             <button v-if="spanModeFallback" type="button" class="btn btn-sm" @click="tracesOnly = false">Show matching spans</button>
@@ -5702,7 +5742,7 @@ watch(() => route.query.log_view, (id) => {
 
         <!-- ═══ Log Table (Logs mode) ═══ -->
         <div v-else-if="viewMode === 'logs'" class="event-table card" :class="{ 'log-wrap-mode': logWordWrap, 'custom-log-layout': customLogLayout }">
-          <ExploreResultsState v-if="!logEntries.length" mode="logs" :loading="false" :has-results="false">
+          <ExploreResultsState v-if="!logEntries.length" mode="logs" :loading="false" :has-results="false" :hint="alertScope ? alertTelemetryHint : null">
             <template #action><QueryDiagnosis v-if="exploreDiagnosticRequest && !searching && !api.error.value" :request="exploreDiagnosticRequest" /></template>
           </ExploreResultsState>
           <template v-else>

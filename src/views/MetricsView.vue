@@ -17,6 +17,7 @@ import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import { loneMetricName, metricSelector } from '../lib/promqlNames'
 import QueryDiagnosis from '../components/QueryDiagnosis.vue'
 import type { DiagnosticRequest } from '../lib/queryDiagnostics'
+import { alertTelemetryHint, matchesAlertSeries, readAlertSeries } from '../lib/alertEvidence'
 
 interface MetricsHistoryQuery {
   query: string
@@ -50,6 +51,8 @@ const viewMode = ref<'query' | 'explore'>('query')
 
 // ═══ Query state ═══
 const query = ref('')
+const alertEvent = ref<{ monitorId: string; eventId: string } | null>(null)
+const alertSeries = ref<Record<string, string> | null>(null)
 const activeTab = ref<'graph' | 'table'>('graph')
 const executing = ref(false)
 const errorMsg = ref('')
@@ -206,6 +209,7 @@ async function executeQuery(opts?: { skipHistory?: boolean }) {
   if (disposed) return
   if (!query.value.trim()) { clearQuery(); return }
   const expression = query.value.trim()
+  const scope = alertSeries.value
   cancelQuery()
   const generation = queryGeneration
   const controller = new AbortController()
@@ -220,7 +224,7 @@ async function executeQuery(opts?: { skipHistory?: boolean }) {
     suggestions.value = []
   }
 
-  if (!opts?.skipHistory) {
+  if (!opts?.skipHistory && !alertEvent.value) {
     pushHistory({ query: query.value, timePreset: selectedPreset.value, customRange: customRange.value ?? undefined })
   }
 
@@ -239,14 +243,14 @@ async function executeQuery(opts?: { skipHistory?: boolean }) {
       const data = await api.promQuery(expression, customRange.value ? end : undefined)
       if (data.resultType === 'vector') {
         if (!isCurrent()) return
-        vectorResults.value = data.result
+        vectorResults.value = data.result.filter(result => matchesAlertSeries(result.metric, scope))
       }
     } else {
       const step = Math.max(1, Math.floor((end - start) / 250))
       const data = await api.promQueryRange(expression, start, end, step)
       if (data.resultType === 'matrix') {
         if (!isCurrent()) return
-        matrixResults.value = data.result
+        matrixResults.value = data.result.filter(result => matchesAlertSeries(result.metric, scope))
       }
     }
     if (isCurrent()) {
@@ -269,6 +273,8 @@ function clearQuery() {
   cancelQuery()
   executing.value = false
   query.value = ''
+  alertEvent.value = null
+  alertSeries.value = null
   diagnosticRequest.value = null
   vectorResults.value = []
   matrixResults.value = []
@@ -280,6 +286,8 @@ function clearQuery() {
 
 async function loadHistoryEntry(entry: HistoryEntry<MetricsHistoryQuery>) {
   cancelQuery()
+  alertEvent.value = null
+  alertSeries.value = null
   initializingTimeRange = true
   query.value = entry.query.query
   selectedPreset.value = entry.query.timePreset
@@ -501,6 +509,11 @@ function metricsUrlState(): Record<string, string> {
   if (activeTab.value !== 'graph') params.tab = activeTab.value
   if (selectedPreset.value !== 60) params.t = String(selectedPreset.value)
   if (viewMode.value !== 'query') params.mode = viewMode.value
+  if (alertEvent.value) {
+    params.alert_monitor = alertEvent.value.monitorId
+    params.alert_event = alertEvent.value.eventId
+  }
+  if (alertSeries.value) params.alert_series = JSON.stringify(alertSeries.value)
   if (customRange.value) {
     params.from = customRange.value.from
     params.to = customRange.value.to
@@ -525,6 +538,14 @@ async function shareLink() {
 function restoreFromUrl() {
   const q = route.query
   if (q.q) query.value = String(q.q)
+  if (typeof q.alert_monitor === 'string' && typeof q.alert_event === 'string') {
+    alertEvent.value = { monitorId: q.alert_monitor, eventId: q.alert_event }
+    alertSeries.value = readAlertSeries(q.alert_series)
+    if (q.alert_series !== undefined && !alertSeries.value) {
+      errorMsg.value = 'This alert link has an invalid series filter.'
+      return false
+    }
+  }
   if (q.tab === 'table') activeTab.value = 'table'
   if (q.t) selectedPreset.value = Number(q.t) || 60
   if (q.mode === 'explore') viewMode.value = 'explore'
@@ -539,6 +560,11 @@ function restoreFromUrl() {
     selectedPreset.value = Math.max(1, Math.round((to - from) / 60_000))
   }
   return true
+}
+
+function clearAlertSeries() {
+  alertSeries.value = null
+  executeQuery({ skipHistory: true })
 }
 
 let initializingTimeRange = true
@@ -668,6 +694,14 @@ watch(viewMode, () => {
         </div>
       </div>
 
+      <div v-if="alertEvent" class="helper-bar" aria-label="Saved alert query">
+        <div class="helper-group">
+          <router-link :to="{ name: 'monitor-detail', params: { id: alertEvent.monitorId }, query: { event: alertEvent.eventId } }">Alert evidence</router-link>
+          <code v-if="alertSeries !== null" class="mono">{{ seriesLabel(alertSeries) }}</code>
+          <button v-if="alertSeries !== null" type="button" class="btn btn-sm" @click="clearAlertSeries">Show all series</button>
+        </div>
+      </div>
+
       <!-- NL preview -->
       <div v-if="nlMode && nlResult" class="nl-preview">
         <span class="nl-preview-label">✦</span>
@@ -761,7 +795,7 @@ watch(viewMode, () => {
       :loading="executing"
       :error="errorMsg || null"
       :empty-title="hasResults ? 'No samples returned' : 'Run a PromQL query'"
-      :empty-message="hasResults ? 'Try another expression or a wider time range.' : 'Enter an expression above, then select Execute.'"
+      :empty-message="hasResults ? (alertEvent ? alertTelemetryHint : 'Try another expression or a wider time range.') : 'Enter an expression above, then select Execute.'"
     >
       <template v-if="matrixResults.length" #details>
         <div class="metric-series-actions" aria-label="Create an alert from a result series">
@@ -796,7 +830,7 @@ watch(viewMode, () => {
       :loading="executing"
       :error="errorMsg || null"
       :empty-title="hasResults ? 'No rows returned' : 'Run a PromQL query'"
-      :empty-message="hasResults ? 'Try another expression or adjust its label matchers.' : 'Enter an expression above, then select Execute.'"
+      :empty-message="hasResults ? (alertEvent ? alertTelemetryHint : 'Try another expression or adjust its label matchers.') : 'Enter an expression above, then select Execute.'"
     >
       <template v-if="diagnosticRequest && hasResults && !errorMsg && !vectorResults.length" #footer><QueryDiagnosis :request="diagnosticRequest" /></template>
       <div class="result-table">
