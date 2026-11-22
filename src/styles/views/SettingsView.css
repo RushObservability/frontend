@@ -2415,11 +2415,28 @@ select.form-input { padding-right: 32px; }
 }
 
 /* ── Firewall rule drawer ─────────────────────────────────────────── */
-.group-drawer-wide { width: 480px; }
+.group-drawer-wide { width: min(1060px, 100vw); }
 
 .fw-wizard-body {
+  display: grid;
+  grid-template-columns: minmax(340px, .86fr) minmax(0, 1.14fr);
+  align-content: start;
+  align-items: stretch;
   gap: 0 !important;
   padding: 0 !important;
+}
+
+.fw-rule-editor {
+  min-width: 0;
+  border-inline-end: 1px solid var(--border-default);
+}
+
+.group-drawer-wide .group-drawer-footer { flex-wrap: wrap; }
+.group-drawer-wide .group-drawer-footer .fw-form-err { flex: 1 1 100%; margin: 0; }
+
+@media (max-width: 740px) {
+  .fw-wizard-body { grid-template-columns: minmax(0, 1fr); }
+  .fw-rule-editor { border-inline-end: none; border-bottom: 1px solid var(--border-default); }
 }
 
 .fw-step {

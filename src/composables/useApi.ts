@@ -121,6 +121,8 @@ import type {
   FunnelStep,
   FunnelResult,
   MetricFirewallRule,
+  MetricFirewallSample,
+  MetricFirewallPreviewResult,
   MetricFirewallInput,
   AuditListResponse,
   AuditQueryParams,
@@ -2062,6 +2064,20 @@ export function useApi() {
     return await request('/metric-firewall')
   }
 
+  async function previewMetricFirewall(
+    rule: MetricFirewallInput,
+    ruleId: string | null,
+    samples: MetricFirewallSample[],
+    signal: AbortSignal,
+  ): Promise<MetricFirewallPreviewResult> {
+    return await request('/metric-firewall/preview', {
+      method: 'POST',
+      body: JSON.stringify({ rule, rule_id: ruleId, samples }),
+      signal,
+      invalidatesAnalytics: false,
+    })
+  }
+
   async function createMetricFirewall(input: MetricFirewallInput): Promise<MetricFirewallRule> {
     return await request('/metric-firewall', {
       method: 'POST',
@@ -2222,6 +2238,6 @@ export function useApi() {
     bubbleUp,
     listMonitors, getMonitor, createMonitor, updateMonitor, deleteMonitor, listMonitorEvents, previewMonitor, muteMonitor, unmuteMonitor, monitorAutocomplete, monitorSuggest,
     getFeatures, getRuntimeConfig, setExportMaxRows, getQueryLimits, setQueryLimits, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, setSreAgentTenantAccess, listLlmProviders, createLlmProvider, updateLlmProvider, deleteLlmProvider, discoverLlmModels, listLlmModels, createLlmModel, updateLlmModel, deleteLlmModel, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
-    listMetricFirewall, createMetricFirewall, updateMetricFirewall, deleteMetricFirewall,
+    listMetricFirewall, previewMetricFirewall, createMetricFirewall, updateMetricFirewall, deleteMetricFirewall,
   }
 }
