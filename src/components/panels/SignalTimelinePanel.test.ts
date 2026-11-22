@@ -16,7 +16,7 @@ describe('SignalTimelinePanel', () => {
     expect(source).toContain('@keydown.left.prevent="moveKeyboardHover(-1)"')
     expect(source).toContain("emit('rangeSelect', { startIndex, endIndex, compare })")
     expect(source).toContain('Drag to zoom. Hold Shift while dragging to compare a window.')
-    expect(source).toContain('timeline-tooltip')
+    expect(source).toContain('timeline-readout')
   })
 
   it('adapts its language to logs and traces', () => {
@@ -24,10 +24,9 @@ describe('SignalTimelinePanel', () => {
     expect(source).toContain("props.resultLabel ?? (props.signal === 'logs' ? 'events' : 'spans')")
   })
 
-  it('keeps the floating tooltip outside the plot and clears keyboard inspection on exit', () => {
-    expect(source).toContain('bottom: calc(100% + 12px)')
-    expect(source).toContain('timeline-tooltip--below')
-    expect(source).toContain('role="tooltip"')
+  it('puts the bucket details after the time axis and clears keyboard inspection on exit', () => {
+    expect(source.indexOf('class="timeline-readout"')).toBeGreaterThan(source.indexOf('class="timeline-x-axis"'))
+    expect(source).toContain('aria-live="polite"')
     expect(source).toContain('@keydown.esc.prevent="hoveredIndex = null"')
     expect(source).toContain('@blur="hoveredIndex = null"')
   })

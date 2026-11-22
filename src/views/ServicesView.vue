@@ -711,13 +711,13 @@ function sfBarColor(p: number) {
              @pointerup="onPointerUp" @pointerleave="onPointerUp">
           <defs>
             <!-- context-stroke makes each arrowhead inherit its line's color (green/amber/red). -->
-            <marker id="arrowhead" markerWidth="7" markerHeight="6" refX="7" refY="3" orient="auto">
+            <marker id="arrowhead" viewBox="0 0 7 6" markerUnits="userSpaceOnUse" :markerWidth="9 / zoom" :markerHeight="8 / zoom" refX="7" refY="3" orient="auto">
               <polygon points="0 0, 7 3, 0 6" fill="context-stroke" opacity="0.75" />
             </marker>
           </defs>
           <g :transform="graphTransform">
             <g v-for="edge in graphEdges" :key="`${edge.source}-${edge.target}`">
-              <path :d="edgePath(edge)" fill="none" :stroke="edgeColor(edge)" :stroke-width="edgeWidth(edge)" :stroke-opacity="dense ? 0.55 : 0.7" marker-end="url(#arrowhead)" />
+              <path :d="edgePath(edge)" fill="none" :stroke="edgeColor(edge)" :stroke-width="edgeWidth(edge)" vector-effect="non-scaling-stroke" :stroke-opacity="dense ? 0.55 : 0.7" marker-end="url(#arrowhead)" />
               <text v-if="!dense && edgeLabelPos(edge)" :x="edgeLabelPos(edge)!.x" :y="edgeLabelPos(edge)!.y" class="edge-label" text-anchor="middle" dominant-baseline="central">{{ formatCount(edge.request_count) }} req</text>
             </g>
             <!-- Service cards: always-on data cards (name + req/s + errors + P50/P95/P99). -->

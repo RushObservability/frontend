@@ -4,12 +4,13 @@
   display: flex;
   flex-direction: column;
 }
-/* Plot box holds the SVG + the hover overlay; the legend sits below it. The
-   crosshair/tooltip are positioned in % of this box (= the SVG box). */
+/* Keep sample values below the plot so they cannot cover adjacent data. */
 .ts-plot {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  touch-action: pan-y;
+  cursor: crosshair;
 }
 .ts-svg {
   width: 100%;
@@ -93,63 +94,42 @@
 /* Multi-series (metrics/PromQL) legend */
 .ts-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  padding: 4px 6px 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 26px;
+  overflow-x: auto;
+  padding: 3px 6px;
+  border-top: 1px solid var(--border-subtle);
   font-size: 10px;
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
-.ts-legend-item { display: inline-flex; align-items: center; gap: 5px; max-width: 240px; overflow: hidden; white-space: nowrap; }
+.ts-legend-item { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 5px; max-width: 240px; overflow: hidden; white-space: nowrap; }
 .ts-legend-dot { width: 8px; height: 3px; border-radius: 1px; flex-shrink: 0; }
 .ts-legend-name { overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
 .ts-legend-val { color: var(--text-primary); font-variant-numeric: tabular-nums; }
 
-/* ── Shared crosshair + hover tooltip ── */
+/* Shared crosshair and screen-space marker. */
+.ts-crosshair,
+.ts-marker,
+.ts-selection { position: absolute; pointer-events: none; z-index: 2; }
 .ts-crosshair {
-  position: absolute;
-  width: 1px;
-  background: var(--text-secondary);
-  opacity: 0.55;
-  pointer-events: none;
-  transform: translateX(-0.5px);
-  z-index: 2;
+  border-left: 1px dashed var(--text-secondary);
+  opacity: .65;
+  transform: translateX(-.5px);
 }
-.ts-tooltip {
-  position: absolute;
-  pointer-events: none;
-  z-index: 3;
-  transform: translate(8px, 0);
-  min-width: 88px;
-  max-width: 220px;
-  padding: 5px 7px;
-  background: color-mix(in srgb, var(--bg-surface, #15181d) 94%, transparent);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-sm, 4px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(2px);
+.ts-marker {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--bg-surface);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
 }
-/* Flip to the left of the crosshair when near the right edge. */
-.ts-tooltip--flip { transform: translate(-100%, 0) translateX(-8px); }
-.ts-tt-time {
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-bottom: 3px;
-  letter-spacing: 0.02em;
+.ts-selection {
+  border-inline: 1px solid var(--accent);
+  background: var(--accent-soft);
 }
-.ts-tt-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  line-height: 1.5;
-}
-.ts-tt-dot { width: 8px; height: 3px; border-radius: 1px; flex-shrink: 0; }
-.ts-tt-name {
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 120px;
-}
-.ts-tt-val { margin-left: auto; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ts-plot:focus-visible, .ts-legend:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.ts-readout-time { flex-shrink: 0; color: var(--text-secondary); }
+.ts-legend--inspecting { border-top-color: var(--border-default); }

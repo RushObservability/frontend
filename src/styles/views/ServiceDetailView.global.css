@@ -1,23 +1,42 @@
-/* Chart expand modal (unscoped — Teleport renders outside component) */
-.chart-modal-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
-.chart-modal { background: var(--bg-surface); border: 1px solid var(--border-default); border-radius: var(--r-lg, 8px); width: 80vw; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4); }
-.chart-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--border-default); }
-.chart-modal-title { font-size: 14px; font-weight: 600; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em; }
-.chart-modal-close { background: none; border: none; font-size: 24px; color: var(--text-muted); cursor: pointer; padding: 0 4px; line-height: 1; transition: color 0.15s; }
-.chart-modal-close:hover { color: var(--text-primary); }
-.chart-modal-body { padding: 20px; }
-.modal-chart-body { cursor: crosshair; }
-.modal-chart-svg { width: 100%; height: 300px; }
-.modal-chart-time { padding: 0 20px 16px; display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+/* The chart dialog is teleported outside the service page. */
+.chart-modal {
+  --panel-chart-axis-size: .625rem;
+  width: min(1100px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  margin: auto;
+  padding: 0;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-lg);
+}
+.chart-modal::backdrop { background: rgb(0 0 0 / .62); }
+.chart-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border-default);
+}
+.chart-modal-title { margin: 0; font-size: var(--text-lg); font-weight: 650; }
+.chart-modal-close { background: none; border: none; font-size: 24px; color: var(--text-secondary); cursor: pointer; padding: 0 4px; }
+.chart-modal-body { padding: clamp(12px, 3vw, 20px); }
+.expanded-chart-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 30px;
+  margin-bottom: var(--sp-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.chart-modal .ts-widget.expanded-latency { height: clamp(220px, 48vh, 420px); }
+.expanded-signals { display: grid; gap: var(--sp-3); }
+.expanded-signals section { min-width: 0; }
+.expanded-signals h3 { margin: 0 0 4px; font-size: var(--text-md); font-weight: 600; }
+.expanded-signals .ts-widget { height: clamp(106px, 22vh, 188px); }
 .modal-map-svg { width: 100%; height: 300px; }
 .modal-map-label { fill: var(--text-secondary); font-size: 11px; font-family: var(--font-mono); }
-.modal-map-center { fill: var(--amber); font-size: 11px; font-weight: 600; font-family: var(--font-mono); }
-.chart-modal-body .chart-body { display: flex; gap: 0; }
-.chart-modal-body .chart-y { display: flex; flex-direction: column; justify-content: space-between; width: 38px; flex-shrink: 0; padding: 2px 0; }
-.chart-modal-body .y-label { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); text-align: right; padding-right: 6px; line-height: 1; }
-.chart-modal-body .chart-area { flex: 1; position: relative; min-width: 0; }
-.chart-modal-body .grid-line { stroke: var(--border-subtle); stroke-width: 1; stroke-dasharray: 4 3; }
-.chart-modal-body .crosshair { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text-muted); opacity: 0.4; pointer-events: none; transform: translateX(-50%); }
-.chart-modal-body .chart-tip { position: absolute; bottom: calc(100% + 6px); transform: translateX(-50%); background: var(--bg-overlay); border: 1px solid var(--border-default); border-radius: var(--r-sm, 4px); padding: 4px 8px; pointer-events: none; white-space: nowrap; z-index: 10; display: flex; flex-direction: column; align-items: center; gap: 1px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
-.chart-modal-body .tip-val { font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text-primary); }
-.chart-modal-body .tip-time { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+.modal-map-center { fill: var(--accent); font-size: 11px; font-weight: 600; font-family: var(--font-mono); }

@@ -11,17 +11,19 @@ import { computed, ref, watch } from 'vue'
 import type { SpanNode, TraceResponse } from '../types'
 import {
   WATERFALL_TICKS,
-  barOffsetPercent,
-  barWidthPercent,
+  clipTraceWindow,
   buildWaterfallRows,
   displayableSpanAttrs,
   durationClass,
   flattenSpans,
   formatSpanDuration,
   isSpanError,
+  parseTraceTimestamp,
   serviceColor,
   spanOperation,
   spanStatusClass,
+  spanTraceWindow,
+  type TraceWindow,
 } from '../lib/traceWaterfall'
 
 const props = withDefaults(defineProps<{
@@ -31,28 +33,92 @@ const props = withDefaults(defineProps<{
   /** Heading text, or empty to render the timeline without a header. */
   title?: string
   subtitle?: string
+  compact?: boolean
 }>(), {
-  activeSpanId: null,
   title: 'Trace timeline',
-  subtitle: 'Follow the request from parent spans into downstream work.',
+  subtitle: '',
+  compact: false,
 })
 
 const emit = defineEmits<{ select: [spanId: string] }>()
 
 const collapsed = ref<Set<string>>(new Set())
 const expandedSpanId = ref<string | null>(null)
+const localSpanId = ref<string | null>(null)
+const focusedWindow = ref<TraceWindow | null>(null)
 
 // A new trace starts fully expanded and with no open detail row.
 watch(() => props.trace?.trace_id, () => {
   collapsed.value = new Set()
   expandedSpanId.value = null
+  localSpanId.value = null
+  focusedWindow.value = null
 })
 
 const orderedSpans = computed(() => flattenSpans(props.trace?.spans ?? []))
 const rows = computed(() => buildWaterfallRows(props.trace?.spans ?? [], collapsed.value))
 const errorCount = computed(() => orderedSpans.value.filter(isSpanError).length)
 const hasBranches = computed(() => orderedSpans.value.some(span => span.children?.length))
-const durationNs = computed(() => props.trace?.duration_ns ?? 0)
+const selectedSpanId = computed(() => props.activeSpanId === undefined ? localSpanId.value : props.activeSpanId)
+const selectedSpan = computed(() => orderedSpans.value.find(span => span.span_id === selectedSpanId.value))
+const spanWindows = computed(() => {
+  const origin = orderedSpans.value[0]
+  const originUs = origin ? parseTraceTimestamp(origin.timestamp) : 0
+  return new Map(orderedSpans.value.map(span => [span.span_id, spanTraceWindow(span, originUs)]))
+})
+const durationNs = computed(() => {
+  let duration = Math.max(0, props.trace.duration_ns)
+  for (const span of spanWindows.value.values()) duration = Math.max(duration, span.to)
+  return duration
+})
+const viewport = computed(() => focusedWindow.value ?? { from: 0, to: durationNs.value })
+const viewportDuration = computed(() => Math.max(1, viewport.value.to - viewport.value.from))
+const selectedWindow = computed(() => spanWindows.value.get(selectedSpanId.value ?? ''))
+const canFocus = computed(() => {
+  const span = selectedWindow.value
+  return span != null && span.to > span.from && span.to - span.from < durationNs.value
+})
+const visibleRows = computed(() => {
+  const visible = rows.value.flatMap(row => {
+    const span = spanWindows.value.get(row.span.span_id)!
+    const bar = clipTraceWindow(span, viewport.value)
+    if (!bar) return []
+    return [{
+      ...row,
+      left: (bar.from - viewport.value.from) / viewportDuration.value * 100,
+      width: (bar.to - bar.from) / viewportDuration.value * 100,
+    }]
+  })
+  return props.compact ? visible.slice(0, 20) : visible
+})
+const hiddenCount = computed(() => orderedSpans.value.length - visibleRows.value.length)
+const hiddenErrors = computed(() => errorCount.value - visibleRows.value.filter(row => isSpanError(row.span)).length)
+
+function overviewX(ns: number) {
+  return ns / Math.max(1, durationNs.value) * 1000
+}
+
+// One overview lane per service, with errors drawn above the service marks.
+const overviewLanes = computed(() => {
+  const services = new Map<string, { service: string; path: string; errors: string }>()
+  for (const span of orderedSpans.value) {
+    const service = span.service_name
+    const lane = services.get(service) ?? { service, path: '', errors: '' }
+    const { from, to } = spanWindows.value.get(span.span_id)!
+    const start = Math.min(999.75, overviewX(from))
+    const end = Math.max(start + .25, overviewX(to))
+    const segment = `M${start.toFixed(2)},0H${end.toFixed(2)}`
+    if (isSpanError(span)) lane.errors += segment
+    else lane.path += segment
+    services.set(service, lane)
+  }
+  return [...services.values()]
+})
+
+function toggleSpanFocus() {
+  if (focusedWindow.value) focusedWindow.value = null
+  else if (canFocus.value && selectedWindow.value) focusedWindow.value = selectedWindow.value
+}
 
 function colorFor(service: string): string {
   return serviceColor(service, props.trace?.services)
@@ -77,6 +143,7 @@ function toggleAllBranches() {
 
 function selectSpan(spanId: string) {
   expandedSpanId.value = expandedSpanId.value === spanId ? null : spanId
+  if (props.activeSpanId === undefined) localSpanId.value = localSpanId.value === spanId ? null : spanId
   emit('select', spanId)
 }
 
@@ -86,13 +153,16 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
 </script>
 
 <template>
-  <div class="tw">
-    <div v-if="title" class="tw-header">
-      <div>
+  <div class="tw" :class="{ 'tw--compact': compact }">
+    <div class="tw-header">
+      <div v-if="title">
         <span class="tw-title">{{ title }}</span>
         <span v-if="subtitle" class="tw-subtitle">{{ subtitle }}</span>
       </div>
       <div class="tw-header-actions">
+        <button class="tw-collapse-all" type="button" :disabled="!focusedWindow && !canFocus" @click.stop="toggleSpanFocus">
+          {{ focusedWindow ? 'Full trace' : 'Focus selected span' }}
+        </button>
         <span v-if="errorCount" class="tw-error-count mono">
           {{ errorCount }} error{{ errorCount === 1 ? '' : 's' }}
         </span>
@@ -109,6 +179,22 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
       <span class="tw-total mono">{{ trace.span_count }} spans · {{ formatSpanDuration(durationNs) }}</span>
     </div>
 
+    <div v-if="orderedSpans.length" class="tw-overview">
+      <div class="tw-overview-label">
+        <span>Whole trace</span>
+        <span v-if="focusedWindow" class="mono">{{ formatSpanDuration(viewport.from) }}–{{ formatSpanDuration(viewport.to) }}</span>
+      </div>
+      <svg role="img" aria-label="Whole trace overview" :viewBox="`0 0 1000 ${overviewLanes.length * 5 + 4}`" preserveAspectRatio="none">
+        <g v-for="(lane, index) in overviewLanes" :key="lane.service" :transform="`translate(0,${4 + index * 5})`">
+          <path :d="lane.path" :stroke="colorFor(lane.service)" />
+          <path :d="lane.errors" stroke="var(--error)" />
+        </g>
+        <rect v-if="focusedWindow" :x="overviewX(focusedWindow.from)" y="1"
+          :width="overviewX(focusedWindow.to - focusedWindow.from)" :height="overviewLanes.length * 5 + 2"
+          class="tw-overview-range" />
+      </svg>
+    </div>
+
     <div class="tw-grid" role="treegrid" aria-label="Trace span waterfall">
       <div class="tw-head-row" role="row">
         <div class="tw-col-span" role="columnheader">Span</div>
@@ -119,29 +205,29 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
             class="tw-tick mono"
             :class="{ 'is-first': tick === 0, 'is-last': tick === 100 }"
             :style="{ left: tick + '%' }"
-          >{{ formatSpanDuration(Math.round(durationNs * tick / 100)) }}</span>
+          >{{ formatSpanDuration(Math.round(viewport.from + (viewport.to - viewport.from) * tick / 100)) }}</span>
         </div>
         <div class="tw-col-dur" role="columnheader">Duration</div>
       </div>
 
-      <template v-for="row in rows" :key="'tw-' + row.span.span_id">
+      <template v-for="row in visibleRows" :key="'tw-' + row.span.span_id">
         <div
           class="tw-row"
           :class="{
             'tw-row-open': row.span.span_id === expandedSpanId,
             'tw-row-error': isSpanError(row.span),
-            'tw-row-current': row.span.span_id === activeSpanId,
+            'tw-row-current': row.span.span_id === selectedSpanId,
           }"
           role="row"
           tabindex="0"
           :aria-level="row.depth + 1"
-          :aria-selected="row.span.span_id === activeSpanId"
+          :aria-selected="row.span.span_id === selectedSpanId"
           @click.stop="selectSpan(row.span.span_id)"
           @keydown.enter.prevent="selectSpan(row.span.span_id)"
           @keydown.space.prevent="selectSpan(row.span.span_id)"
         >
-          <div class="tw-col-span" role="gridcell" :style="{ paddingLeft: (10 + row.depth * 18) + 'px' }">
-            <span v-if="row.depth" class="tw-connector" :style="{ width: (row.depth * 18 - 5) + 'px' }" aria-hidden="true"></span>
+          <div class="tw-col-span" role="gridcell" :style="{ paddingLeft: (10 + Math.min(row.depth, 6) * 14) + 'px' }">
+            <span v-if="row.depth" class="tw-connector" :style="{ width: (Math.min(row.depth, 6) * 14 - 5) + 'px' }" aria-hidden="true"></span>
             <button
               v-if="row.childCount"
               class="tw-branch-toggle"
@@ -177,16 +263,11 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
               <div
                 class="tw-bar"
                 :style="{
-                  width: barWidthPercent(row.span, durationNs),
-                  left: barOffsetPercent(row.span, orderedSpans, durationNs),
+                  width: row.width + '%',
+                  left: row.left + '%',
                   backgroundColor: isSpanError(row.span) ? 'var(--error)' : colorFor(row.span.service_name),
                 }"
-              >
-                <span
-                  v-if="durationNs > 0 && row.span.duration_ns / durationNs > 0.14"
-                  class="tw-bar-label mono"
-                >{{ formatSpanDuration(row.span.duration_ns) }}</span>
-              </div>
+              />
             </div>
           </div>
 
@@ -219,16 +300,22 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
         </div>
       </template>
     </div>
+    <div v-if="selectedSpan || hiddenCount" class="tw-readout">
+      <span v-if="selectedSpan">Selected span <strong>{{ spanOperation(selectedSpan) }}</strong>
+        {{ selectedSpan.service_name }} · <span class="mono">{{ formatSpanDuration(selectedSpan.duration_ns) }}</span>
+      </span>
+      <span v-if="hiddenCount">{{ hiddenCount }} hidden<span v-if="hiddenErrors"> · {{ hiddenErrors }} with errors</span></span>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.tw { display: block; min-width: 0; }
+.tw { display: block; min-width: 0; container-type: inline-size; }
 
 .tw-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-2); }
 .tw-title { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .tw-subtitle { display: block; margin-top: 2px; font-size: 11px; color: var(--text-tertiary); }
-.tw-header-actions { display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; }
+.tw-header-actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin-left: auto; }
 .tw-error-count { color: var(--error); font-size: 11px; font-weight: 600; }
 .tw-collapse-all {
   padding: 3px 9px; font: inherit; font-size: 11px;
@@ -247,20 +334,44 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
 .tw-legend i { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 2px; vertical-align: -1px; }
 .tw-total { margin-left: auto; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 
+.tw-overview { margin-bottom: var(--sp-2); }
+.tw-overview-label, .tw-readout {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.tw-overview svg {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin-top: var(--sp-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--bg-raised);
+}
+.tw-overview path { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.tw-overview-range { fill: var(--accent-soft); stroke: var(--text-secondary); vector-effect: non-scaling-stroke; }
+.tw-readout { padding: var(--sp-2) 0 0; overflow-wrap: anywhere; }
+.tw-readout strong { color: var(--text-primary); }
 .tw-grid { border: 1px solid var(--border-subtle); border-radius: var(--r-md); overflow: hidden; }
+.tw--compact .tw-grid { max-height: 300px; overflow-y: auto; }
+.tw--compact .tw-overview svg { height: 28px; }
 .tw-head-row, .tw-row {
   display: grid;
   grid-template-columns: minmax(180px, 2fr) minmax(140px, 3fr) 104px;
   align-items: center;
 }
 .tw-head-row {
-  position: relative; height: 24px;
+  position: sticky; top: 0; z-index: 1; height: 24px;
   background: var(--bg-raised);
   border-bottom: 1px solid var(--border-subtle);
   font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-tertiary);
 }
 .tw-head-row .tw-col-span { padding-left: 10px; }
-.tw-head-row .tw-col-bar { position: relative; height: 100%; }
+.tw-head-row .tw-col-bar { position: relative; height: 100%; margin: 0 var(--sp-2); padding: 0; }
 .tw-tick {
   position: absolute; top: 6px; transform: translateX(-50%);
   font-size: 9px; color: var(--text-tertiary); white-space: nowrap;
@@ -281,8 +392,8 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
 .tw-row-open { background: var(--bg-raised); }
 /* Error and current are edge marks, not fills, so they can co-occur. */
 .tw-row-error { box-shadow: inset 3px 0 0 var(--error); }
-.tw-row-current { box-shadow: inset 3px 0 0 var(--accent); }
-.tw-row-error.tw-row-current { box-shadow: inset 3px 0 0 var(--error), inset 6px 0 0 var(--accent); }
+.tw-row-current { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.tw-row-error.tw-row-current { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--error), inset 6px 0 0 var(--accent); }
 
 .tw-col-span { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; padding-right: var(--sp-2); }
 .tw-connector { position: absolute; left: 6px; height: 1px; background: var(--border-default); }
@@ -306,13 +417,12 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
 }
 
 .tw-col-bar { position: relative; padding: 0 var(--sp-2); min-width: 0; }
-.tw-track { position: relative; height: 14px; }
+.tw-track { position: relative; height: 14px; overflow: hidden; }
 .tw-gridline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-subtle); }
 .tw-bar {
   position: absolute; top: 3px; height: 8px; min-width: 2px;
   border-radius: 2px; display: flex; align-items: center;
 }
-.tw-bar-label { position: absolute; left: 5px; font-size: 9px; color: var(--text-inverse); white-space: nowrap; }
 
 .tw-duration { font-size: 11px; font-variant-numeric: tabular-nums; }
 .tw-status { margin-left: 5px; font-size: 10px; }
@@ -325,8 +435,9 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
 .tw-attr-k { min-width: 150px; max-width: 40%; flex-shrink: 0; color: var(--text-tertiary); overflow-wrap: anywhere; }
 .tw-attr-v { color: var(--text-primary); overflow-wrap: anywhere; }
 
-@media (max-width: 720px) {
-  .tw-head-row, .tw-row { grid-template-columns: minmax(120px, 1.4fr) minmax(90px, 2fr) 78px; }
-  .tw-subtitle { display: none; }
+@container (max-width: 500px) {
+  .tw-head-row, .tw-row { grid-template-columns: minmax(0, 1.4fr) minmax(0, 2fr) 72px; }
+  .tw-row .tw-connector { display: none; }
+  .tw-subtitle, .tw-svc, .tw-tick:not(.is-first, .is-last) { display: none; }
 }
 </style>

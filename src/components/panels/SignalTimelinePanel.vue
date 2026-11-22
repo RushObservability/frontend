@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import type { CountBucket, ExploreCountKind } from '../../types'
 import PanelCard from '../PanelCard.vue'
 
@@ -34,31 +34,10 @@ const emit = defineEmits<{
 }>()
 
 const plotEl = ref<HTMLElement | null>(null)
-const tooltipEl = ref<HTMLElement | null>(null)
-const tooltipBelow = ref(false)
 const hoveredIndex = ref<number | null>(null)
 const dragStart = ref<number | null>(null)
 const dragEnd = ref<number | null>(null)
 const dragCompare = ref(false)
-
-function updateTooltipPlacement() {
-  if (!plotEl.value) return
-  const height = tooltipEl.value?.offsetHeight ?? 160
-  tooltipBelow.value = plotEl.value.getBoundingClientRect().top < height + 20
-}
-
-watch(hoveredIndex, async () => {
-  await nextTick()
-  updateTooltipPlacement()
-})
-onMounted(() => {
-  window.addEventListener('scroll', updateTooltipPlacement, true)
-  window.addEventListener('resize', updateTooltipPlacement)
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('scroll', updateTooltipPlacement, true)
-  window.removeEventListener('resize', updateTooltipPlacement)
-})
 
 const title = computed(() => props.signal === 'logs' ? 'Log volume' : props.resultLabel === 'spans' ? 'Span volume' : 'Trace volume')
 const itemLabel = computed(() => props.resultLabel ?? (props.signal === 'logs' ? 'events' : 'spans'))
@@ -380,23 +359,6 @@ function errorHeight(bucket: CountBucket): number {
             :style="{ left: `${((hoveredIndex + 0.5) / buckets.length) * 100}%` }"
             aria-hidden="true"
           />
-
-          <div
-            v-if="hoveredBucket && hoveredIndex !== null && dragStart === null"
-            ref="tooltipEl"
-            class="timeline-tooltip"
-            :class="{ 'timeline-tooltip--below': tooltipBelow }"
-            :style="{ left: `clamp(0px, calc(${((hoveredIndex + 0.5) / buckets.length) * 100}% - 92px), calc(100% - 184px))` }"
-            role="tooltip"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <div class="timeline-tooltip-time mono">{{ hoveredBucket.time }}</div>
-            <div><span>Total</span><strong class="mono">{{ hoveredBucket.total.toLocaleString() }}</strong></div>
-            <div><span><i class="timeline-key timeline-key--normal" />Normal</span><strong class="mono">{{ hoveredBucket.ok.toLocaleString() }}</strong></div>
-            <div><span><i class="timeline-key timeline-key--error" />Errors</span><strong class="mono timeline-tooltip-error">{{ hoveredBucket.errors.toLocaleString() }}</strong></div>
-            <div class="timeline-tooltip-rate"><span>Error rate</span><strong class="mono">{{ errorPercent(hoveredBucket.errorRate) }}</strong></div>
-          </div>
         </div>
 
         <div class="timeline-x-axis" aria-hidden="true">
@@ -409,6 +371,16 @@ function errorHeight(bucket: CountBucket): number {
           >{{ tick.label }}</span>
         </div>
       </div>
+    </div>
+    <div class="timeline-readout" aria-live="polite" aria-atomic="true">
+      <template v-if="hoveredBucket && dragStart === null">
+        <time class="timeline-readout-time mono">{{ hoveredBucket.time }}</time>
+        <span>Total <strong class="mono">{{ hoveredBucket.total.toLocaleString() }}</strong></span>
+        <span>Normal <strong class="mono">{{ hoveredBucket.ok.toLocaleString() }}</strong></span>
+        <span>Errors <strong class="mono">{{ hoveredBucket.errors.toLocaleString() }}</strong></span>
+        <span>Error rate <strong class="mono">{{ errorPercent(hoveredBucket.errorRate) }}</strong></span>
+      </template>
+      <span v-else class="timeline-readout-hint">Hover or use the arrow keys to inspect a bucket.</span>
     </div>
   </PanelCard>
 </template>
@@ -504,8 +476,7 @@ function errorHeight(bucket: CountBucket): number {
   white-space: nowrap;
 }
 
-.timeline-legend > span,
-.timeline-tooltip span {
+.timeline-legend > span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -570,6 +541,7 @@ function errorHeight(bucket: CountBucket): number {
 
 .timeline-grid {
   position: absolute;
+  top: 0;
   right: 0;
   left: 0;
   height: 116px;
@@ -672,41 +644,19 @@ function errorHeight(bucket: CountBucket): number {
 .timeline-selection-label--start { left: 4px; }
 .timeline-selection-label--end { right: 4px; }
 
-.timeline-tooltip {
-  position: absolute;
-  z-index: 8;
-  bottom: calc(100% + 12px);
-  width: 184px;
-  max-width: 100%;
-  box-sizing: border-box;
-  padding: 8px 12px;
-  color: var(--text-secondary);
-  background: var(--bg-overlay);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
-  box-shadow: 0 4px 16px rgba(16, 24, 40, .16);
-  font-size: 10px;
-  pointer-events: none;
-}
-
-.timeline-tooltip--below { top: calc(100% + 32px); bottom: auto; }
-.timeline-tooltip-time {
-  padding-bottom: 4px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-primary);
-  font-weight: 650;
-}
-.timeline-tooltip > div:not(.timeline-tooltip-time) {
+.timeline-readout {
   display: flex;
-  min-height: 20px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  min-height: 28px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--panel-chart-label-size);
 }
-.timeline-tooltip strong { color: var(--text-primary); }
-.timeline-tooltip .timeline-tooltip-error { color: var(--error); }
-.timeline-tooltip-rate { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border-subtle); }
+.timeline-readout strong, .timeline-readout-time { color: var(--text-primary); }
+.timeline-readout-hint { color: var(--text-muted); }
 
 .timeline-x-axis {
   position: relative;

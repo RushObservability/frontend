@@ -19,7 +19,7 @@ describe('time-series area fill', () => {
 
   it('closes every enabled series area at the x-axis', async () => {
     const html = await render({ series, fill: true })
-    expect(html).toMatch(/d="M40,66 L558,12 L558,120 L40,120 Z" class="ch-area"/)
+    expect(html).toMatch(/d="M60,66 L542,12 L542,120 L60,120 Z" class="ch-area"/)
     expect(html).toContain('color:#3b82f6')
   })
 
@@ -34,7 +34,7 @@ describe('time-series area fill', () => {
       buckets: [{ bucket: '2026-09-17 00:30:00', count: 1 }],
       timeDomain: { from: Date.parse('2026-09-17T00:00:00Z') / 1000, to: Date.parse('2026-09-17T01:00:00Z') / 1000 },
     })
-    expect(html).toContain('d="M299,12')
+    expect(html).toContain('d="M301,12')
   })
 
   it('does not draw area fill over stacked bars', async () => {
@@ -48,8 +48,8 @@ describe('time-series area fill', () => {
       series: [series[0], { name: 'errors', color: '#e5584f', points: [[0, 2], [60, 1]] }],
       displayMode: 'stacked-lines',
     })
-    expect(html).toMatch(/d="M40,84 L558,48 L558,120 L40,120 Z" class="ch-area ts-stacked-area"/)
-    expect(html).toMatch(/d="M40,12 L558,12 L558,48 L40,84 Z" class="ch-area ts-stacked-area"/)
+    expect(html).toMatch(/d="M60,84 L542,48 L542,120 L60,120 Z" class="ch-area ts-stacked-area"/)
+    expect(html).toMatch(/d="M60,12 L542,12 L542,48 L60,84 Z" class="ch-area ts-stacked-area"/)
     expect((html.match(/class="ch-area ts-stacked-area"/g) || [])).toHaveLength(2)
   })
 
@@ -61,8 +61,8 @@ describe('time-series area fill', () => {
       ],
       displayMode: 'stacked-lines',
     })
-    expect(html).toMatch(/d="M40,12 L558,12 L558,110\.18 L40,110\.18 Z" class="ch-area ts-stacked-area" style="color:#3b82f6/)
-    expect(html).toMatch(/d="M40,110\.18 L558,110\.18 L558,120 L40,120 Z" class="ch-area ts-stacked-area" style="color:#e5584f/)
+    expect(html).toMatch(/d="M60,12 L542,12 L542,110\.18 L60,110\.18 Z" class="ch-area ts-stacked-area" style="color:#3b82f6/)
+    expect(html).toMatch(/d="M60,110\.18 L542,110\.18 L542,120 L60,120 Z" class="ch-area ts-stacked-area" style="color:#e5584f/)
   })
 
   it('can show stacked lines without their area fill', async () => {
