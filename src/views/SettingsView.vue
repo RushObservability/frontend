@@ -14,6 +14,7 @@ import MaintenanceWindows from '../components/MaintenanceWindows.vue'
 import RegexHelp from '../components/RegexHelp.vue'
 import SettingsNavigation from '../components/SettingsNavigation.vue'
 import LogViewsSettings from './settings/LogViewsSettings.vue'
+import MetricFirewallPreview from './settings/MetricFirewallPreview.vue'
 import { directoryRole, filterDirectoryUsers, type UserRole, type UserStatus } from './settings/userDirectory'
 import EmptyState from '../components/EmptyState.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
@@ -2401,6 +2402,10 @@ const firewallLoaded = ref(false)
 const showFirewallForm = ref(false)
 const editingFirewallId = ref<string | null>(null)
 const firewallFormError = ref<string | null>(null)
+const firewallSaving = ref(false)
+const fwPreviewRevision = ref<string | null>(null)
+const fwPreviewTesting = ref(false)
+const fwPolicyChanged = ref(false)
 
 // Form fields
 const fwName = ref('')
@@ -2491,6 +2496,29 @@ const fwCanSave = computed(() =>
   && (!fwMatchesAll.value || fwHasOtherAllowRules.value)
 )
 
+const fwDraft = computed<MetricFirewallInput>(() => ({
+  name: fwName.value.trim(),
+  enabled: fwEnabled.value,
+  action: fwAction.value,
+  metric_pattern: fwMetricPattern.value.trim(),
+  metric_regex: fwMetricRegex.value,
+  match_label_key: fwMatchLabelKey.value.trim(),
+  match_label_value: fwMatchLabelValue.value.trim(),
+  match_label_value_regex: fwMatchLabelValueRegex.value,
+  drop_label_pattern: fwDropLabelPattern.value.trim(),
+  drop_label_regex: fwDropLabelRegex.value,
+}))
+
+watch(fwDraft, () => { fwPreviewRevision.value = null }, { flush: 'sync' })
+
+function setFirewallPreviewRevision(revision: string | null) {
+  fwPreviewRevision.value = revision
+  if (revision && fwPolicyChanged.value) {
+    fwPolicyChanged.value = false
+    firewallFormError.value = null
+  }
+}
+
 async function loadFirewallRules() {
   try {
     const res = await api.listMetricFirewall()
@@ -2501,6 +2529,9 @@ async function loadFirewallRules() {
 
 function openFirewallForm(rule?: MetricFirewallRule) {
   firewallFormError.value = null
+  fwPreviewRevision.value = null
+  fwPreviewTesting.value = false
+  fwPolicyChanged.value = false
   // Editing an existing rule keeps its name; only fresh rules get auto-suggestions.
   fwNameTouched.value = !!rule
   if (rule) {
@@ -2536,22 +2567,17 @@ function closeFirewallForm() {
   editingFirewallId.value = null
   firewallFormError.value = null
   fwNameTouched.value = false
+  fwPreviewRevision.value = null
+  fwPreviewTesting.value = false
+  fwPolicyChanged.value = false
 }
 
 async function saveFirewallRule() {
+  if (!fwCanSave.value || firewallSaving.value || fwPolicyChanged.value || fwPreviewTesting.value) return
   firewallFormError.value = null
-  const input: MetricFirewallInput = {
-    name: fwName.value.trim(),
-    enabled: fwEnabled.value,
-    action: fwAction.value,
-    metric_pattern: fwMetricPattern.value.trim(),
-    metric_regex: fwMetricRegex.value,
-    match_label_key: fwMatchLabelKey.value.trim(),
-    match_label_value: fwMatchLabelValue.value.trim(),
-    match_label_value_regex: fwMatchLabelValueRegex.value,
-    drop_label_pattern: fwDropLabelPattern.value.trim(),
-    drop_label_regex: fwDropLabelRegex.value,
-  }
+  firewallSaving.value = true
+  const expected = fwPreviewRevision.value
+  const input = { ...fwDraft.value, expected_policy_revision: expected ?? undefined }
   try {
     if (editingFirewallId.value) {
       await api.updateMetricFirewall(editingFirewallId.value, input)
@@ -2560,8 +2586,16 @@ async function saveFirewallRule() {
     }
     closeFirewallForm()
     await loadFirewallRules()
-  } catch (e: any) {
-    firewallFormError.value = e.message || 'Failed to save rule'
+  } catch (e: unknown) {
+    if (expected && (e as { status?: number })?.status === 409) {
+      fwPolicyChanged.value = true
+      firewallFormError.value = 'Firewall rules changed. Test the draft again before saving.'
+      await loadFirewallRules()
+    } else {
+      firewallFormError.value = e instanceof Error ? e.message : 'Failed to save rule'
+    }
+  } finally {
+    firewallSaving.value = false
   }
 }
 
@@ -5598,7 +5632,7 @@ function formatDate(ts: string): string {
       <!-- Firewall Rule Drawer -->
       <Teleport to="body">
         <Transition name="group-drawer">
-          <div v-if="showFirewallForm" class="group-drawer-overlay" @click.self="closeFirewallForm">
+          <div v-if="showFirewallForm && isAdmin" class="group-drawer-overlay" @click.self="closeFirewallForm">
             <div class="group-drawer group-drawer-wide" role="dialog" aria-label="Firewall rule">
               <div class="group-drawer-header">
                 <span class="group-drawer-title">{{ editingFirewallId ? 'Edit Rule' : 'New Firewall Rule' }}</span>
@@ -5610,6 +5644,7 @@ function formatDate(ts: string): string {
               </div>
 
               <div class="group-drawer-body fw-wizard-body">
+                <div class="fw-rule-editor">
 
                 <!-- Step 1: Action -->
                 <div class="fw-step">
@@ -5753,9 +5788,9 @@ function formatDate(ts: string): string {
                   </div>
                 </div>
 
-                <!-- Live preview -->
+                <!-- Rule summary and allowlist warnings -->
                 <div class="fw-preview-wrap" :class="{ 'fw-preview-alert': fwMatchesAll || (fwAction === 'allow' && fwNoCriteria) }">
-                  <div class="fw-preview-chip">Preview</div>
+                  <div class="fw-preview-chip">Rule summary</div>
                   <div class="fw-preview-row">
                     <span
                       class="fw-preview-verb"
@@ -5792,13 +5827,23 @@ function formatDate(ts: string): string {
                   </div>
                 </div>
 
-                <div v-if="firewallFormError" class="fw-form-err">{{ firewallFormError }}</div>
+                </div>
+
+                <MetricFirewallPreview
+                  :rule-id="editingFirewallId"
+                  :draft="fwDraft"
+                  :can-test="fwCanSave && !firewallSaving"
+                  :policy-changed="fwPolicyChanged"
+                  @revision="setFirewallPreviewRevision"
+                  @testing="fwPreviewTesting = $event"
+                />
               </div>
 
               <div class="group-drawer-footer">
+                <p v-if="firewallFormError" class="fw-form-err" role="alert">{{ firewallFormError }}</p>
                 <button class="btn btn-secondary" @click="closeFirewallForm">Cancel</button>
-                <button class="btn btn-primary" @click="saveFirewallRule" :disabled="!fwCanSave">
-                  {{ editingFirewallId ? 'Save Changes' : 'Create Rule' }}
+                <button class="btn btn-primary" @click="saveFirewallRule" :disabled="!fwCanSave || firewallSaving || fwPolicyChanged || fwPreviewTesting">
+                  {{ firewallSaving ? 'Saving…' : editingFirewallId ? 'Save Changes' : 'Create Rule' }}
                 </button>
               </div>
             </div>
