@@ -49,7 +49,20 @@ jobs:
         run: npm run test:e2e
 
       - name: Build production security-header image
-        run: docker build --platform linux/amd64 -t rush-frontend:csp-test .
+        run: |
+          set -o pipefail
+          build_log=$(mktemp)
+          trap 'unlink "$build_log"' EXIT
+          for delay in 20 40 80 120 0; do
+            if docker build --platform linux/amd64 -t rush-frontend:csp-test . 2>&1 | tee "$build_log"; then
+              exit 0
+            fi
+            if [[ "$delay" == 0 ]] || ! grep -Eq 'unexpected status from (HEAD|GET) request to https://cgr\.dev/[^[:space:]]+: 5[0-9]{2}' "$build_log"; then
+              exit 1
+            fi
+            echo "Chainguard registry returned a server error. Retrying in ${delay}s."
+            sleep "$delay"
+          done
 
       - name: Run production CSP route matrix
         run: |
