@@ -1,5 +1,6 @@
 import type { RouteLocationRaw } from 'vue-router'
 import type { MonitorEvent, MonitorEvidenceQuery } from '../types'
+import { forecastResourceLabel } from './capacityForecast'
 
 type ExploreQuery = Extract<MonitorEvidenceQuery, { kind: 'apm' | 'log' }>
 
@@ -86,6 +87,12 @@ export function evidenceFilters(query: MonitorEvidenceQuery): string[] {
     ].filter(Boolean)
   }
   if (query.kind === 'promql') return Object.entries(query.series ?? {}).map(([label, value]) => `${label}=${value}`)
+  if (query.kind === 'forecast') return [
+    query.metric_name,
+    forecastResourceLabel(query.resource),
+    `${query.horizon_secs / 3600}h forecast`,
+    query.crossing_at ? `Threshold crossing ${formatEvidenceTime(query.crossing_at)}` : '',
+  ].filter(Boolean)
   if (query.kind === 'metric') return query.filters.map(({ key, value }) => `${key}=${value}`)
   return Object.entries(query.members).map(([member, firing]) => `${member} ${firing ? 'firing' : 'clear'}`)
 }
@@ -112,7 +119,7 @@ export function formatEvidenceReading(value: number | null, query: MonitorEviden
     if (query.metric === 'request_rate') return `${number}/s`
     if (/^p(50|75|90|95|99)(?:_latency)?$/.test(query.metric)) return `${number} ms`
   }
-  return number
+  return query.kind === 'forecast' ? `${number}%` : number
 }
 
 export function formatEvidenceThreshold(event: MonitorEvent): string {
@@ -130,6 +137,7 @@ export function evidenceSignal(query: MonitorEvidenceQuery): string {
   }
   if (query.kind === 'log') return 'Log count'
   if (query.kind === 'promql') return 'PromQL'
+  if (query.kind === 'forecast') return query.metric_name
   if (query.kind === 'metric') return `${query.metric_name} (${query.aggregation})`
   return 'Composite'
 }

@@ -118,6 +118,7 @@ import type {
   Monitor,
   MonitorEvent,
   MonitorPreview,
+  ForecastResource,
   MaintenanceWindow,
   CreateMaintenanceWindowRequest,
   Funnel,
@@ -1865,7 +1866,7 @@ export function useApi() {
     return await request(`/monitors/${encodePathSegment(id)}/events`)
   }
 
-  async function previewMonitor(config: Record<string, unknown>): Promise<MonitorPreview> {
+  async function previewMonitor(config: Record<string, unknown>, signal?: AbortSignal): Promise<MonitorPreview> {
     const {
       type,
       eval_window_secs,
@@ -1879,7 +1880,7 @@ export function useApi() {
       ...queryFields
     } = config
     return await request('/monitors/preview', {
-      method: 'POST',
+      method: 'POST', signal,
       body: JSON.stringify({
         type,
         query_config: queryFields,
@@ -1893,6 +1894,11 @@ export function useApi() {
         comparator: comparator || 'above',
       }),
     })
+  }
+
+  async function forecastSeries(metric: string, filter: string, signal: AbortSignal): Promise<{ resources: ForecastResource[]; truncated: boolean }> {
+    const params = new URLSearchParams({ metric, filter })
+    return await request(`/monitors/forecast/series?${params}`, { signal })
   }
 
   async function muteMonitor(id: string): Promise<void> {
@@ -2278,7 +2284,7 @@ export function useApi() {
     listUsers, createUser, deleteUser, changeUserPassword, toggleUser, parsePromql,
     listInvestigationSessions, getInvestigationSession, deleteInvestigationSession, listInvestigationTemplates,
     bubbleUp,
-    listMonitors, getMonitor, createMonitor, updateMonitor, deleteMonitor, listMonitorEvents, previewMonitor, muteMonitor, unmuteMonitor, monitorAutocomplete, monitorSuggest,
+    listMonitors, getMonitor, createMonitor, updateMonitor, deleteMonitor, listMonitorEvents, previewMonitor, forecastSeries, muteMonitor, unmuteMonitor, monitorAutocomplete, monitorSuggest,
     getFeatures, getRuntimeConfig, setExportMaxRows, getQueryLimits, setQueryLimits, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, setSreAgentTenantAccess, listLlmProviders, createLlmProvider, updateLlmProvider, deleteLlmProvider, discoverLlmModels, listLlmModels, createLlmModel, updateLlmModel, deleteLlmModel, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
     listMetricFirewall, previewMetricFirewall, createMetricFirewall, updateMetricFirewall, deleteMetricFirewall,
     previewTraceSampling, traceSamplingOptions, getTraceSamplingDraft, saveTraceSamplingDraft,

@@ -3,6 +3,9 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import DOMPurify from 'dompurify'
 import { useApi } from '../composables/useApi'
 import AutocompleteInput from './AutocompleteInput.vue'
+import ForecastMonitorFields from './ForecastMonitorFields.vue'
+import CapacityForecastPanel from './CapacityForecastPanel.vue'
+import { defaultForecast } from '../lib/capacityForecast'
 import { TimeSeriesPanel } from './panels'
 import { ALERT_TEMPLATE_GROUPS, ALERT_TEMPLATES } from '../lib/alertTemplates'
 import { normalizeApmGroups } from '../lib/monitorApm'
@@ -31,7 +34,10 @@ const saving = ref(false)
 const saveError = ref<string | null>(null)
 
 // ── Section 1: Type ──
-const monitorType = ref<'metric' | 'log' | 'apm' | 'composite'>('metric')
+const monitorType = ref<Monitor['type']>('metric')
+const forecastConfig = ref(defaultForecast())
+const forecastThreshold = ref<number | null>(90)
+const savedForecastSettings = ref<Pick<Monitor, 'enabled' | 'no_data_action' | 'no_data_timeframe' | 'eval_interval_secs'> | null>(null)
 
 // ── Section 2: Query config per type ──
 
@@ -84,6 +90,7 @@ const previewLoading = ref(false)
 const previewError = ref<string | null>(null)
 const previewLookbackSecs = ref(10_800)
 let previewTimer: ReturnType<typeof setTimeout> | null = null
+let previewController: AbortController | undefined
 
 // ── Section 5: Smart Suggestions ──
 const smartSuggestions = ref<{ text: string; severity: string }[]>([])
@@ -177,16 +184,26 @@ const higherValuesAreWorse = computed(() => (
 const lowerValuesAreWorse = computed(() => (
   comparator.value === 'below' || comparator.value === 'below_or_equal'
 ))
+const normalizedForecastThreshold = computed(() => normalizeThreshold(forecastThreshold.value))
+const forecastReady = computed(() => {
+  const threshold = normalizedForecastThreshold.value
+  return Boolean(forecastConfig.value.metric_name.trim() && forecastConfig.value.resource
+    && threshold !== null && threshold > 0 && threshold <= 100)
+})
 const canSave = computed(() => (
   Boolean(monitorName.value.trim())
-  && (monitorType.value === 'composite' || normalizedCriticalThreshold.value !== null)
-  && thresholdValidationError.value === null
+  && (monitorType.value === 'forecast' ? forecastReady.value : (
+    (monitorType.value === 'composite' || normalizedCriticalThreshold.value !== null)
+    && thresholdValidationError.value === null
+  ))
 ))
 
 function applyBlankTemplate() {
   selectedTemplate.value = 'blank'
   templatesExpanded.value = false
   monitorType.value = 'metric'
+  forecastConfig.value = defaultForecast()
+  forecastThreshold.value = 90
   metricExpression.value = ''
   useVisualBuilder.value = true
   metricConfig.value = { metric_name: '', aggregation: 'avg', filters: [], group_by: [] }
@@ -335,6 +352,14 @@ watch(
 
 // ── Query config computed for API ──
 const queryConfig = computed(() => {
+  if (monitorType.value === 'forecast') {
+    return {
+      type: 'forecast',
+      ...forecastConfig.value,
+      metric_name: forecastConfig.value.metric_name.trim(),
+      eval_window_secs: 86_400,
+    }
+  }
   if (monitorType.value === 'metric') {
     return {
       type: 'metric',
@@ -384,38 +409,54 @@ const groupBy = computed(() => {
   return []
 })
 
-// ── Build payload ──
-function buildPayload(): Record<string, unknown> {
-  return {
-    name: monitorName.value,
-    type: monitorType.value,
-    query_config: queryConfig.value,
+const conditions = computed(() => monitorType.value === 'forecast'
+  ? { critical: normalizedForecastThreshold.value, critical_recovery: null, warning: null, warning_recovery: null, comparator: 'above_or_equal' }
+  : {
     critical: normalizedCriticalThreshold.value,
     critical_recovery: criticalRecovery.value,
     warning: normalizedWarningThreshold.value,
     warning_recovery: warningRecovery.value,
-    eval_window_secs: evalWindow.value,
-    eval_interval_secs: 60,
+    comparator: comparator.value,
+  })
+
+// ── Build payload ──
+function buildPayload(): Record<string, unknown> {
+  const forecast = monitorType.value === 'forecast'
+  const saved = forecast ? savedForecastSettings.value : null
+  return {
+    name: monitorName.value,
+    type: monitorType.value,
+    query_config: queryConfig.value,
+    ...conditions.value,
+    eval_window_secs: queryConfig.value.eval_window_secs ?? evalWindow.value,
+    eval_interval_secs: saved?.eval_interval_secs ?? (forecast ? 300 : 60),
     group_by: groupBy.value,
-    no_data_action: 'show',
-    no_data_timeframe: 600,
+    no_data_action: saved?.no_data_action ?? 'show',
+    no_data_timeframe: saved?.no_data_timeframe ?? 600,
     message: message.value,
     notification_channels: notificationChannels.value,
     renotify_interval: renotifyInterval.value,
     tags: tags.value,
     priority: priority.value,
-    enabled: true,
+    enabled: saved?.enabled ?? true,
   }
 }
 
 // ── Preview ──
 function schedulePreview() {
   if (previewTimer) clearTimeout(previewTimer)
-  previewTimer = setTimeout(fetchPreview, 800)
+  previewController?.abort()
+  if (monitorType.value === 'forecast') {
+    preview.value = null
+    previewError.value = null
+    previewLoading.value = forecastReady.value
+  }
+  previewTimer = setTimeout(fetchPreview, monitorType.value === 'forecast' ? 500 : 800)
 }
 
 const previewQueryReady = computed(() => {
   const cfg = queryConfig.value
+  if (cfg.type === 'forecast') return forecastReady.value
   if (cfg.type === 'metric') return Boolean(cfg.metric_name || cfg.expression)
   if (cfg.type === 'apm') return Boolean(cfg.service)
   if (cfg.type === 'log') return Boolean(cfg.search || cfg.service || cfg.severities?.length || cfg.filters?.length)
@@ -423,13 +464,15 @@ const previewQueryReady = computed(() => {
 })
 
 async function fetchPreview() {
-  if (monitorType.value === 'composite') return
-  if (!previewQueryReady.value) {
+  previewController?.abort()
+  if (monitorType.value === 'composite' || !previewQueryReady.value) {
     preview.value = null
     previewError.value = null
     previewLoading.value = false
     return
   }
+  const controller = new AbortController()
+  previewController = controller
   previewLoading.value = true
   previewError.value = null
   try {
@@ -437,18 +480,16 @@ async function fetchPreview() {
       ...queryConfig.value,
       lookback_secs: previewLookbackSecs.value,
       group_by: groupBy.value,
-      critical: normalizedCriticalThreshold.value,
-      critical_recovery: criticalRecovery.value,
-      warning: normalizedWarningThreshold.value,
-      warning_recovery: warningRecovery.value,
-      comparator: comparator.value,
-    })
-    preview.value = result
+      ...conditions.value,
+    }, controller.signal)
+    if (!controller.signal.aborted) preview.value = result
   } catch (error) {
-    preview.value = null
-    previewError.value = error instanceof Error ? error.message : 'The preview request failed.'
+    if (!controller.signal.aborted) {
+      preview.value = null
+      previewError.value = error instanceof Error ? error.message : 'The preview request failed.'
+    }
   } finally {
-    previewLoading.value = false
+    if (!controller.signal.aborted) previewLoading.value = false
   }
 }
 
@@ -459,7 +500,7 @@ function scheduleSuggestions() {
 }
 
 async function fetchSuggestions() {
-  if (monitorType.value === 'composite') return
+  if (monitorType.value === 'composite' || monitorType.value === 'forecast') return
   suggestionsLoading.value = true
   try {
     const res = await api.monitorSuggest(queryConfig.value)
@@ -492,6 +533,8 @@ watch(
     logConfig,
     apmConfig,
     compositeConfig,
+    forecastConfig,
+    forecastThreshold,
     evalWindow,
     monitorType,
     comparator,
@@ -767,11 +810,15 @@ async function handleSave() {
     saveError.value = 'Enter a name for this alert.'
     return
   }
-  if (monitorType.value !== 'composite' && normalizedCriticalThreshold.value === null) {
+  if (monitorType.value === 'forecast' && !forecastReady.value) {
+    saveError.value = 'Choose a resource and enter a threshold above 0% and at most 100%.'
+    return
+  }
+  if (monitorType.value !== 'forecast' && monitorType.value !== 'composite' && normalizedCriticalThreshold.value === null) {
     saveError.value = 'Set an alert threshold.'
     return
   }
-  if (thresholdValidationError.value) {
+  if (monitorType.value !== 'forecast' && thresholdValidationError.value) {
     saveError.value = thresholdValidationError.value
     return
   }
@@ -822,7 +869,16 @@ onMounted(async () => {
       priority.value = m.priority
 
       const qc = m.query_config || {}
-      if (m.type === 'metric') {
+      if (m.type === 'forecast') {
+        savedForecastSettings.value = m
+        forecastConfig.value = {
+          metric_name: qc.metric_name || '',
+          horizon_secs: qc.horizon_secs,
+          input_unit: qc.input_unit,
+          resource: qc.resource || null,
+        }
+        forecastThreshold.value = m.critical
+      } else if (m.type === 'metric') {
         metricConfig.value.metric_name = qc.metric_name || ''
         metricConfig.value.aggregation = qc.aggregation || 'avg'
         metricConfig.value.filters = qc.filters || []
@@ -860,6 +916,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  previewController?.abort()
   if (previewTimer) clearTimeout(previewTimer)
   if (suggestTimer) clearTimeout(suggestTimer)
 })
@@ -948,20 +1005,22 @@ onUnmounted(() => {
         <div class="mf-section-label">Alert type</div>
         <div class="mf-type-pills">
           <button
-            v-for="t in (['metric', 'log', 'apm', 'composite'] as const)"
+            v-for="t in (['metric', 'log', 'apm', 'forecast', 'composite'] as const)"
             :key="t"
             class="mf-type-pill"
             :class="{ active: monitorType === t }"
+            :aria-pressed="monitorType === t"
             @click="monitorType = t"
           >
-            {{ t === 'apm' ? 'APM' : t.charAt(0).toUpperCase() + t.slice(1) }}
+            {{ t === 'apm' ? 'APM' : t === 'forecast' ? 'Capacity forecast' : t.charAt(0).toUpperCase() + t.slice(1) }}
           </button>
         </div>
       </div>
 
       <!-- ═══ Section 2: Query ═══ -->
       <div class="mf-section">
-        <div class="mf-section-label">Query</div>
+        <div class="mf-section-label">{{ monitorType === 'forecast' ? 'Capacity forecast' : 'Query' }}</div>
+        <ForecastMonitorFields v-if="monitorType === 'forecast'" v-model="forecastConfig" v-model:threshold="forecastThreshold" />
 
         <!-- Metric Query -->
         <template v-if="monitorType === 'metric'">
@@ -1249,7 +1308,7 @@ onUnmounted(() => {
       </div>
 
       <!-- ═══ Section 3: Conditions ═══ -->
-      <div class="mf-section">
+      <div v-if="monitorType !== 'forecast'" class="mf-section">
         <div class="mf-section-label">Conditions</div>
         <div class="mf-condition-direction">
           <span class="mf-cond-text">Trigger when value is</span>
@@ -1335,8 +1394,15 @@ onUnmounted(() => {
       </div>
 
       <!-- ═══ Section 4: Live Preview ═══ -->
+      <CapacityForecastPanel
+        v-if="monitorType === 'forecast'"
+        :forecast="preview?.forecast"
+        :loading="previewLoading"
+        :error="previewError"
+        :ready="forecastReady"
+      />
       <TimeSeriesPanel
-        v-if="monitorType !== 'composite'"
+        v-else-if="monitorType !== 'composite'"
         class="mf-preview-panel"
         title="Alert preview"
         description="Recent values for this query with the warning and critical thresholds overlaid."
@@ -1415,7 +1481,7 @@ onUnmounted(() => {
       </TimeSeriesPanel>
 
       <!-- ═══ Section 5: Smart Suggestions ═══ -->
-      <TransitionGroup name="mf-suggest" tag="div" class="mf-suggestions" v-if="smartSuggestions.length > 0">
+      <TransitionGroup name="mf-suggest" tag="div" class="mf-suggestions" v-if="monitorType !== 'forecast' && smartSuggestions.length > 0">
         <div
           v-for="s in smartSuggestions"
           :key="s.text"
