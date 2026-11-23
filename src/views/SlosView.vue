@@ -108,19 +108,17 @@ function successRate(slo: Slo): string {
 
 function budgetPct(slo: Slo): number {
   if (slo.error_budget_remaining === null) return 0
-  const errorBudget = 1 - slo.target_percentage / 100
-  if (errorBudget <= 0) return 0
-  return Math.max(0, Math.min(100, (slo.error_budget_remaining / errorBudget) * 100))
+  return Math.max(0, Math.min(100, slo.error_budget_remaining * 100))
 }
 
 function budgetLabel(slo: Slo): string {
-  if (slo.error_budget_remaining === null) return '-'
+  if (slo.error_budget_remaining === null || slo.state === 'no_data') return '-'
   return `${budgetPct(slo).toFixed(1)}%`
 }
 
 function budgetSeverity(slo: Slo): string {
   const pct = budgetPct(slo)
-  if (slo.error_budget_remaining === null) return 'none'
+  if (slo.error_budget_remaining === null || slo.state === 'no_data') return 'none'
   if (pct > 50) return 'healthy'
   if (pct > 10) return 'warning'
   return 'critical'

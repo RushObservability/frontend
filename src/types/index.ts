@@ -616,6 +616,25 @@ export type SloState = 'compliant' | 'breaching' | 'no_data'
 export type SloType = 'trace' | 'metric'
 export type SloIndicatorType = 'availability' | 'latency' | 'threshold'
 export type SloThresholdOp = 'lt' | 'lte' | 'gt' | 'gte'
+export type SloMaintenanceRepeat = 'once' | 'daily' | 'weekly'
+
+export interface SloMaintenancePeriod {
+  starts_at: string
+  ends_at: string
+}
+
+export interface SloMaintenanceWindow extends SloMaintenancePeriod {
+  name: string
+  repeat: SloMaintenanceRepeat
+}
+
+export interface SloMaintenanceEvaluation {
+  revision: number
+  excluded_seconds: number
+  excluded_total: number
+  excluded_bad: number
+  periods: SloMaintenancePeriod[]
+}
 
 export interface Slo {
   id: string
@@ -643,6 +662,10 @@ export interface Slo {
   total_count: number | null
   last_eval_at: string | null
   last_breached_at: string | null
+  maintenance_supported?: boolean
+  maintenance_revision?: number
+  maintenance_windows?: SloMaintenanceWindow[]
+  maintenance_evaluation?: SloMaintenanceEvaluation | null
   created_at: string
   updated_at: string
 }
