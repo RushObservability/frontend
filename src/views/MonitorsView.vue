@@ -102,6 +102,7 @@ function typeLabel(type: string): string {
     metric: 'Metric',
     log: 'Log',
     apm: 'APM',
+    forecast: 'Capacity forecast',
     composite: 'Composite',
   }
   return labels[type] || type
@@ -224,6 +225,7 @@ async function removeMonitor(id: string, ev: Event) {
           <option value="metric">Metric</option>
           <option value="log">Log</option>
           <option value="apm">APM</option>
+          <option value="forecast">Capacity forecast</option>
           <option value="composite">Composite</option>
         </select>
         <div class="search-wrap">

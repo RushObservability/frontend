@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
 import { PanelCard, TablePanel, TimeSeriesPanel } from '../components/panels'
+import CapacityForecastPanel from '../components/CapacityForecastPanel.vue'
 import DeleteConfirmationModal from '../components/DeleteConfirmationModal.vue'
 import DataTable from '../components/DataTable.vue'
 import MonitorEventEvidence from '../components/MonitorEventEvidence.vue'
@@ -49,6 +50,7 @@ async function loadPreview() {
   try {
     preview.value = await api.previewMonitor({
       ...m.query_config,
+      ...(m.type === 'forecast' ? { type: m.type } : {}),
       eval_window_secs: m.eval_window_secs,
       lookback_secs: lookbackSecs.value,
       group_by: m.group_by,
@@ -101,7 +103,7 @@ function stateLabel(state: string): string {
 }
 
 function typeLabel(type: string): string {
-  const labels: Record<string, string> = { metric: 'Metric', log: 'Log', apm: 'APM', composite: 'Composite' }
+  const labels: Record<string, string> = { metric: 'Metric', log: 'Log', apm: 'APM', forecast: 'Capacity forecast', composite: 'Composite' }
   return labels[type] || type
 }
 
@@ -322,7 +324,16 @@ function closeDeleteConfirm() {
       </div>
 
       <!-- Live graph -->
+      <CapacityForecastPanel
+        v-if="monitor.type === 'forecast'"
+        class="detail-section detail-live-panel"
+        :forecast="preview?.forecast"
+        :loading="previewLoading"
+        :error="previewError"
+        ready
+      />
       <TimeSeriesPanel
+        v-else
         class="detail-section detail-live-panel"
         title="Live"
         description="The alert's evaluated metric over the selected lookback, with alert thresholds drawn as reference lines."

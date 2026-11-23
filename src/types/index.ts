@@ -1571,7 +1571,7 @@ export interface Monitor {
   id: string
   tenant_id: string
   name: string
-  type: 'metric' | 'log' | 'apm' | 'composite'
+  type: 'metric' | 'log' | 'apm' | 'composite' | 'forecast'
   query_config: any
   critical: number | null
   critical_recovery: number | null
@@ -1613,11 +1613,38 @@ export interface MonitorEvent {
   evidence?: MonitorEvidence | null
 }
 
+export interface ForecastResource {
+  service: string
+  attributes: Record<string, string>
+  resource_attributes: Record<string, string>
+}
+
+export interface CapacityForecastConfig {
+  metric_name: string
+  resource: ForecastResource
+  input_unit: 'ratio' | 'percent'
+  horizon_secs: number
+}
+
+export interface CapacityForecast {
+  evaluated_at: string
+  history_from: string
+  horizon_end: string
+  threshold_pct: number
+  current_pct: number | null
+  projected_pct: number | null
+  crossing_at: string | null
+  no_data: 'insufficient_history' | 'stale' | 'invalid_unit' | null
+  history: { timestamp: string; value: number }[]
+  projection: { timestamp: string; value: number }[]
+}
+
 export type MonitorEvidenceQuery =
   | { kind: 'apm'; service: string; metric: string; endpoint_filter?: string | null }
   | { kind: 'log'; search: string; service: string; severities: string[]; filters: Array<{ field: string; op: string; value: string }> }
   | { kind: 'promql'; expression: string; series: Record<string, string> | null }
   | { kind: 'metric'; metric_name: string; aggregation: string; filters: Array<{ key: string; value: string }> }
+  | ({ kind: 'forecast'; crossing_at: string | null } & CapacityForecastConfig)
   | { kind: 'composite'; formula: string; members: Record<string, boolean> }
 
 export interface MonitorEvidence {
@@ -1631,6 +1658,7 @@ export interface MonitorEvidence {
 }
 
 export interface MonitorPreview {
+  forecast?: CapacityForecast
   current_value: number | null
   timeseries: { timestamp: string; value: number }[]
   series?: Array<{

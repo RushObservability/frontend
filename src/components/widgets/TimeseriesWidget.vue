@@ -34,6 +34,7 @@ const props = withDefaults(defineProps<{
   linkedReadout?: boolean
   sharedLegend?: boolean
   selectableSeries?: boolean
+  forecastFrom?: number
   zoomable?: boolean
 }>(), { fill: null })
 
@@ -189,6 +190,14 @@ const seriesBounds = computed(() => {
 })
 
 // Threshold reference lines (mapped to the active Y scale).
+const forecastRegion = computed(() => {
+  const start = props.forecastFrom
+  const { minT, maxT } = seriesBounds.value
+  if (start == null || start < minT || start >= maxT || maxT <= minT) return null
+  const x = padLeft + (start - minT) / (maxT - minT) * plotWidth.value
+  return { x, width: padLeft + plotWidth.value - x }
+})
+
 const thresholdLines = computed(() => {
   const ths = props.thresholds || []
   if (!ths.length) return []
@@ -588,8 +597,12 @@ function cancelZoom(event: PointerEvent) {
     >
       <!-- ── Multi-series (metrics/PromQL) mode ── -->
       <svg v-if="seriesMode" :viewBox="`0 0 ${svgWidth} ${svgHeight}`" preserveAspectRatio="none" class="ch-svg ch-animate ts-svg" aria-hidden="true">
+        <rect v-if="forecastRegion" :x="forecastRegion.x" :y="padTop"
+          :width="forecastRegion.width" :height="plotHeight" class="ts-forecast-region" />
         <line v-for="tick in seriesYTicks" :key="'sy' + tick.value" :x1="padLeft" :y1="tick.y" :x2="svgWidth - padRight" :y2="tick.y" :class="['ch-grid', { 'ch-grid--baseline': tick.value === 0 }]" />
         <line v-for="xl in seriesXLabels" :key="'sv' + xl.x" :x1="xl.x" :y1="padTop" :x2="xl.x" :y2="padTop + plotHeight" class="ch-grid" />
+        <line v-if="forecastRegion" :x1="forecastRegion.x" :x2="forecastRegion.x"
+          :y1="padTop" :y2="padTop + plotHeight" class="ts-forecast-boundary" />
         <rect
           v-for="bar in stackedBars"
           :key="`${bar.seriesIndex}:${bar.time}`"
@@ -708,8 +721,10 @@ function cancelZoom(event: PointerEvent) {
           class="ts-axis-label ts-axis-label--bottom"
           :style="{ left: `${(tick.x / svgWidth) * 100}%` }"
         >{{ tick.label }}</span>
+        <span v-if="forecastRegion" class="ts-reference-label ts-forecast-label"
+          :style="{ left: `${(forecastRegion.x / svgWidth) * 100}%`, top: `${(padTop / svgHeight) * 100}%` }">Now</span>
         <span
-          v-for="(threshold, index) in thresholdLines"
+          v-for="(threshold, index) in thresholdLines.filter(line => line.label)"
           :key="`threshold-${index}`"
           class="ts-reference-label ts-threshold-label"
           :style="{

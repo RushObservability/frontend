@@ -34,7 +34,7 @@ const currentVersionLabel = computed(() => evidence.value && props.currentVersio
     <template v-else>
       <dl class="evidence-readings">
         <div>
-          <dt>Observed</dt>
+          <dt>{{ evidence.query.kind === 'forecast' ? 'Forecast peak' : 'Observed' }}</dt>
           <dd class="mono">{{ formatEvidenceReading(event.value, evidence.query) }}</dd>
         </div>
         <div>
