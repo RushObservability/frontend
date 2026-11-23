@@ -125,6 +125,10 @@ import type {
   MetricFirewallSample,
   MetricFirewallPreviewResult,
   MetricFirewallInput,
+  TraceSamplingPolicy,
+  TraceSamplingDraft,
+  TraceSamplingPreviewResult,
+  TraceSamplingOption,
   AuditListResponse,
   AuditQueryParams,
   AuditVerifyResponse,
@@ -2066,6 +2070,29 @@ export function useApi() {
     })
   }
 
+  async function previewTraceSampling(policy: TraceSamplingPolicy, signal: AbortSignal): Promise<TraceSamplingPreviewResult> {
+    return await request('/traces/sampling-preview', {
+      method: 'POST',
+      body: JSON.stringify(policy),
+      signal,
+      invalidatesAnalytics: false,
+    })
+  }
+
+  async function traceSamplingOptions(windowMinutes: TraceSamplingPolicy['window_minutes'], signal: AbortSignal): Promise<TraceSamplingOption[]> {
+    return await request(`/traces/sampling-options?window_minutes=${windowMinutes}`, { signal })
+  }
+
+  async function getTraceSamplingDraft(signal: AbortSignal): Promise<TraceSamplingDraft> {
+    return await request('/settings/trace-sampling', { signal })
+  }
+
+  async function saveTraceSamplingDraft(draft: TraceSamplingDraft, signal: AbortSignal): Promise<TraceSamplingDraft> {
+    return await request('/settings/trace-sampling', {
+      method: 'PUT', body: JSON.stringify(draft), signal, invalidatesAnalytics: false,
+    })
+  }
+
   // ── Metric Firewall API ──
 
   async function listMetricFirewall(): Promise<{ rules: MetricFirewallRule[] }> {
@@ -2247,5 +2274,6 @@ export function useApi() {
     listMonitors, getMonitor, createMonitor, updateMonitor, deleteMonitor, listMonitorEvents, previewMonitor, muteMonitor, unmuteMonitor, monitorAutocomplete, monitorSuggest,
     getFeatures, getRuntimeConfig, setExportMaxRows, getQueryLimits, setQueryLimits, getSreAgentSettings, setSreAgentSettings, getSreAgentModels, getSreAgentOptions, setSreAgentEnabled, setSreAgentTenantAccess, listLlmProviders, createLlmProvider, updateLlmProvider, deleteLlmProvider, discoverLlmModels, listLlmModels, createLlmModel, updateLlmModel, deleteLlmModel, getDeployMarkersSetting, setDeployMarkersEnabled, getRumSetting, setRumEnabled, getCloudwatchSetting, setCloudwatchSetting, exportExplore,
     listMetricFirewall, previewMetricFirewall, createMetricFirewall, updateMetricFirewall, deleteMetricFirewall,
+    previewTraceSampling, traceSamplingOptions, getTraceSamplingDraft, saveTraceSamplingDraft,
   }
 }

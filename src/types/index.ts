@@ -1713,6 +1713,76 @@ export interface FunnelResult {
   steps: FunnelResultStep[]
 }
 
+export interface TraceSamplingRule {
+  service?: string
+  scope: 'any_span' | 'server_span' | 'root_span'
+  http_status?: string
+  method?: string
+  route?: string
+  minimum_root_duration_ms?: number
+  require_rare_route?: boolean
+  keep_percent: number
+}
+
+export interface TraceSamplingOption {
+  service: string
+  method: string
+  route: string
+  http_status: number
+  root: number
+  server: number
+}
+
+export interface TraceSamplingPolicy {
+  window_minutes: 15 | 60
+  rules?: TraceSamplingRule[]
+}
+
+export interface TraceSamplingDraft extends TraceSamplingPolicy {
+  rules: TraceSamplingRule[]
+}
+
+export interface TraceSamplingRetention {
+  total: number
+  kept: number
+}
+
+export interface TraceSamplingPreviewResult {
+  from: string
+  to: string
+  window_minutes: number
+  settling_seconds: number
+  coverage: {
+    scanned_spans: number
+    observed_minutes: number
+    sampled_traces: number
+    sample_limit: number
+    discovery_capped: boolean
+    trace_sample_capped: boolean
+    incomplete_traces: number
+    boundary_traces: number
+    span_capped_traces: number
+    traces_without_route: number
+  }
+  retention: TraceSamplingRetention
+  rule_retention: TraceSamplingRetention[]
+  fallback_retention: TraceSamplingRetention
+  cohorts: {
+    errors: TraceSamplingRetention
+    slow: TraceSamplingRetention
+    rare_routes: TraceSamplingRetention
+  }
+  rare_route_threshold: number
+  rare_route_count: number
+  rare_routes_zero_kept: number
+  rare_routes: Array<{
+    service: string
+    method: string
+    route: string
+    retention: TraceSamplingRetention
+  }>
+}
+
 // ── Metric Firewall ──
 
 export interface MetricFirewallRule {
