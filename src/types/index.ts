@@ -726,6 +726,31 @@ export interface ServiceTimeBreakdown {
   databases: DatabaseTimeBreakdown[]
 }
 
+export type ServiceTagDimension = 'region' | 'version' | 'endpoint'
+
+export interface ServiceTagBucket {
+  timestamp_ms: number
+  requests: number
+  errors: number
+  p95_ms: number
+}
+
+export interface ServiceTagGroup {
+  value: string | null
+  requests: number
+  errors: number
+  p95_ms: number
+  other_values: number
+  untagged_requests: number
+  buckets: ServiceTagBucket[]
+}
+
+export interface ServiceTagBreakdown {
+  bucket_seconds: number
+  total_requests: number
+  groups: ServiceTagGroup[]
+}
+
 export interface ServiceTimeBreakdownBucket {
   bucket: string
   request_count: number

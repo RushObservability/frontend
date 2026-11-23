@@ -8,6 +8,7 @@ import SpanLogTable from '../components/SpanLogTable.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 import TimePicker from '../components/TimePicker.vue'
 import PanelCard from '../components/PanelCard.vue'
+import ServiceTagBreakdown from '../components/ServiceTagBreakdown.vue'
 import { HistogramPanel, TimeSeriesPanel } from '../components/panels'
 import TimeseriesWidget from '../components/widgets/TimeseriesWidget.vue'
 import { provideChartHover } from '../composables/useChartHover'
@@ -31,6 +32,7 @@ const graphNodes = ref<GraphNode[]>([])
 const graphEdges = ref<GraphEdge[]>([])
 const timeseries = ref<TimeseriesBucket[]>([])
 const chartDomain = ref<TimeDomain>()
+const overviewWindow = ref<{ from: string; to: string }>()
 const timeseriesError = ref('')
 const graphError = ref('')
 let loadGeneration = 0
@@ -251,6 +253,7 @@ async function loadData() {
   graphError.value = ''
   timeseriesPrev.value = []
   const { from, to } = windowRange()
+  overviewWindow.value = { from, to }
   const interval = serviceQueryBucketSeconds(minutes.value)
   chartDomain.value = { from: Math.floor(parseUtcTimestamp(from) / 1000 / interval) * interval, to: parseUtcTimestamp(to) / 1000 }
   chartZoom.value = null
@@ -1482,6 +1485,13 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
           @keydown.space.prevent="openChart('hist')"
         />
       </div>
+
+      <ServiceTagBreakdown
+        v-if="activeTab === 'overview' && overviewWindow"
+        :service="serviceName"
+        :tenant="activeTenant"
+        :range="overviewWindow"
+      />
 
       <!-- Topology: who calls this service and what it depends on -->
       <div class="svc-overview-grid">

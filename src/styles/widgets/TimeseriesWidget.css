@@ -105,6 +105,7 @@
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
+.ts-legend--shared:not(.ts-legend--inspecting) { visibility: hidden; }
 .ts-legend-item { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 5px; max-width: 240px; overflow: hidden; white-space: nowrap; }
 .ts-legend-dot { width: 8px; height: 3px; border-radius: 1px; flex-shrink: 0; }
 .ts-legend-name { overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
@@ -133,3 +134,11 @@
 .ts-plot:focus-visible, .ts-legend:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .ts-readout-time { flex-shrink: 0; color: var(--text-secondary); }
 .ts-legend--inspecting { border-top-color: var(--border-default); }
+
+.ts-series-hit { cursor: pointer; }
+.ts-series-hit-line {
+  stroke: transparent;
+  stroke-width: 12;
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
+}
