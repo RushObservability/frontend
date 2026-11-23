@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, watch, nextTick, computed, useId } from 'vue'
+
+defineOptions({ inheritAttrs: false })
 
 const props = withDefaults(defineProps<{
   modelValue: string
   placeholder?: string
   mono?: boolean
-  fetchSuggestions: (prefix: string) => Promise<string[]>
+  fetchSuggestions?: (prefix: string) => Promise<string[]>
+  options?: readonly string[]
+  emptyOption?: string
   debounceMs?: number
 }>(), {
   placeholder: '',
@@ -23,7 +27,22 @@ const suggestions = ref<string[]>([])
 const showDropdown = ref(false)
 const activeIndex = ref(-1)
 const loading = ref(false)
+const focused = ref(false)
+const dismissed = ref(false)
+const typed = ref(false)
+const listId = useId()
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+const items = computed(() => {
+  if (!props.options) return suggestions.value
+  const query = typed.value ? props.modelValue.trim().toLowerCase() : ''
+  const matches = query ? props.options.filter(value => value.toLowerCase().includes(query)) : props.options
+  const offerEmpty = props.emptyOption && props.emptyOption.toLowerCase().includes(query)
+  return (offerEmpty ? ['', ...matches] : matches).slice(0, 50)
+})
+const expanded = computed(() => props.options
+  ? focused.value && !dismissed.value && items.value.length > 0
+  : showDropdown.value)
 
 const inputClasses = computed(() => ({
   'ac-input': true,
@@ -34,12 +53,18 @@ function onInput(ev: Event) {
   const val = (ev.target as HTMLInputElement).value
   emit('update:modelValue', val)
   activeIndex.value = -1
+  if (props.options) {
+    dismissed.value = false
+    typed.value = true
+    return
+  }
   scheduleFetch(val)
 }
 
 function scheduleFetch(val: string) {
   if (debounceTimer) clearTimeout(debounceTimer)
-  if (!val.trim()) {
+  const fetch = props.fetchSuggestions
+  if (!val.trim() || !fetch) {
     suggestions.value = []
     showDropdown.value = false
     return
@@ -47,7 +72,7 @@ function scheduleFetch(val: string) {
   debounceTimer = setTimeout(async () => {
     loading.value = true
     try {
-      const results = await props.fetchSuggestions(val)
+      const results = await fetch(val)
       suggestions.value = results
       showDropdown.value = results.length > 0
     } catch {
@@ -59,13 +84,23 @@ function scheduleFetch(val: string) {
   }, props.debounceMs)
 }
 
+function openChoices() {
+  dismissed.value = false
+  typed.value = false
+  activeIndex.value = -1
+}
+
 function onFocus() {
+  focused.value = true
+  openChoices()
   if (suggestions.value.length > 0 && props.modelValue.trim()) {
     showDropdown.value = true
   }
 }
 
 function onBlur() {
+  focused.value = false
+  activeIndex.value = -1
   // Delay to allow click on dropdown items
   setTimeout(() => {
     showDropdown.value = false
@@ -76,15 +111,19 @@ function selectItem(item: string) {
   emit('update:modelValue', item)
   emit('select', item)
   showDropdown.value = false
+  dismissed.value = true
   activeIndex.value = -1
 }
 
 function onKeydown(ev: KeyboardEvent) {
-  if (!showDropdown.value) return
+  if (!expanded.value && props.options && ev.key === 'ArrowDown') {
+    openChoices()
+  }
+  if (!expanded.value) return
 
   if (ev.key === 'ArrowDown') {
     ev.preventDefault()
-    activeIndex.value = Math.min(activeIndex.value + 1, suggestions.value.length - 1)
+    activeIndex.value = Math.min(activeIndex.value + 1, items.value.length - 1)
     scrollActive()
   } else if (ev.key === 'ArrowUp') {
     ev.preventDefault()
@@ -92,10 +131,12 @@ function onKeydown(ev: KeyboardEvent) {
     scrollActive()
   } else if (ev.key === 'Enter' && activeIndex.value >= 0) {
     ev.preventDefault()
-    const item = suggestions.value[activeIndex.value]
-    if (item) selectItem(item)
+    const item = items.value[activeIndex.value]
+    if (item !== undefined) selectItem(item)
   } else if (ev.key === 'Escape') {
+    ev.preventDefault()
     showDropdown.value = false
+    dismissed.value = true
     activeIndex.value = -1
   }
 }
@@ -119,31 +160,45 @@ watch(() => props.modelValue, (val) => {
 <template>
   <div class="ac-wrap">
     <input
+      v-bind="$attrs"
       :value="modelValue"
       :placeholder="placeholder"
       :class="inputClasses"
       autocomplete="off"
       spellcheck="false"
+      role="combobox"
+      aria-autocomplete="list"
+      :aria-expanded="expanded"
+      :aria-controls="expanded ? listId : undefined"
+      :aria-activedescendant="expanded && items[activeIndex] !== undefined ? `${listId}-${activeIndex}` : undefined"
       @input="onInput"
       @focus="onFocus"
+      @click="options && openChoices()"
       @blur="onBlur"
       @keydown="onKeydown"
     />
     <Transition name="ac-dropdown">
       <div
-        v-if="showDropdown"
+        v-if="expanded"
+        :id="listId"
         ref="dropdownRef"
         class="ac-dropdown"
+        role="listbox"
       >
         <div
-          v-for="(item, i) in suggestions"
+          v-for="(item, i) in items"
           :key="item"
+          :id="`${listId}-${i}`"
           class="ac-item"
           :class="{ 'ac-item-active': i === activeIndex }"
-          @mousedown.prevent="selectItem(item)"
+          role="option"
+          :aria-selected="i === activeIndex"
+          :title="item || emptyOption"
+          @pointerdown.prevent
+          @click="selectItem(item)"
           @mouseenter="activeIndex = i"
         >
-          {{ item }}
+          {{ item || emptyOption }}
         </div>
       </div>
     </Transition>
@@ -215,6 +270,7 @@ watch(() => props.modelValue, (val) => {
 }
 .ac-dropdown-leave-active {
   transition: opacity 0.08s ease-in;
+  pointer-events: none;
 }
 .ac-dropdown-enter-from {
   opacity: 0;

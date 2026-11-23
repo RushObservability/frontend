@@ -1,4 +1,5 @@
-import type { Component } from 'vue'
+import { defineAsyncComponent, type Component } from 'vue'
+import { frontendEdition } from '../../edition/manifest'
 
 export type SettingsTabId = string
 export type AgentSubtabId = 'access' | 'providers' | 'models' | 'limits' | 'skills'
@@ -8,7 +9,7 @@ export interface SettingsTabDef {
   label: string
   hint: string
   group: string
-  /** Optional edition-owned top-level settings page. */
+  /** Optional top-level settings page. */
   component?: Component
 }
 
@@ -47,6 +48,11 @@ export const SETTINGS_TABS: SettingsTabDef[] = [
   { id: 'log-views', label: 'Log views', group: 'Data & Routing', hint: 'Saved log datasets with their own filters and columns.' },
   { id: 'alerting', label: 'Alerting', group: 'Data & Routing', hint: 'Configure alert delivery channels.' },
   { id: 'firewall', label: 'Metric Firewall', group: 'Data & Routing', hint: 'Block metric series or remove labels during ingest.' },
+  {
+    id: 'trace-sampling', label: 'Trace sampling', group: 'Data & Routing',
+    hint: 'Preview how a draft sampling policy would affect stored traces.',
+    component: defineAsyncComponent(() => import('./TraceSamplingPreview.vue')),
+  },
 ]
 
 const SETTINGS_GROUP_ORDER = ['Workspace', 'Access & Identity', 'Data & Routing']
@@ -65,4 +71,3 @@ export const SETTINGS_INTEGRATIONS: SettingsIntegrationNavItem[] = [
 ]
 
 export const SETTINGS_CONFIG_PANELS: SettingsConfigPanel[] = frontendEdition.settingsConfigPanels
-import { frontendEdition } from '../../edition/manifest'
