@@ -1,0 +1,212 @@
+.rum-cohorts {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+}
+
+.report-header h2 {
+  margin: 0 0 5px;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -.025em;
+}
+
+.report-header p,
+.history-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.report-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 36px;
+}
+
+.action-filter {
+  display: grid;
+  flex: 0 1 340px;
+  min-width: 0;
+  gap: 5px;
+}
+
+.action-filter label,
+.identity-title {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.report-control {
+  min-height: 34px;
+  min-width: 0;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+}
+
+.report-control:not(:disabled) { cursor: pointer; }
+.report-control:disabled { color: var(--text-muted); }
+.report-control:focus-visible,
+.retention-value:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.filter-hint,
+.identity-dates {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.identity-coverage {
+  display: flex;
+  flex: 0 1 390px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 7px 12px;
+}
+
+.identity-coverage p {
+  width: 100%;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.coverage-count { color: var(--text-muted); }
+.identity-coverage strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.coverage-meter {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  background: var(--border-strong);
+  border-radius: var(--r-pill);
+}
+
+.coverage-meter span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.retention-panel {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.retention-header,
+.retention-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 14px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.retention-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.retention-panel :deep(table) { min-width: 535px; }
+.retention-table .cohort-date-header,
+.retention-table .cohort-date {
+  position: sticky;
+  left: 0;
+}
+.retention-table .cohort-date {
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border-color: var(--border-subtle);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.retention-table .cohort-week-header { text-align: center; }
+.retention-table .cohort-count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.retention-table .retention-cell {
+  width: 14%;
+  padding: 4px 3px;
+  text-align: center;
+}
+.retention-table .retention-cell:last-child { padding-right: 10px; }
+
+.retention-value,
+.heat-swatches span {
+  background: color-mix(in srgb, var(--accent) var(--heat), var(--bg-surface));
+  border-radius: var(--r-sm);
+}
+
+.retention-value,
+.incomplete-week {
+  display: grid;
+  width: 100%;
+  min-height: 30px;
+  place-items: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.retention-value {
+  color: var(--text-primary);
+  font-family: inherit;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.retention-value:hover { border-color: var(--border-strong); }
+.retention-value[aria-pressed="true"] { border-color: var(--accent); }
+.incomplete-week { color: var(--text-muted); }
+
+.cohort-caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.retention-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.retention-readout strong { color: var(--text-primary); }
+.retention-footer { border-top: 1px solid var(--border-subtle); }
+.retention-legend,
+.heat-swatches { display: inline-flex; align-items: center; gap: 4px; }
+.heat-swatches { gap: 2px; }
+.heat-swatches span { width: 10px; height: 8px; }
+
+@media (pointer: coarse) {
+  .report-control,
+  .retention-value { min-height: 44px; }
+}

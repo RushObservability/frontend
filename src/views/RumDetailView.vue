@@ -5,6 +5,7 @@ import { useApi } from '../composables/useApi'
 import type { RumVitalsSummary, RumPageStats, RumErrorGroup, RumSessionSummary, RumRecord, Filter } from '../types'
 import TimePicker from '../components/TimePicker.vue'
 import DataTable from '../components/DataTable.vue'
+import RumAppLayout from '../components/RumAppLayout.vue'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 
 const props = defineProps<{ appName: string }>()
@@ -405,24 +406,11 @@ watch(selectedPreset, () => {
 </script>
 
 <template>
-  <div class="rum">
-    <!-- ═══ Header ═══ -->
-    <div class="rum-header">
-      <div class="rum-header-left">
-        <button class="back-btn" @click="router.push('/rum')">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 3L5 7l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          RUM
-        </button>
-        <div class="rum-title-block">
-          <span class="rum-kicker">Real user monitoring</span>
-          <h2 class="page-title">{{ appName }}</h2>
-        </div>
-      </div>
-      <div class="rum-header-controls">
-        <span class="rum-window">Last {{ rangeLabel(selectedPreset) }}</span>
-        <TimePicker v-model="selectedPreset" />
-      </div>
-    </div>
+  <RumAppLayout :app-name="appName">
+    <template #controls>
+      <span class="rum-window">Last {{ rangeLabel(selectedPreset) }}</span>
+      <TimePicker v-model="selectedPreset" />
+    </template>
 
     <!-- ═══ Loading indicator ═══ -->
     <div v-if="loadingData" class="loading-bar"></div>
@@ -825,7 +813,7 @@ watch(selectedPreset, () => {
         </div>
       </Transition>
     </Teleport>
-  </div>
+  </RumAppLayout>
 </template>
 
 <style scoped src="../styles/views/RumDetailView.css"></style>
