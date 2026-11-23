@@ -49,6 +49,8 @@ import type {
   DeployMarker,
   Filter,
   ServiceGraph,
+  ServiceTagBreakdown,
+  ServiceTagDimension,
   ServiceTimeBreakdown,
   ServiceTimeBreakdownTimeseries,
   LatencyHistogram,
@@ -823,6 +825,11 @@ export function useApi() {
   async function serviceGraph(minutes?: number, signal?: AbortSignal): Promise<ServiceGraph> {
     const qs = minutes ? `?minutes=${minutes}` : ''
     return await request(`/services/graph${qs}`, { signal })
+  }
+
+  async function serviceTagBreakdown(service: string, dimension: ServiceTagDimension, range: { from: string; to: string }, signal: AbortSignal): Promise<ServiceTagBreakdown> {
+    const qs = new URLSearchParams({ service, dimension, ...range })
+    return await request(`/services/tag-breakdown?${qs}`, { signal })
   }
 
   async function serviceTimeBreakdown(service: string, minutes?: number): Promise<ServiceTimeBreakdown> {
@@ -2235,7 +2242,7 @@ export function useApi() {
     loading, error,
     login, logout, getMe, listAuthSessions, revokeAuthSession, getSessionTimeoutSettings, saveSessionTimeoutSettings,
     getAuditEvents, verifyAuditChain,
-    getTrace, queryEvents, queryExplore, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceTimeBreakdown, serviceTimeBreakdownTimeseries, serviceLatencyHistogram, serviceEndpoints, serviceErrors, suggestValues, queryGroup,
+    getTrace, queryEvents, queryExplore, queryCount, queryTimeseries, openInvestigationStream, getServices, serviceGraph, serviceTagBreakdown, serviceTimeBreakdown, serviceTimeBreakdownTimeseries, serviceLatencyHistogram, serviceEndpoints, serviceErrors, suggestValues, queryGroup,
     queryLogs, getLogDetail, getLogContext, countLogs, groupLogs, logPatterns, scatterPoints, getLogHistogram, getLogViews, saveLogViews, suggestLogValues,
     listSavedQueries, getSavedQuery, createSavedQuery, updateSavedQuery, deleteSavedQuery,
     listNotebooks, getNotebook, createNotebook, updateNotebook, deleteNotebook,

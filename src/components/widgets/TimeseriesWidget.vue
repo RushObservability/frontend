@@ -32,10 +32,12 @@ const props = withDefaults(defineProps<{
   /** Label for the single-series legend entry (defaults to "value"). */
   seriesName?: string
   linkedReadout?: boolean
+  sharedLegend?: boolean
+  selectableSeries?: boolean
   zoomable?: boolean
 }>(), { fill: null })
 
-const emit = defineEmits<{ rangeSelect: [range: TimeDomain] }>()
+const emit = defineEmits<{ rangeSelect: [range: TimeDomain]; seriesSelect: [index: number] }>()
 
 // Distinct line colors for split/grouped series. The palette is intentionally
 // longer than the editor's query palette because a single APM or PromQL query
@@ -221,6 +223,7 @@ const seriesPaths = computed(() => {
           area: straightBandPath(top, bottom),
           color: series.color || SERIES_COLORS[layer.seriesIndex % SERIES_COLORS.length]!,
           name: series.name,
+          seriesIndex: layer.seriesIndex,
           axis: layer.axis,
           lineStyle: series.lineStyle || 'solid',
           opacity: series.opacity ?? 1,
@@ -255,6 +258,7 @@ const seriesPaths = computed(() => {
       point: points.length === 1 ? points[0] : undefined,
       color: s.color || SERIES_COLORS[i % SERIES_COLORS.length]!,
       name: s.name,
+      seriesIndex: i,
       axis: s.axis || 'left',
       lineStyle: s.lineStyle || 'solid',
       opacity: s.opacity ?? 1,
@@ -613,6 +617,21 @@ function cancelZoom(event: PointerEvent) {
             :stroke="sp.color" :opacity="sp.opacity"
             stroke-width="4" stroke-linecap="round" vector-effect="non-scaling-stroke" />
         </template>
+        <template v-if="selectableSeries">
+          <template v-for="(sp, i) in seriesPaths" :key="'hit' + i">
+            <circle
+              v-if="sp.point"
+              :cx="sp.point[0]" :cy="sp.point[1]" r="7"
+              class="ts-series-hit" fill="transparent"
+              @click="emit('seriesSelect', sp.seriesIndex)"
+            />
+            <path
+              v-else :d="sp.d" fill="none"
+              class="ts-series-hit ts-series-hit-line"
+              @click="emit('seriesSelect', sp.seriesIndex)"
+            />
+          </template>
+        </template>
         <!-- Threshold reference lines -->
         <g v-for="(th, i) in thresholdLines" :key="'th' + i">
           <line :x1="padLeft" :y1="th.y" :x2="svgWidth - padRight" :y2="th.y" :stroke="th.color" stroke-width="1" stroke-dasharray="5,4" vector-effect="non-scaling-stroke" />
@@ -737,7 +756,7 @@ function cancelZoom(event: PointerEvent) {
       />
     </div>
 
-    <div v-if="legendItems.length" class="ts-legend" :class="{ 'ts-legend--inspecting': readout }"
+    <div v-if="legendItems.length" class="ts-legend" :class="{ 'ts-legend--inspecting': readout, 'ts-legend--shared': sharedLegend }"
       tabindex="0" aria-label="Chart values" @blur="onLeave">
       <time v-if="readout" class="ts-readout-time">{{ readout.label }}</time>
       <span v-for="(lg, i) in legendItems" :key="'lg' + i" class="ts-legend-item">

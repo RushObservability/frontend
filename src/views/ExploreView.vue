@@ -39,6 +39,7 @@ import type { ContextMenuEntry } from '../types/contextMenu'
 import { isErrorStatus } from '../lib/spanStatus'
 import { logStatusFacetFilters } from '../lib/logStatusFacets'
 import { failedInsideTrace, rowHasError, spanModeFilters, spanModeHint, visibleFilters } from '../lib/tracesOnly'
+import { readServiceTagScope, serviceTagFilter, serviceTagLabels, SERVICE_TAG_FIELD, type ServiceTagScope } from '../lib/serviceTagBreakdown'
 import { ALERT_SCOPE_FIELD, alertTelemetryHint, evidenceFilters, readAlertScope, type AlertScope } from '../lib/alertEvidence'
 
 interface ExploreHistoryQuery {
@@ -183,6 +184,8 @@ const viewMode = ref<'spans' | 'logs'>('spans')
 const alertScope = ref<AlertScope | null>(null)
 const alertScopeFilters = computed(() => alertScope.value ? evidenceFilters(alertScope.value.query) : [])
 const alertScopeError = ref(false)
+const serviceTagScope = ref<ServiceTagScope | null>(null)
+const serviceTagError = ref(false)
 // Start Explore at the request/trace level. Users can still switch to all
 // spans with the sidebar toggle (or the "a" keyboard shortcut).
 const tracesOnly = ref(true)
@@ -274,10 +277,13 @@ function setViewMode(mode: 'spans' | 'logs') {
   if (mode !== viewMode.value) {
     alertScope.value = null
     alertScopeError.value = false
+    serviceTagScope.value = null
+    serviceTagError.value = false
   }
   viewMode.value = mode
   const query = { ...route.query }
   if (mode === 'logs') {
+    delete query.service_tag
     query.mode = 'logs'
   } else {
     delete query.mode
@@ -292,6 +298,15 @@ function clearAlertScope() {
   if (alertScopeError.value) customRange.value = null
   alertScope.value = null
   alertScopeError.value = false
+  search({ skipHistory: true })
+}
+
+function clearServiceTagFilter() {
+  if (serviceTagError.value && customRange.value && !(Date.parse(customRange.value.from) < Date.parse(customRange.value.to))) {
+    customRange.value = null
+  }
+  serviceTagScope.value = null
+  serviceTagError.value = false
   search({ skipHistory: true })
 }
 
@@ -1204,6 +1219,8 @@ function getActiveFilters(): Filter[] {
     base = filters.value
   }
   const all = [...base, ...getQuickFilters()]
+  const tag = serviceTagScope.value
+  if (tag && viewMode.value === 'spans') all.push(serviceTagFilter(tag))
   const scope = alertScope.value
   if (scope) all.push({ field: ALERT_SCOPE_FIELD, op: '=', value: JSON.stringify(scope) })
   if (tracesOnly.value && viewMode.value === 'spans') {
@@ -1230,7 +1247,7 @@ async function checkSpanModeFallback(activeFilters: Filter[], search: string | u
 }
 
 async function search(opts?: { skipHistory?: boolean }) {
-  if (logViewsLoading.value || alertScopeError.value
+  if (logViewsLoading.value || alertScopeError.value || serviceTagError.value
     || (alertScope.value && (alertScope.value.query.kind === 'log') !== (viewMode.value === 'logs'))) return
   if (viewMode.value === 'logs' && logViewUnavailable.value) {
     stopLive(); activeSearchController?.abort()
@@ -1256,7 +1273,7 @@ async function search(opts?: { skipHistory?: boolean }) {
   const searchParam = searchText.value || undefined
 
   syncUrlState()
-  if (!opts?.skipHistory && !alertScope.value && (activeFilters.length > 0 || searchParam)) {
+  if (!opts?.skipHistory && !alertScope.value && !serviceTagScope.value && (activeFilters.length > 0 || searchParam)) {
     pushHistory({
       filters: activeFilters,
       groupBy: groupByField.value || undefined,
@@ -1488,6 +1505,8 @@ function loadHistoryEntry(entry: HistoryEntry<ExploreHistoryQuery>) {
   const q = entry.query
   alertScope.value = null
   alertScopeError.value = false
+  serviceTagScope.value = null
+  serviceTagError.value = false
   selectedLogViewId.value = q.logViewId || ''
   customLogColumns.value = null
   // Restore filters into the search bar
@@ -3454,7 +3473,7 @@ function addExcludeFilter(field: string, value: string | number) {
 
 // Adapt the active (text-parsed) filters into QueryFilter shape for SavedQueries.
 const savedQueryFilters = computed<QueryFilter[]>(() =>
-  filters.value.filter(f => f.field !== ALERT_SCOPE_FIELD).map((f, i) => ({
+  filters.value.filter(f => f.field !== ALERT_SCOPE_FIELD && f.field !== SERVICE_TAG_FIELD).map((f, i) => ({
     id: `f-${i}`,
     field: f.field,
     op: f.op,
@@ -3475,7 +3494,7 @@ const activeFilterChips = computed(() => {
         value: f.value,
       }))
   }
-  return visibleFilters(filters.value).filter(f => f.field !== ALERT_SCOPE_FIELD).map((f, i) => ({
+  return visibleFilters(filters.value).filter(f => f.field !== ALERT_SCOPE_FIELD && f.field !== SERVICE_TAG_FIELD).map((f, i) => ({
     id: `filter-${i}`,
     label: `${f.field} ${f.op} ${f.value}`,
     field: f.field,
@@ -3855,6 +3874,7 @@ function buildQueryParams(): Record<string, string> {
   if (viewMode.value === 'logs' && selectedLogViewId.value) p.log_view = selectedLogViewId.value
   if (viewMode.value === 'logs' && customLogColumns.value) p.log_columns = JSON.stringify(customLogColumns.value)
   if (alertScope.value) p.alert_scope = JSON.stringify(alertScope.value)
+  if (serviceTagScope.value) p.service_tag = JSON.stringify(serviceTagScope.value)
   if (customRange.value) {
     p.from = customRange.value.from
     p.to = customRange.value.to
@@ -3915,7 +3935,7 @@ let restoringUrlState = true
 
 function syncUrlState() {
   if (restoringUrlState) return
-  if (alertScopeError.value) return
+  if (alertScopeError.value || serviceTagError.value) return
   const query = buildQueryParams()
   router.replace({ query })
 }
@@ -3956,6 +3976,12 @@ function restoreFromUrl() {
   if (q.alert_scope !== undefined) {
     alertScope.value = readAlertScope(q.alert_scope, viewMode.value)
     alertScopeError.value = !alertScope.value
+      || ((q.from !== undefined || q.to !== undefined)
+        && (!customRange.value || !(Date.parse(customRange.value.from) < Date.parse(customRange.value.to))))
+  }
+  if (q.service_tag !== undefined && viewMode.value === 'spans') {
+    serviceTagScope.value = readServiceTagScope(q.service_tag)
+    serviceTagError.value = !serviceTagScope.value
       || ((q.from !== undefined || q.to !== undefined)
         && (!customRange.value || !(Date.parse(customRange.value.from) < Date.parse(customRange.value.to))))
   }
@@ -4936,7 +4962,7 @@ watch(() => route.query.log_view, (id) => {
           <TimePicker v-model="selectedPreset" v-model:custom-range="customRange" />
         </template>
         <template #saved>
-          <AddToNotebookButton v-if="!alertScope" :build="notebookDraft" />
+          <AddToNotebookButton v-if="!alertScope && !serviceTagScope" :build="notebookDraft" />
           <SavedQueries
             v-if="!alertScope"
             ref="savedQueriesRef"
@@ -4977,6 +5003,22 @@ watch(() => route.query.log_view, (id) => {
         <code v-if="alertScope.group_key !== null">{{ alertScope.group_by.join(', ') }} = {{ alertScope.group_key || 'Empty value' }}</code>
         <span v-if="(alertScope.query.kind === 'log') !== (viewMode === 'logs')" class="text-muted">This signal is unavailable in the current tenant.</span>
         <button type="button" class="btn btn-sm" @click="clearAlertScope">Clear alert filter</button>
+      </div>
+      <div v-if="serviceTagError" class="log-view-warning" role="alert">
+        This service breakdown link has an invalid time range or tag.
+        <button type="button" class="btn btn-sm" @click="clearServiceTagFilter">Clear tag filter</button>
+      </div>
+      <div v-else-if="serviceTagScope" class="log-view-context" aria-label="Service tag filters">
+        <router-link :to="{
+          name: 'service-detail',
+          params: { serviceName: serviceTagScope.service },
+          query: { tab: 'overview', tag: serviceTagScope.dimension },
+        }">Service overview</router-link>
+        <code>Service = {{ serviceTagScope.service }}</code>
+        <code v-if="serviceTagScope.selection.kind === 'value'">{{ serviceTagLabels[serviceTagScope.dimension] }} = {{ serviceTagScope.selection.value }}</code>
+        <code v-else-if="serviceTagScope.selection.excluded.length">{{ serviceTagLabels[serviceTagScope.dimension] }} outside the top values · {{ serviceTagScope.selection.excluded.join(', ') }}</code>
+        <code v-else>{{ serviceTagLabels[serviceTagScope.dimension] }} · Other</code>
+        <button type="button" class="btn btn-sm" @click="clearServiceTagFilter">Clear tag filter</button>
       </div>
       <div v-if="viewMode === 'logs' && logViewsError" class="log-view-warning" role="alert">{{ logViewsError }} <button type="button" class="btn btn-sm" @click="loadLogViews().then(() => search({ skipHistory: true }))">Retry</button></div>
       <div v-if="savedQueryError" class="log-view-warning" role="alert">{{ savedQueryError }} <button type="button" class="btn btn-sm" @click="savedQueryError = ''">Dismiss</button></div>
