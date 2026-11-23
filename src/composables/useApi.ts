@@ -81,6 +81,7 @@ import type {
   RumErrorGroup,
   RumSessionSummary,
   RumAppEntry,
+  RumCohortReport,
   ArgoApp,
   ArgoAppDetail,
   ArgoAppSet,
@@ -1354,6 +1355,12 @@ export function useApi() {
     })
   }
 
+  function rumCohorts(appName: string, firstAction: string, signal?: AbortSignal): Promise<RumCohortReport> {
+    const params = new URLSearchParams({ app_name: appName })
+    if (firstAction) params.set('first_action', firstAction)
+    return request(`/rum/cohorts?${params}`, { signal })
+  }
+
   async function rumSession(id: string): Promise<{ events: RumRecord[] }> {
     return await request(`/rum/session/${encodePathSegment(id)}`)
   }
@@ -2272,7 +2279,7 @@ export function useApi() {
     getIngestBuffer,
     getUsage, getLabelBreakdown, getTelemetryQuality, getNoiseWaste,
     getUsageMeteringSummary, getUsageMeteringBreakdown, getUsageMeteringTenantBreakdown, getUsageMeteringTenants,
-    rumApps, queryRumEvents, rumVitals, rumPages, rumErrors, rumSessions, rumSession,
+    rumApps, queryRumEvents, rumVitals, rumPages, rumErrors, rumSessions, rumSession, rumCohorts,
     promQuery, promQueryRange, promLabels, promLabelValues,
     getArgoApps, getArgoApp, getArgoAppSets,
     getFluxResources, getFluxSources, getFluxResource,

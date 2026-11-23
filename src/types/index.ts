@@ -1284,6 +1284,25 @@ export interface RumErrorGroup {
   sample_stack: string
 }
 
+export interface RumCohort {
+  week_start: string
+  new_users: number
+  returned: Array<number | null>
+}
+
+export interface RumCohortReport {
+  as_of: string
+  cohort_start: string
+  cohort_end: string
+  coverage_start: string
+  coverage: {
+    total_sessions: number
+    missing_user_id_sessions: number
+  }
+  first_actions: string[]
+  cohorts: RumCohort[]
+}
+
 export interface RumSessionSummary {
   SessionId: string
   UserId: string

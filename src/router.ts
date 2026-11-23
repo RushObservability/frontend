@@ -179,6 +179,12 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/rum/:appName/returning-users',
+      name: 'rum-cohorts',
+      component: () => import('./views/RumCohortsView.vue'),
+      props: true,
+    },
+    {
       // Replay is temporarily disabled; keep old links from opening a blank view.
       path: '/rum/:appName/replay/:sessionId',
       redirect: to => `/rum/${encodeURIComponent(String(to.params.appName))}`,
