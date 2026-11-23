@@ -7,6 +7,7 @@ import { useFeatures } from '../composables/useFeatures'
 import { useAuth } from '../composables/useAuth'
 import type { Slo, SloEvent, NotificationChannel, TimeseriesBucket, PromMatrixResponse } from '../types'
 import SloForm from '../components/SloForm.vue'
+import SloMaintenancePanel from '../components/SloMaintenancePanel.vue'
 import { PanelCard, StatPanel, TimeSeriesPanel } from '../components/panels'
 import type { PanelTone, TimeSeriesPanelSeries } from '../components/panels'
 import { usePollingTask } from '../composables/usePollingTask'
@@ -62,6 +63,7 @@ onUnmounted(() => {
 async function pollSlo(rethrow = false, signal?: AbortSignal) {
   try {
     const res = await api.getSlo(props.sloId, signal)
+    if ((res.slo.maintenance_revision ?? 0) < (slo.value?.maintenance_revision ?? 0)) return
     slo.value = res.slo
     events.value = res.events || []
   } catch (error) {
@@ -199,9 +201,7 @@ const successRateStr = computed(() => {
 
 const budgetPct = computed(() => {
   if (!slo.value || slo.value.error_budget_remaining === null) return 0
-  const errorBudget = 1 - slo.value.target_percentage / 100
-  if (errorBudget <= 0) return 0
-  return Math.max(0, Math.min(100, (slo.value.error_budget_remaining / errorBudget) * 100))
+  return Math.max(0, Math.min(100, slo.value.error_budget_remaining * 100))
 })
 
 const budgetSeverity = computed(() => {
@@ -227,12 +227,14 @@ const sloSuccessDescription = computed(() => {
   return 'Successful requests as a percentage of evaluated requests.'
 })
 const requestCountDescription = computed(() => {
+  if (slo.value?.indicator_type === 'threshold') return 'Samples evaluated against the configured gauge threshold.'
   if (isTraceLatencySlo.value && latencyThresholdMs.value !== null) {
     return `Slow and total requests evaluated against the ${latencyThresholdMs.value} ms latency limit.`
   }
   return 'Error and total requests evaluated for the current SLO window.'
 })
-const badRequestLabel = computed(() => isTraceLatencySlo.value ? 'Over limit' : 'Errors')
+const badRequestLabel = computed(() => slo.value?.indicator_type === 'threshold' ? 'Violations' : isTraceLatencySlo.value ? 'Over limit' : 'Errors')
+const hasAppliedMaintenance = computed(() => !!slo.value?.maintenance_evaluation?.periods.length)
 const sloPanelTone = computed<PanelTone>(() => slo.value?.state === 'breaching' ? 'danger' : slo.value?.state === 'compliant' ? 'positive' : 'default')
 const budgetPanelTone = computed<PanelTone>(() => budgetSeverity.value === 'critical' ? 'danger' : budgetSeverity.value === 'warning' ? 'warning' : budgetSeverity.value === 'healthy' ? 'positive' : 'default')
 
@@ -661,14 +663,14 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
       />
 
       <StatPanel
-        v-if="slo.error_budget_remaining !== null"
+        v-if="slo.error_budget_remaining !== null && slo.state !== 'no_data'"
         class="sd-hero-card"
         title="Error Budget"
         description="Share of the configured error budget still available."
         :value="budgetPct"
         :precision="1"
         unit="%"
-        :label="`${(slo.error_budget_remaining * 100).toFixed(3)}% raw budget`"
+        label="Remaining"
         :range-label="sloRangeLabel"
         :source-label="sloSourceLabel"
         :tone="budgetPanelTone"
@@ -691,13 +693,15 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
         description="Share of the configured error budget still available."
         :empty="true"
         empty-title="No budget data"
-        empty-message="Budget will appear after the first successful evaluation."
+        :empty-message="(slo.maintenance_evaluation?.excluded_total ?? 0) > 0 && slo.total_count === 0
+          ? 'Every matching request or sample fell inside maintenance.'
+          : 'Budget appears when the SLO has data to evaluate.'"
         variant="stat"
       />
 
       <PanelCard
         class="sd-hero-card"
-        title="Request Counts"
+        :title="slo.indicator_type === 'threshold' ? 'Sample Counts' : 'Request Counts'"
         :description="requestCountDescription"
         :range-label="sloRangeLabel"
         :source-label="sloSourceLabel"
@@ -715,6 +719,13 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
         </div>
       </PanelCard>
     </div>
+
+    <SloMaintenancePanel
+      v-if="!showEdit && slo.maintenance_supported !== undefined"
+      :slo="slo"
+      :can-write="canWrite"
+      @updated="slo = $event"
+    />
 
     <!-- ═══ Charts ═══ -->
     <div
@@ -740,7 +751,7 @@ function referenceLineY(def: ChartDef, geo: Geo = geoSmall): number {
         :key="key"
         class="sd-chart-panel"
         :title="chartDefs[key].title"
-        description="SLO evaluation trend for the current rolling window."
+        :description="hasAppliedMaintenance ? 'Raw signal trend for the rolling window, including maintenance.' : 'SLO evaluation trend for the current rolling window.'"
         :caption="chartCaption(key)"
         :source-label="sloSourceLabel"
         :range-label="sloRangeLabel"

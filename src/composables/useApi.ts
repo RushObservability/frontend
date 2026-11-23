@@ -45,6 +45,7 @@ import type {
   AlertRouteInput,
   Slo,
   SloEvent,
+  SloMaintenanceWindow,
   DeployMarker,
   Filter,
   ServiceGraph,
@@ -795,6 +796,13 @@ export function useApi() {
     return await request(`/slos/${encodePathSegment(id)}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    })
+  }
+
+  async function replaceSloMaintenanceExclusions(id: string, revision: number, windows: SloMaintenanceWindow[]): Promise<Slo> {
+    return await request(`/slos/${encodePathSegment(id)}/maintenance-exclusions`, {
+      method: 'PUT',
+      body: JSON.stringify({ revision, windows }),
     })
   }
 
@@ -2213,7 +2221,7 @@ export function useApi() {
     listAlertRoutes, createAlertRoute, updateAlertRoute, deleteAlertRoute,
     listMaintenanceWindows, createMaintenanceWindow, deleteMaintenanceWindow,
     listFunnels, createFunnel, deleteFunnel, runFunnel,
-    listSlos, createSlo, getSlo, updateSlo, deleteSlo, listSloEvents,
+    listSlos, createSlo, getSlo, updateSlo, replaceSloMaintenanceExclusions, deleteSlo, listSloEvents,
     listAnomalyRules, createAnomalyRule, getAnomalyRule, updateAnomalyRule, deleteAnomalyRule, listAllAnomalyEvents, getAnomalyEvent, getEventCorrelations, analyzeAnomalyEvent,
     listDeploys, createDeploy, queryProfiles, profileSeries,
     listApiKeys, createApiKey, deleteApiKey,
