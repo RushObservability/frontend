@@ -61,4 +61,19 @@ describe('bounded metric pattern workers', () => {
     FakeWorker.workers[1]!.complete(['b']); FakeWorker.workers[2]!.complete(['c'])
     await Promise.all([b, c])
   })
+
+  it('matches a pattern once per name list across repeated refreshes', async () => {
+    const names = ['cpu_total', 'memory']
+    const first = matchMetricNames('cpu.*', names, 20)
+    FakeWorker.workers[0]!.complete(['cpu_total'])
+    await expect(first).resolves.toEqual(['cpu_total'])
+    await expect(matchMetricNames('cpu.*', names, 20)).resolves.toEqual(['cpu_total'])
+    await expect(matchMetricNames('cpu.*', names, 20)).resolves.toEqual(['cpu_total'])
+    expect(FakeWorker.workers).toHaveLength(1)
+
+    const reloaded = matchMetricNames('cpu.*', [...names], 20)
+    expect(FakeWorker.workers).toHaveLength(2)
+    FakeWorker.workers[1]!.complete(['cpu_total'])
+    await reloaded
+  })
 })
