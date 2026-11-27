@@ -467,7 +467,9 @@ async function initializeService() {
     // Match the Services catalog's fast service-name lookup. The full
     // `/services` catalog also returns endpoint rows and can be slow or stall
     // independently of the trace queries needed by this detail page.
-    const names = await api.suggestValues('service_name')
+    // Pass the name as the prefix: suggestions are capped at 20 sorted names,
+    // so an unfiltered list misses every service past the first 20.
+    const names = await api.suggestValues('service_name', serviceName.value)
     serviceStatus.value = names.includes(serviceName.value) ? 'found' : 'missing'
   } catch {
     // Keep the older catalog endpoint as a compatibility fallback for tenants
