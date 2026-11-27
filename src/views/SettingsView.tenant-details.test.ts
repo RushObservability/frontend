@@ -11,6 +11,6 @@ describe('settings tenant detail loading', () => {
   it('loads them once the Tenants section is shown, with bounded concurrency', () => {
     expect(source).toContain("if (tenantDetailsLoaded || activeTab.value !== 'tenants' || !tenants.value.length) return")
     expect(source).not.toMatch(/Promise\.allSettled\(\s*tenants\.value\.map/)
-    expect(source.match(/settleLimited\(tenants\.value, TENANT_DETAIL_CONCURRENCY,/g)).toHaveLength(2)
+    expect(source.match(/settleWithLimit\(tenants\.value, TENANT_DETAIL_CONCURRENCY,/g)).toHaveLength(2)
   })
 })

@@ -19,7 +19,7 @@ import { directoryRole, filterDirectoryUsers, type UserRole, type UserStatus } f
 import EmptyState from '../components/EmptyState.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 import { getAddon } from '../integrations/catalog'
-import { settleLimited } from '../lib/settleLimited'
+import { settleWithLimit } from '../lib/settleWithLimit'
 import { isAddonEnabled, setAddonEnabled, addonNamespace, saveAddonNamespace, namespaceValid } from '../composables/useIntegrationEnabled'
 import {
   SETTINGS_INTEGRATIONS,
@@ -1406,7 +1406,7 @@ const SIGNAL_DEFS: { key: 'logs' | 'apm' | 'metrics' | 'rum' | 'profiles'; label
 ]
 
 async function loadAllTenantSignals() {
-  const results = await settleLimited(tenants.value, TENANT_DETAIL_CONCURRENCY,
+  const results = await settleWithLimit(tenants.value, TENANT_DETAIL_CONCURRENCY,
     async (t) => ({ id: t.id, signals: await api.getTenantSignals(t.id) }))
   const next = { ...tenantSignalsMap.value }
   for (const result of results) {
@@ -1450,7 +1450,7 @@ const retentionLogs = ref<string>('')
 const retentionSaving = ref(false)
 
 async function loadAllTenantRetention() {
-  const results = await settleLimited(tenants.value, TENANT_DETAIL_CONCURRENCY,
+  const results = await settleWithLimit(tenants.value, TENANT_DETAIL_CONCURRENCY,
     async (t) => ({ id: t.id, retention: await api.getTenantRetention(t.id) }))
   const next = { ...tenantRetentionMap.value }
   for (const result of results) {
