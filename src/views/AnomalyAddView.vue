@@ -43,6 +43,7 @@ const searchSensitivity = ref(3.0)
 const searchAlpha = ref(0.25)
 
 const previewData = ref<MetricMonitor[]>([])
+let previewGeneration = 0
 const previewPattern = ref('')
 const saveName = ref('')
 const saveDescription = ref('')
@@ -141,6 +142,7 @@ function extractApmValues(buckets: TimeseriesBucket[], metric: string): { timest
 
 async function fetchApmData() {
   if (!apmService.value) return
+  previewGeneration++
   dataLoading.value = true
   const range = TIME_RANGES[selectedRange.value]!
   const to = new Date()
@@ -386,15 +388,7 @@ watch(matchedMetrics, async (metrics) => {
 watch(selectedLabels, async (newLabels, oldLabels) => {
   if (JSON.stringify(newLabels) === JSON.stringify(oldLabels)) return
   if (!previewPattern.value || !matchedMetrics.value.length) return
-  dataLoading.value = true
-  try {
-    previewData.value = await fetchMetrics(
-      matchedMetrics.value,
-      newLabels.length ? newLabels : undefined
-    )
-  } finally {
-    dataLoading.value = false
-  }
+  await loadPreviewData(matchedMetrics.value, newLabels)
 }, { deep: true })
 
 // Re-query when time range changes
@@ -404,15 +398,7 @@ watch(selectedRange, async () => {
     return
   }
   if (!previewPattern.value || !matchedMetrics.value.length) return
-  dataLoading.value = true
-  try {
-    previewData.value = await fetchMetrics(
-      matchedMetrics.value,
-      selectedLabels.value.length ? selectedLabels.value : undefined
-    )
-  } finally {
-    dataLoading.value = false
-  }
+  await loadPreviewData(matchedMetrics.value, selectedLabels.value)
 })
 
 // Re-query when APM metric changes
@@ -424,6 +410,20 @@ watch(apmMetric, () => {
 })
 
 // ═══ Data fetching ═══
+// Label, range and pattern changes can overlap; only the newest request may write the preview.
+async function loadPreviewData(names: string[], labels: string[]): Promise<boolean> {
+  const generation = ++previewGeneration
+  dataLoading.value = true
+  try {
+    const data = await fetchMetrics(names, labels.length ? labels : undefined)
+    if (generation !== previewGeneration) return false
+    previewData.value = data
+    return true
+  } finally {
+    if (generation === previewGeneration) dataLoading.value = false
+  }
+}
+
 async function fetchMetrics(names: string[], labels?: string[]): Promise<MetricMonitor[]> {
   const range = TIME_RANGES[selectedRange.value]!
   const end = Math.floor(Date.now() / 1000)
@@ -480,17 +480,13 @@ async function loadMetricNames() {
 async function queryPreview() {
   const metrics = matchedMetrics.value
   if (!metrics.length) {
+    previewGeneration++
+    dataLoading.value = false
     previewData.value = []
     previewPattern.value = ''
     return
   }
-  dataLoading.value = true
-  try {
-    previewData.value = await fetchMetrics(metrics, selectedLabels.value.length ? selectedLabels.value : undefined)
-    previewPattern.value = searchPattern.value.trim()
-  } finally {
-    dataLoading.value = false
-  }
+  if (await loadPreviewData(metrics, selectedLabels.value)) previewPattern.value = searchPattern.value.trim()
 }
 
 // ═══ Chart computation ═══
