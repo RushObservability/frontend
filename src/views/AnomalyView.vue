@@ -7,6 +7,7 @@ import { usePollingTask } from '../composables/usePollingTask'
 import type { NotificationChannel, AnomalyRule, AnomalyEventWithRule, TimeseriesBucket } from '../types'
 import { metricSelector } from '../lib/promqlNames'
 import { matchMetricNames } from '../lib/metricPattern'
+import { settleWithLimit } from '../lib/settleWithLimit'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,6 +44,8 @@ interface AnomalyConfig {
 // ═══ Constants ═══
 const MAX_MONITORS = 20
 const LIVE_INTERVAL = 30_000
+// Each detector fetch can issue up to MAX_MONITORS range queries.
+const DETECTOR_FETCH_CONCURRENCY = 4
 const COUNTER_SUFFIXES = ['_total', '_count', '_sum', '_bucket', '_created']
 
 const TIME_RANGES = [
@@ -578,7 +581,7 @@ async function refreshAll({ signal }: { signal: AbortSignal }) {
     // Fetch chart data for all configs visible on the anomalous tab (active + recently triggered)
     const visible = anomalousConfigs.value
     if (visible.length) {
-      const results = await Promise.allSettled(visible.map(c => fetchConfigData(c, activeRangeIdx(), signal)))
+      const results = await settleWithLimit(visible, DETECTOR_FETCH_CONCURRENCY, c => fetchConfigData(c, activeRangeIdx(), signal))
       const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
       if (failure) throw failure.reason
     }
@@ -937,7 +940,7 @@ onMounted(async () => {
   // charts are loaded on demand to keep the page focused and fast.
   const visible = anomalousConfigs.value
   if (visible.length) {
-    await Promise.allSettled(visible.map(c => fetchConfigData(c)))
+    await settleWithLimit(visible, DETECTOR_FETCH_CONCURRENCY, c => fetchConfigData(c))
   }
   liveLoop.start()
 })

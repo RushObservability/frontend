@@ -2,6 +2,8 @@ const MAX_WORKERS = 2
 const MATCH_TIMEOUT_MS = 2000
 const pending: Array<() => void> = []
 let active = 0
+// Keyed by the names array itself, so a reloaded name list rematches and an unused one is collected.
+const matchCache = new WeakMap<string[], Map<string, string[]>>()
 
 function drain() {
   while (active < MAX_WORKERS && pending.length) pending.shift()!()
@@ -9,6 +11,9 @@ function drain() {
 
 /** A saved JavaScript regex must never execute on the UI thread. */
 export function matchMetricNames(pattern: string, names: string[], limit: number, signal?: AbortSignal): Promise<string[]> {
+  const key = `${limit}\0${pattern}`
+  const cached = matchCache.get(names)?.get(key)
+  if (cached && !signal?.aborted) return Promise.resolve([...cached])
   return new Promise((resolve, reject) => {
     let worker: Worker | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -26,8 +31,10 @@ export function matchMetricNames(pattern: string, names: string[], limit: number
         if (index >= 0) pending.splice(index, 1)
       }
       queueMicrotask(drain)
-      if (error) reject(error)
-      else resolve(matches)
+      if (error) return reject(error)
+      if (!matchCache.has(names)) matchCache.set(names, new Map())
+      matchCache.get(names)!.set(key, matches)
+      resolve([...matches])
     }
     const onAbort = () => finish(signal?.reason ?? new DOMException('Metric matching cancelled', 'AbortError'))
     const start = () => {
