@@ -38,6 +38,14 @@ export function parseTraceTimestamp(ts: string): number {
   return epochMs * 1000 + parseInt(frac, 10)
 }
 
+/** Start-time order, parsing each timestamp once instead of once per comparison. */
+function byStartTime(spans: readonly SpanNode[]): SpanNode[] {
+  return spans
+    .map(span => ({ span, start: parseTraceTimestamp(span.timestamp) }))
+    .sort((a, b) => a.start - b.start)
+    .map(({ span }) => span)
+}
+
 /** Depth-first span list in start order, ignoring collapse state. */
 export function flattenSpans(spans: readonly SpanNode[]): SpanNode[] {
   const flat: SpanNode[] = []
@@ -48,7 +56,7 @@ export function flattenSpans(spans: readonly SpanNode[]): SpanNode[] {
     }
   }
   walk(spans)
-  return flat.sort((a, b) => parseTraceTimestamp(a.timestamp) - parseTraceTimestamp(b.timestamp))
+  return byStartTime(flat)
 }
 
 /** Visible rows, honouring collapsed branches. Children sort by start time. */
@@ -58,10 +66,7 @@ export function buildWaterfallRows(
 ): WaterfallRow[] {
   const rows: WaterfallRow[] = []
   function walk(spans: readonly SpanNode[], depth: number) {
-    const ordered = [...spans].sort(
-      (a, b) => parseTraceTimestamp(a.timestamp) - parseTraceTimestamp(b.timestamp),
-    )
-    for (const span of ordered) {
+    for (const span of byStartTime(spans)) {
       const children = span.children ?? []
       rows.push({ span, depth, childCount: children.length })
       if (children.length && !collapsed.has(span.span_id)) walk(children, depth + 1)

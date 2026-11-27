@@ -121,4 +121,26 @@ describe('trace waterfall', () => {
     expect(spanStatusClass('OK', 404)).toBe('status-warning')
     expect(spanStatusClass('OK', 200)).toBe('status-ok')
   })
+
+  it('parses each span timestamp once per sort, not once per comparison', () => {
+    let reads = 0
+    const counted = (id: string, second: number, children: SpanNode[] = []) => {
+      const node = span({ span_id: id, timestamp: '', children })
+      const timestamp = `2026-01-01 10:${String(Math.floor(second / 60) % 60).padStart(2, '0')}:${String(second % 60).padStart(2, '0')}.000000000`
+      Object.defineProperty(node, 'timestamp', { get: () => { reads++; return timestamp } })
+      return node
+    }
+    // Reverse order forces the sort to do real work.
+    const children = Array.from({ length: 500 }, (_, i) => counted(`c${i}`, 3599 - i))
+    const roots = [counted('root', 0, children)]
+
+    reads = 0
+    const flat = flattenSpans(roots)
+    expect(flat[1]!.span_id).toBe('c499')
+    expect(reads).toBe(501)
+
+    reads = 0
+    buildWaterfallRows(roots, new Set())
+    expect(reads).toBe(501)
+  })
 })
