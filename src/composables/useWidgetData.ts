@@ -1,3 +1,4 @@
+import { markRaw } from 'vue'
 import { useApi, type Workload, type WorkloadSource } from './useApi'
 import { applyVarsToFilters, substitute } from './useVarSubst'
 import { parseUtcTimestamp } from '../lib/utcTimestamp'
@@ -203,7 +204,9 @@ export function useWidgetData() {
     }
   }
 
-  return { fetchWidgetData }
+  // Results are replaced wholesale on every refresh, so keep Vue from deep-proxying
+  // every series and point when callers store them in a ref.
+  return { fetchWidgetData: async (...args: Parameters<typeof fetchWidgetData>) => markRaw(await fetchWidgetData(...args)) }
 }
 
 function apmTimeseriesToSeries(

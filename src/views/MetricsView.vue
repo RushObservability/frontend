@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, shallowRef, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useTenant } from '../composables/useTenant'
@@ -15,6 +15,7 @@ import { TablePanel, TimeSeriesPanel, formatPanelRange } from '../components/pan
 import type { TimeSeriesPanelSeries } from '../components/panels'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
 import { loneMetricName, metricSelector } from '../lib/promqlNames'
+import { MAX_CHART_SERIES } from '../lib/chart'
 import QueryDiagnosis from '../components/QueryDiagnosis.vue'
 import type { DiagnosticRequest } from '../lib/queryDiagnostics'
 import { alertTelemetryHint, matchesAlertSeries, readAlertSeries } from '../lib/alertEvidence'
@@ -141,7 +142,8 @@ const filteredMetrics = computed(() => {
 
 // ═══ Results ═══
 const vectorResults = ref<PromVectorResult[]>([])
-const matrixResults = ref<PromMatrixResult[]>([])
+// Replaced wholesale per query; a deep proxy over thousands of series is wasted work.
+const matrixResults = shallowRef<PromMatrixResult[]>([])
 const hasResults = ref(false)
 const resultExpression = ref('')
 
@@ -801,7 +803,7 @@ watch(viewMode, () => {
         <div class="metric-series-actions" aria-label="Create an alert from a result series">
           <span class="metric-series-actions-label">Alert from series</span>
           <button
-            v-for="(series, idx) in matrixResults"
+            v-for="(series, idx) in matrixResults.slice(0, MAX_CHART_SERIES)"
             :key="`alert-${seriesLabel(series.metric)}-${idx}`"
             class="metric-series-action"
             :title="loneMetricName(resultExpression) === series.metric.__name__ ? `Create alert for ${seriesLabel(series.metric)}` : 'Create alert from the full query, including all returned series'"

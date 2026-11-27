@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { isReactive, ref } from 'vue'
 import type { Widget } from '../types'
 import { useWidgetData } from './useWidgetData'
 
@@ -46,6 +47,13 @@ describe('dashboard bucket times', () => {
     const panel = widget('spans'); panel.widget_type = 'state-timeline'; panel.query_config.source = 'metrics'; panel.query_config.promql = 'up'
     const data = await useWidgetData().fetchWidgetData(panel)
     expect(data.step_secs).toBe(14); expect(data.series?.[0]?.points[0]).toEqual([10, 0]); expect(data.time_domain).toBeDefined()
+  })
+  it('returns raw results so a dashboard ref does not deep-proxy every series', async () => {
+    api.promQueryRange.mockResolvedValue({ result: [{ metric: { pod: 'a' }, values: [[10, '1']] }] })
+    const panel = widget('spans'); panel.query_config.source = 'metrics'; panel.query_config.promql = 'up'
+    const map = ref<Record<string, unknown>>({})
+    map.value.panel = await useWidgetData().fetchWidgetData(panel)
+    expect(isReactive(map.value.panel)).toBe(false)
   })
   beforeEach(() => {
     vi.useFakeTimers()

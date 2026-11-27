@@ -7,7 +7,7 @@ let chartIdSeq = 0
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { CountBucket, DeployMarker, TimeDomain } from '../../types'
 import type { TimeSeriesPanelSeries } from '../panels/types'
-import { straightLinePath, straightAreaPath, straightBandPath, fmtAxis, resolveTimeDomain, type Pt } from '../../lib/chart'
+import { straightLinePath, straightAreaPath, straightBandPath, fmtAxis, resolveTimeDomain, MAX_CHART_SERIES, type Pt } from '../../lib/chart'
 import { useChartHover } from '../../composables/useChartHover'
 import EmptyState from '../EmptyState.vue'
 import { stackTimeSeries } from '../../lib/stackedTimeBars'
@@ -50,9 +50,15 @@ const SERIES_COLORS = [
   '#f97316', '#6366f1', '#0f766e', '#be123c',
 ]
 const seriesMode = computed(() => props.series !== undefined)
+// A high-cardinality PromQL query can return thousands of series; drawing each
+// one as paths, a legend entry and a hover row freezes the page.
+const chartSeries = computed(() => props.series?.slice(0, MAX_CHART_SERIES))
+const seriesCapNote = computed(() => (props.series?.length ?? 0) > MAX_CHART_SERIES
+  ? `Showing the first ${MAX_CHART_SERIES} of ${props.series!.length.toLocaleString()} series. Narrow the query to see the rest.`
+  : '')
 const hasSamples = computed(() => (
   seriesMode.value
-    ? Boolean(props.series?.some(series => series.points.length))
+    ? Boolean(chartSeries.value?.some(series => series.points.length))
     : props.buckets.length > 0
 ))
 
@@ -139,9 +145,9 @@ const stackedMode = computed(() => props.displayMode === 'stacked-bars')
 const stackedLinesMode = computed(() => props.displayMode === 'stacked-lines' && seriesMode.value)
 const showFill = computed(() => !stackedMode.value && (props.fill ?? (stackedLinesMode.value || !seriesMode.value)))
 const stacks = computed(() => stackedMode.value
-  ? stackTimeSeries((props.series || []).map(series => series.barOverlay ? { ...series, points: [] } : series))
+  ? stackTimeSeries((chartSeries.value || []).map(series => series.barOverlay ? { ...series, points: [] } : series))
   : [])
-const stackedLineLayers = computed(() => stackedLinesMode.value ? stackTimeLines(props.series || []) : [])
+const stackedLineLayers = computed(() => stackedLinesMode.value ? stackTimeLines(chartSeries.value || []) : [])
 const barInterval = computed(() => {
   if (props.bucketSeconds && props.bucketSeconds > 0) return props.bucketSeconds
   const times = [...new Set(stacks.value.map(bar => bar.time))].sort((a, b) => a - b)
@@ -149,7 +155,7 @@ const barInterval = computed(() => {
 })
 const seriesBounds = computed(() => {
   let minT = Infinity, maxT = -Infinity, maxLeft = 0, maxRight = 0
-  for (const s of props.series || []) {
+  for (const s of chartSeries.value || []) {
     for (const [t, v] of s.points) {
       if (!Number.isFinite(t) || !Number.isFinite(v)) continue
       if (t < minT) minT = t
@@ -185,7 +191,7 @@ const seriesBounds = computed(() => {
     maxT: domain.to,
     maxLeft: maxLeft || 1,
     maxRight: maxRight || 1,
-    hasRight: (props.series || []).some(series => series.axis === 'right'),
+    hasRight: (chartSeries.value || []).some(series => series.axis === 'right'),
   }
 })
 
@@ -215,7 +221,7 @@ const seriesPaths = computed(() => {
   const span = maxT - minT || 1
   if (stackedLinesMode.value) {
     return stackedLineLayers.value.flatMap(layer => {
-      const series = props.series![layer.seriesIndex]!
+      const series = chartSeries.value![layer.seriesIndex]!
       const axisMax = layer.axis === 'right' ? maxRight : maxLeft
       return layer.segments.map(segment => {
         const top: Pt[] = segment.map(point => [
@@ -240,7 +246,7 @@ const seriesPaths = computed(() => {
       })
     })
   }
-  return (props.series || []).flatMap((s, i) => {
+  return (chartSeries.value || []).flatMap((s, i) => {
     if (stackedMode.value && !s.barOverlay) return []
     const axisMax = s.axis === 'right' ? maxRight : maxLeft
     const segments: Pt[][] = []
@@ -285,7 +291,7 @@ const stackedBars = computed(() => {
     const width = (end - start) / span * plotWidth.value
     const gap = Math.min(1.5, width * .15)
     const max = bar.axis === 'right' ? maxRight : maxLeft
-    const series = props.series![bar.seriesIndex]!
+    const series = chartSeries.value![bar.seriesIndex]!
     return [{
       ...bar,
       x: padLeft + (start - minT) / span * plotWidth.value + gap / 2,
@@ -387,7 +393,7 @@ interface HSeries { name: string; color: string; pts: [number, number][]; legend
 // Unified [time, value] model so hover works the same in both render modes.
 const hoverModel = computed<{ minT: number; maxT: number; series: HSeries[] }>(() => {
   if (seriesMode.value) {
-    const series: HSeries[] = (props.series || []).map((s, i) => ({
+    const series: HSeries[] = (chartSeries.value || []).map((s, i) => ({
       name: s.name,
       color: s.color || SERIES_COLORS[i % SERIES_COLORS.length]!,
       pts: s.points,
@@ -474,7 +480,7 @@ const markers = computed(() => {
   const { maxLeft, maxRight } = seriesBounds.value
   return readout.value.values.flatMap((value, i) => {
     if (value == null) return []
-    const max = !seriesMode.value ? maxCount.value : props.series?.[i]?.axis === 'right' ? maxRight : maxLeft
+    const max = !seriesMode.value ? maxCount.value : chartSeries.value?.[i]?.axis === 'right' ? maxRight : maxLeft
     return [{
       color: hoverModel.value.series[i]!.color,
       top: (padTop + plotHeight * (1 - value / max)) / svgHeight * 100,
@@ -781,6 +787,7 @@ function cancelZoom(event: PointerEvent) {
         <span v-else-if="lg.last" class="ts-legend-val mono">{{ lg.last }}</span>
       </span>
     </div>
+    <p v-if="seriesCapNote" class="ts-series-cap">{{ seriesCapNote }}</p>
   </div>
 </template>
 
