@@ -9,6 +9,9 @@ export type Pt = [number, number] // [x, y] in viewBox coordinates
 /** Most series a time-series chart draws; the rest are listed as hidden. */
 export const MAX_CHART_SERIES = 50
 
+/** Shown when query-api kept only the 24 groups with the most spans. */
+export const TOP_GROUPS_NOTE = 'Showing the top 24 groups by span count.'
+
 /**
  * Prefer the requested query window over sample bounds. This leaves gaps blank
  * when retention or a new data source covers only part of the selected range.

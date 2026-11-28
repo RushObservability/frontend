@@ -83,7 +83,7 @@ const panelProps = computed<Record<string, unknown>>(() => {
   if (props.type === 'bar') return { ...base, groups: props.data?.groups || [] }
   if (props.type === 'pie') return { ...base, data: props.data || {}, pieStyle: props.pieStyle, calculation: props.pieCalculation, sort: props.pieSort, legendPosition: props.pieLegendPosition, unit: props.unit || '' }
   if (props.type === 'table') return { ...base, rows: props.data?.rows || [] }
-  if (props.type === 'heatmap') return { ...base, series: props.data?.series || [], timeDomain: props.data?.time_domain, unit: props.unit || '' }
+  if (props.type === 'heatmap') return { ...base, series: props.data?.series || [], timeDomain: props.data?.time_domain, unit: props.unit || '', truncated: props.data?.truncated }
   if (props.type === 'histogram') {
     const distribution = buildHistogram(props.data?.series || [], props.histogramBucketCount)
     return {
@@ -107,6 +107,7 @@ const panelProps = computed<Record<string, unknown>>(() => {
     unit: props.unit || '',
     displayMode: props.displayMode,
     fill: props.fill,
+    truncated: props.data?.truncated,
   }
 })
 </script>

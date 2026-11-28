@@ -7,7 +7,7 @@ let chartIdSeq = 0
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { CountBucket, DeployMarker, TimeDomain } from '../../types'
 import type { TimeSeriesPanelSeries } from '../panels/types'
-import { straightLinePath, straightAreaPath, straightBandPath, fmtAxis, resolveTimeDomain, MAX_CHART_SERIES, type Pt } from '../../lib/chart'
+import { straightLinePath, straightAreaPath, straightBandPath, fmtAxis, resolveTimeDomain, MAX_CHART_SERIES, TOP_GROUPS_NOTE, type Pt } from '../../lib/chart'
 import { useChartHover } from '../../composables/useChartHover'
 import EmptyState from '../EmptyState.vue'
 import { stackTimeSeries } from '../../lib/stackedTimeBars'
@@ -36,6 +36,8 @@ const props = withDefaults(defineProps<{
   selectableSeries?: boolean
   forecastFrom?: number
   zoomable?: boolean
+  /** The server kept only its top groups. */
+  truncated?: boolean
 }>(), { fill: null })
 
 const emit = defineEmits<{ rangeSelect: [range: TimeDomain]; seriesSelect: [index: number] }>()
@@ -55,7 +57,7 @@ const seriesMode = computed(() => props.series !== undefined)
 const chartSeries = computed(() => props.series?.slice(0, MAX_CHART_SERIES))
 const seriesCapNote = computed(() => (props.series?.length ?? 0) > MAX_CHART_SERIES
   ? `Showing the first ${MAX_CHART_SERIES} of ${props.series!.length.toLocaleString()} series. Narrow the query to see the rest.`
-  : '')
+  : props.truncated ? TOP_GROUPS_NOTE : '')
 const hasSamples = computed(() => (
   seriesMode.value
     ? Boolean(chartSeries.value?.some(series => series.points.length))

@@ -135,6 +135,26 @@ describe('tenant-aware API transport', () => {
     })
   })
 
+  it('shows the message of a 4xx error envelope but never a 5xx or raw body', async () => {
+    const message = 'channel secrets need RUSH_CONFIG_ENCRYPTION_KEY to be configured'
+    const envelope = (status: number) => new Response(
+      JSON.stringify({ error: { code: 'config_encryption_key_missing', message, request_id: 'r-1' } }),
+      { status, headers: { 'Content-Type': 'application/json' } },
+    )
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(envelope(409))
+      .mockResolvedValueOnce(envelope(503))
+      .mockResolvedValueOnce(new Response('SELECT secret FROM users', { status: 400 })))
+
+    const { useApi } = await import('./useApi')
+    const api = useApi()
+    const channel = { name: 'ops', channel_type: 'slack', config: {} }
+
+    await expect(api.createChannel(channel)).rejects.toMatchObject({ status: 409, message })
+    await expect(api.createChannel(channel)).rejects.toThrow('temporarily unavailable')
+    await expect(api.createChannel(channel)).rejects.toThrow('was not accepted')
+  })
+
   it('encodes identifiers as single URL path segments', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({}), { status: 200 }),

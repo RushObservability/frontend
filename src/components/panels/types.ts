@@ -46,12 +46,16 @@ export interface TimeSeriesPanelProps extends PanelFrameProps {
   unit?: string
   seriesName?: string
   linkedReadout?: boolean
+  /** The server kept only its top groups. */
+  truncated?: boolean
 }
 
 export interface HeatmapPanelProps extends PanelFrameProps {
   series?: TimeSeriesPanelSeries[]
   timeDomain?: TimeDomain
   unit?: string
+  /** The server kept only its top groups. */
+  truncated?: boolean
 }
 
 export interface StatPanelProps extends PanelFrameProps {

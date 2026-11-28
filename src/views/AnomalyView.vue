@@ -9,6 +9,7 @@ import { metricSelector } from '../lib/promqlNames'
 import { matchMetricNames } from '../lib/metricPattern'
 import { settleWithLimit } from '../lib/settleWithLimit'
 import { MAX_CHART_SERIES } from '../lib/chart'
+import { sendInTurn, sendInTurnSummary } from '../lib/sendInTurn'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,6 +36,8 @@ interface AnomalyConfig {
   apmMetric: string
   sensitivity: number
   alpha: number
+  evalIntervalSecs: number
+  windowSecs: number
   state: string
   lastTriggeredAt: number | null
   splitLabels?: string[]
@@ -217,6 +220,8 @@ function fromApiRule(rule: AnomalyRule): AnomalyConfig {
     apmMetric: rule.apm_metric,
     sensitivity: rule.sensitivity,
     alpha: rule.alpha,
+    evalIntervalSecs: rule.eval_interval_secs,
+    windowSecs: rule.window_secs,
     state: rule.state,
     lastTriggeredAt: rule.last_triggered_at ? new Date(rule.last_triggered_at).getTime() : null,
     splitLabels: rule.split_labels.length ? rule.split_labels : undefined,
@@ -267,9 +272,11 @@ const editDescription = ref('')
 const editSensitivity = ref(3.0)
 const editAlpha = ref(0.25)
 const editChannels = ref<string[]>([])
+const editError = ref('')
 
 function startEdit(config: AnomalyConfig) {
   editingId.value = config.id
+  editError.value = ''
   editName.value = config.name || ''
   editDescription.value = config.description || ''
   editSensitivity.value = config.sensitivity
@@ -292,10 +299,12 @@ async function saveEdit() {
   if (!config) return
   const newName = editName.value.trim() || config.pattern || config.name
   const newDesc = editDescription.value.trim()
+  editError.value = ''
   try {
     await api.updateAnomalyRule(config.id, {
       name: newName,
       description: newDesc,
+      enabled: config.enabled,
       source: config.source,
       pattern: config.pattern,
       query: '',
@@ -303,12 +312,15 @@ async function saveEdit() {
       apm_metric: config.apmMetric,
       sensitivity: editSensitivity.value,
       alpha: editAlpha.value,
-      eval_interval_secs: 300,
-      window_secs: 3600,
+      eval_interval_secs: config.evalIntervalSecs,
+      window_secs: config.windowSecs,
       split_labels: config.splitLabels || [],
       notification_channel_ids: editChannels.value,
     })
-  } catch { /* best effort */ }
+  } catch (e) {
+    editError.value = e instanceof Error ? e.message : 'The detector could not be saved.'
+    return
+  }
   config.name = newName
   config.description = newDesc
   config.sensitivity = editSensitivity.value
@@ -650,6 +662,8 @@ const liveLoop = usePollingTask({ category: 'anomaly', intervalMs: LIVE_INTERVAL
 // ═══ Manual alert sending ═══
 const alertSending = ref<Set<string>>(new Set())
 const alertSent = ref<Set<string>>(new Set())
+const alertErrors = ref<Record<string, string>>({}) // send key → why it failed
+const alertNotice = ref<Record<string, string>>({}) // chart key → send-to-all summary
 const alertPickerOpen = ref<string | null>(null) // chartAlertKey of open picker
 
 function chartAlertKey(configId: string, m: { name: string; labels?: Record<string, string> }): string {
@@ -765,12 +779,13 @@ async function sendAlertToChannel(
 
   const ch = channels.value.find(c => c.id === channelId)
   const payload = buildAlertPayload(config, m, ch?.channel_type)
+  delete alertErrors.value[sendKey]
   try {
     await api.notifyChannel(channelId, payload)
     alertSent.value.add(sendKey)
     setTimeout(() => alertSent.value.delete(sendKey), 3000)
-  } catch {
-    // failed silently
+  } catch (e) {
+    alertErrors.value[sendKey] = e instanceof Error ? e.message : 'Send failed.'
   } finally {
     alertSending.value.delete(sendKey)
   }
@@ -783,19 +798,24 @@ async function sendAlertToAll(
   const key = chartAlertKey(config.id, m)
   if (alertSending.value.has(key)) return
   alertSending.value.add(key)
+  delete alertNotice.value[key]
 
+  // One at a time: the API allows 30 manual sends per tenant per minute.
+  const targets = [...channels.value]
   try {
-    await Promise.all(channels.value.map(ch => {
-      const payload = buildAlertPayload(config, m, ch.channel_type)
-      return api.notifyChannel(ch.id, payload)
-    }))
-    alertSent.value.add(key)
-    setTimeout(() => alertSent.value.delete(key), 3000)
-  } catch {
-    // failed silently
+    const result = await sendInTurn(targets, ch => api.notifyChannel(ch.id, buildAlertPayload(config, m, ch.channel_type)))
+    for (const ch of targets) delete alertErrors.value[`${key}:${ch.id}`]
+    for (const { item, message } of result.failed) alertErrors.value[`${key}:${item.id}`] = message
+    const notice = sendInTurnSummary(result, targets.length)
+    if (notice) {
+      alertNotice.value[key] = notice
+    } else {
+      alertSent.value.add(key)
+      setTimeout(() => alertSent.value.delete(key), 3000)
+      alertPickerOpen.value = null
+    }
   } finally {
     alertSending.value.delete(key)
-    alertPickerOpen.value = null
   }
 }
 
@@ -1315,6 +1335,7 @@ onUnmounted(() => {
           <div class="edit-row edit-actions">
             <span class="section-pattern mono">{{ config.source === 'apm' ? `${config.serviceName}:${config.apmMetric}` : config.pattern }}</span>
             <div class="section-header-actions">
+              <span v-if="editError" class="edit-error" role="alert">{{ editError }}</span>
               <button class="save-btn" @click="saveEdit">Save</button>
               <button class="discard-btn" @click="cancelEdit">Cancel</button>
             </div>
@@ -1418,6 +1439,7 @@ onUnmounted(() => {
                       <span class="alert-picker-type">{{ ch.channel_type }}</span>
                       <span class="alert-picker-name">{{ ch.name }}</span>
                       <svg v-if="alertSent.has(chartAlertKey(config.id, m) + ':' + ch.id)" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      <span v-if="alertErrors[chartAlertKey(config.id, m) + ':' + ch.id]" class="alert-picker-error">{{ alertErrors[chartAlertKey(config.id, m) + ':' + ch.id] }}</span>
                     </button>
                     <button
                       v-if="channels.length > 1"
@@ -1428,6 +1450,7 @@ onUnmounted(() => {
                       Send to all
                       <svg v-if="alertSent.has(chartAlertKey(config.id, m))" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
                     </button>
+                    <div v-if="alertNotice[chartAlertKey(config.id, m)]" class="alert-picker-notice" role="status">{{ alertNotice[chartAlertKey(config.id, m)] }}</div>
                   </template>
                   <div v-else class="alert-picker-empty">
                     <span>No channels configured</span>
