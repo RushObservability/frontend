@@ -856,6 +856,8 @@ export interface TimeseriesResponse {
   buckets: TimeseriesBucket[] | GroupedTimeseriesBucket[]
   heatmap?: LatencyHeatmapCell[]
   grouped: boolean
+  /** Groups past the server's top 24 were dropped. Absent from older APIs. */
+  truncated?: boolean
 }
 
 // ── Deploy types ──

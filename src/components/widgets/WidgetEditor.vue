@@ -519,8 +519,8 @@ function save() {
                 <StateTimelineWidget v-else-if="widgetType === 'state-timeline' && previewData.time_domain" :series="previewData.series || []" :time-domain="previewData.time_domain" :step-secs="previewData.step_secs" :states="states" />
                 <ScatterWidget v-else-if="widgetType === 'scatter'" :points="previewData.scatter_points || []" :x-label="xLabel || activeQuery.x_field || 'X'" :y-label="yLabel || activeQuery.y_field || 'Y'" :x-unit="xUnit" :y-unit="unit" :source="previewData.source" :truncated="previewData.truncated" :time-domain="previewData.time_domain" />
                 <TableWidget v-else-if="widgetType === 'table'" :rows="(previewData.rows || []) as Record<string, unknown>[]" />
-                <TimeseriesWidget v-else-if="widgetType === 'timeseries'" :buckets="previewData.buckets || []" :series="previewData.series" :unit="unit" :display-mode="displayMode" :fill="fill" />
-                <HeatmapWidget v-else-if="widgetType === 'heatmap'" :series="previewData.series || []" :time-domain="previewData.time_domain" :unit="unit" />
+                <TimeseriesWidget v-else-if="widgetType === 'timeseries'" :buckets="previewData.buckets || []" :series="previewData.series" :unit="unit" :display-mode="displayMode" :fill="fill" :truncated="previewData.truncated" />
+                <HeatmapWidget v-else-if="widgetType === 'heatmap'" :series="previewData.series || []" :time-domain="previewData.time_domain" :unit="unit" :truncated="previewData.truncated" />
                 <HistogramWidget v-else-if="widgetType === 'histogram'" :bins="previewHistogram.bins.map(bin => ({ ...bin, key: `${bin.key}${unit ? ` ${unit}` : ''}` }))" :min-label="`${previewHistogram.minLabel}${unit ? ` ${unit}` : ''}`" :max-label="`${previewHistogram.maxLabel}${unit ? ` ${unit}` : ''}`" :axis-unit="unit" color="var(--blue, #3b82f6)" unit="samples" />
               </template>
               <div v-else class="we-preview-msg"><strong>No preview yet</strong><span>Configure a query in the panel editor.</span></div>

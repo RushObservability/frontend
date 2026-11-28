@@ -44,6 +44,7 @@ export function useWidgetData() {
       )
       const series: NonNullable<WidgetData['series']> = []
       const queryErrors: NonNullable<WidgetData['query_errors']> = []
+      let truncated = false
 
       settled.forEach((result, index) => {
         const query = visibleQueries[index]!
@@ -55,6 +56,7 @@ export function useWidgetData() {
           return
         }
         const data = result.value
+        truncated ||= data.truncated === true
         if (data.series?.length) {
           const isSplit = data.series.length > 1
           data.series.forEach((item) => {
@@ -79,7 +81,7 @@ export function useWidgetData() {
       if (!series.length && queryErrors.length) {
         throw new Error(queryErrors.map(error => `${error.ref_id}: ${error.message}`).join(' · '))
       }
-      return { type: widget.widget_type, series, query_errors: queryErrors, time_domain: timeDomain, diagnostic_requests }
+      return { type: widget.widget_type, series, query_errors: queryErrors, truncated, time_domain: timeDomain, diagnostic_requests }
     }
 
     // Stat/bar/table panels use the first visible query for now. The editor
@@ -174,6 +176,7 @@ export function useWidgetData() {
         return {
           type: widgetType,
           series: apmTimeseriesToSeries(response.buckets, query, response.grouped),
+          truncated: response.truncated === true,
         }
       }
       case 'pie':

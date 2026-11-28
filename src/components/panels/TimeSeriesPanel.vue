@@ -60,6 +60,7 @@ const hasData = () => Boolean(
       :unit="unit"
       :series-name="seriesName"
       :linked-readout="linkedReadout"
+      :truncated="truncated"
     />
     <slot name="details" />
     <template v-if="$slots.footer" #footer><slot name="footer" /></template>

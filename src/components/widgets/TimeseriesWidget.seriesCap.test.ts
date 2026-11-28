@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { createSSRApp } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import TimeseriesWidget from './TimeseriesWidget.vue'
-import { MAX_CHART_SERIES } from '../../lib/chart'
+import { MAX_CHART_SERIES, TOP_GROUPS_NOTE } from '../../lib/chart'
 
 function series(count: number) {
   return Array.from({ length: count }, (_, i) => ({ name: `pod-${i}`, points: [[0, i], [60, i + 1]] as [number, number][] }))
 }
 
-async function render(count: number): Promise<string> {
-  return renderToString(createSSRApp(TimeseriesWidget, { buckets: [], series: series(count) }))
+async function render(count: number, truncated?: boolean): Promise<string> {
+  return renderToString(createSSRApp(TimeseriesWidget, { buckets: [], series: series(count), truncated }))
 }
 
 describe('time-series series cap', () => {
@@ -26,5 +26,10 @@ describe('time-series series cap', () => {
     const html = await render(MAX_CHART_SERIES)
     expect(html.match(/class="ch-line ts-line"/g)).toHaveLength(MAX_CHART_SERIES)
     expect(html).not.toContain('ts-series-cap')
+  })
+
+  it('says when the server kept only its top groups', async () => {
+    expect(await render(24, true)).toContain(TOP_GROUPS_NOTE)
+    expect(await render(24)).not.toContain('ts-series-cap')
   })
 })

@@ -2,11 +2,14 @@
 import { computed, ref } from 'vue'
 import type { TimeDomain } from '../../types'
 import { buildHeatmap } from '../../lib/heatmap'
+import { TOP_GROUPS_NOTE } from '../../lib/chart'
 
 const props = withDefaults(defineProps<{
   series?: Array<{ name: string; points: [number, number][] }>
   timeDomain?: TimeDomain
   unit?: string
+  /** The server kept only its top groups. */
+  truncated?: boolean
 }>(), { series: () => [], unit: '' })
 
 const visibleSeries = computed(() => props.series.slice(0, 24))
@@ -112,6 +115,7 @@ function onCellKeydown(event: KeyboardEvent, row: number, column: number) {
     <div class="heatmap-axis"><span>{{ formatTime(heatmap.domain.from) }}</span><span>{{ formatTime((heatmap.domain.from + heatmap.domain.to) / 2) }}</span><span>{{ formatTime(heatmap.domain.to) }}</span></div>
     <div class="heatmap-legend"><span>No data</span><i class="heatmap-legend-empty"></i><span>{{ formatValue(heatmap.min) }}</span><span class="heatmap-legend-scale"><i v-for="step in 5" :key="step" :style="{ background: cellColor(heatmap.min + (heatmap.max - heatmap.min) * (step - 1) / 4) }"></i></span><span>{{ formatValue(heatmap.max) }}</span></div>
     <span v-if="series.length > visibleSeries.length" class="heatmap-overflow">Showing first {{ visibleSeries.length }} of {{ series.length }} series</span>
+    <span v-else-if="truncated" class="heatmap-overflow">{{ TOP_GROUPS_NOTE }}</span>
   </div>
 </template>
 

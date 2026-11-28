@@ -30,6 +30,6 @@ withDefaults(defineProps<HeatmapPanelProps>(), {
     variant="chart"
   >
     <template v-if="$slots.actions" #actions><slot name="actions" /></template>
-    <HeatmapWidget :series="series" :time-domain="timeDomain" :unit="unit" />
+    <HeatmapWidget :series="series" :time-domain="timeDomain" :unit="unit" :truncated="truncated" />
   </PanelCard>
 </template>

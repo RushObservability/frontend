@@ -75,6 +75,17 @@ describe('dashboard bucket times', () => {
     expect(data.series?.[0]?.points[0]?.[0]).toBeLessThan(data.time_domain!.to)
   })
 
+  it('reports dropped span groups only when the API says so', async () => {
+    const buckets = [{ bucket: '2026-09-17 00:30:00', group_key: 'gateway', count: 4, error_count: 0 }]
+    const panel = widget('spans')
+    panel.query_config.queries = [{ ref_id: 'A', source: 'spans', filters: [], group_by: ['http_path'] }]
+    api.queryTimeseries.mockResolvedValue({ grouped: true, truncated: true, buckets })
+    expect((await useWidgetData().fetchWidgetData(panel)).truncated).toBe(true)
+    // An older API without the field shows no note.
+    api.queryTimeseries.mockResolvedValue({ grouped: true, buckets })
+    expect((await useWidgetData().fetchWidgetData(panel)).truncated).toBeFalsy()
+  })
+
   it('normalizes log buckets the same way', async () => {
     api.countLogs.mockResolvedValue([{ bucket: '2026-09-17 00:30:00', count: 5 }])
     const panel = widget('logs')
