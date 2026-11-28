@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick, onUnmounted } from 'vue'
+import { ref, shallowRef, triggerRef, computed, onMounted, watch, nextTick, onUnmounted } from 'vue'
 import { parseSearchComparison } from '../lib/searchComparison'
 import { useRouter, useRoute } from 'vue-router'
 import { useApi } from '../composables/useApi'
@@ -194,7 +194,13 @@ const spanModeFallback = ref<{ count: number; capped: boolean } | null>(null)
 let spanModeFallbackSeq = 0
 const resultCountLabel = computed(() => viewMode.value === 'logs' ? 'events' : tracesOnly.value ? 'traces' : 'spans')
 const apmResultMode = ref<'individual' | 'groups'>('individual')
-const otelLogs = ref<LogRecord[]>([])
+// Rows are only replaced or appended, so skip deep proxies over every record.
+const otelLogs = shallowRef<LogRecord[]>([])
+// Infinite scroll stops here: every loaded row is rebuilt, sorted and faceted on each page.
+const MAX_LOADED_LOG_ROWS = 10_000
+// Reuse a record's entry while the record and its index are unchanged, so an
+// appended page or one hydrated row does not rebuild every other entry.
+const otelLogEntryCache = new WeakMap<LogRecord, LogEntry>()
 const logViews = ref<LogView[]>([])
 const logViewsLoading = ref(true)
 const logViewsError = ref('')
@@ -553,7 +559,12 @@ const logEntries = computed(() => {
   // logs records
   for (let sourceLogIndex = 0; sourceLogIndex < otelLogs.value.length; sourceLogIndex++) {
     const log = otelLogs.value[sourceLogIndex]!
-    entries.push({
+    const cached = otelLogEntryCache.get(log)
+    if (cached?._sourceLogIndex === sourceLogIndex) {
+      entries.push(cached)
+      continue
+    }
+    const entry: LogEntry = {
       key: `otel:${log.TraceId || 'no-trace'}:${log.Timestamp}:${sourceLogIndex}`,
       timestamp: log.Timestamp,
       service_name: log.ServiceName,
@@ -570,7 +581,9 @@ const logEntries = computed(() => {
       _sourceLogIndex: sourceLogIndex,
       _detailLoaded: log.ResourceAttributes !== undefined && log.LogAttributes !== undefined,
       _source: 'otel',
-    })
+    }
+    otelLogEntryCache.set(log, entry)
+    entries.push(entry)
   }
 
   entries.sort((a, b) => b.timestamp - a.timestamp)
@@ -690,10 +703,11 @@ async function hydrateOtelLog(entry: LogEntry): Promise<void> {
   logDetailErrors.value = errors
   try {
     const detail = await api.getLogDetail(row)
-    const next = [...otelLogs.value]
+    // A new search replaced the rows while the detail loaded.
+    if (otelLogs.value[idx] !== row) return
     // Preserve list-only locator fields so reopening does not require another list query.
-    next[idx] = { ...row, ...detail }
-    otelLogs.value = next
+    otelLogs.value[idx] = { ...row, ...detail }
+    triggerRef(otelLogs)
   } catch {
     logDetailErrors.value = new Set(logDetailErrors.value).add(idx)
   } finally {
@@ -1396,9 +1410,9 @@ async function loadMore() {
         search: searchParam,
       })
       if (requestScope !== JSON.stringify([activeTenant.value, selectedLogViewId.value, logColumns.value, searchInput.value, timeRange.value])) return
-      otelLogs.value.push(...page.rows)
+      otelLogs.value = otelLogs.value.concat(page.rows)
       nextCursor.value = page.next_cursor || null
-      paginationHasMore.value = page.has_more && Boolean(page.next_cursor)
+      paginationHasMore.value = page.has_more && Boolean(page.next_cursor) && otelLogs.value.length < MAX_LOADED_LOG_ROWS
     } else {
       const page = await api.queryEvents({
         time_range: timeRange.value,
@@ -6053,6 +6067,9 @@ watch(() => route.query.log_view, (id) => {
               </div>
               <div v-else-if="hasMore" class="loading-more text-muted">
                 {{ logEntries.length.toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}
+              </div>
+              <div v-else-if="otelLogs.length >= MAX_LOADED_LOG_ROWS" class="loading-more text-muted">
+                Showing the first {{ MAX_LOADED_LOG_ROWS.toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}. Narrow your query or time range to see the rest.
               </div>
               <div v-else-if="logEntries.length" class="loading-more text-muted">
                 {{ logEntries.length.toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}
