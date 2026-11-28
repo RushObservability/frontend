@@ -174,4 +174,22 @@ describe('useAuth session expiration', () => {
     expect(auth.isAuthenticated.value).toBe(false)
     expect(auth.user.value).toBeNull()
   })
+
+  it('clears identity in this tab when another tab logs out', async () => {
+    const user = { id: 'user-1', username: 'operator', display_name: 'Operator', tenant_id: 'default', role: 'write' }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ user }), { status: 200 })))
+    const { useAuth } = await import('./useAuth')
+    const { onSessionExpired } = await import('./authSession')
+    const auth = useAuth()
+    await auth.checkSession()
+    const expired = vi.fn()
+    onSessionExpired(expired)
+
+    const otherTab = new BroadcastChannel('rush-auth')
+    otherTab.postMessage('logout')
+    otherTab.close()
+
+    await vi.waitFor(() => expect(auth.user.value).toBeNull())
+    expect(expired).toHaveBeenCalledOnce()
+  })
 })

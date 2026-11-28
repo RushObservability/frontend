@@ -48,6 +48,15 @@ onSessionExpired(() => {
   loading.value = false
 })
 
+// Logging out revokes the cookie every tab shares, but the other tabs would
+// keep showing loaded data until their next request. Tell them right away.
+const authChannel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('rush-auth')
+if (authChannel) {
+  authChannel.onmessage = (event) => {
+    if (event.data === 'logout' && user.value) reportSessionExpired()
+  }
+}
+
 async function checkSession(): Promise<void> {
   if (checked.value) return
   if (checkPromise) return checkPromise
@@ -161,6 +170,7 @@ async function logout(): Promise<void> {
   setStorageUserId(null)
   clearAllScopedStorage()
   checked.value = false
+  authChannel?.postMessage('logout')
 }
 
 export function useAuth() {
