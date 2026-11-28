@@ -8,6 +8,7 @@ import type { NotificationChannel, AnomalyRule, AnomalyEventWithRule, Timeseries
 import { metricSelector } from '../lib/promqlNames'
 import { matchMetricNames } from '../lib/metricPattern'
 import { settleWithLimit } from '../lib/settleWithLimit'
+import { MAX_CHART_SERIES } from '../lib/chart'
 
 const route = useRoute()
 const router = useRouter()
@@ -470,9 +471,55 @@ const allConfigCharts = computed(() => {
   return result
 })
 
+// Each series is its own SVG card and a split detector can return thousands,
+// so a detector draws at most MAX_CHART_SERIES. Their paths, ticks and anomaly
+// regions are built here once per data change: the crosshair re-renders every
+// chart on each mouse move, and template calls rebuilt all of them each time.
+function withGeometry(m: ReturnType<typeof computeChartsForMonitors>[number]) {
+  return {
+    ...m,
+    ticks: yTicks(m.maxVal),
+    times: timeLabels(m.timestamps),
+    rects: anomalyRects(m.bands.anomalies, m.values.length),
+    paths: {
+      band: bandPath(m.bands.upper, m.bands.lower, m.maxVal),
+      upper: linePath(m.bands.upper, m.maxVal),
+      lower: linePath(m.bands.lower, m.maxVal),
+      ewma: linePath(m.bands.ewma, m.maxVal),
+      area: areaPath(m.values, m.maxVal),
+      line: linePath(m.values, m.maxVal),
+    },
+  }
+}
+
+function chartView(charts: ReturnType<typeof computeChartsForMonitors>, noun: string) {
+  return {
+    charts: charts.slice(0, MAX_CHART_SERIES).map(withGeometry),
+    capNote: charts.length > MAX_CHART_SERIES
+      ? `Showing the first ${MAX_CHART_SERIES} of ${charts.length.toLocaleString()} ${noun}. Narrow the detector to see the rest.`
+      : '',
+  }
+}
+
+const EMPTY_CHART_VIEW = chartView([], '')
+const configChartViews = computed(() => {
+  const result: Record<string, { all: typeof EMPTY_CHART_VIEW; anomalous: typeof EMPTY_CHART_VIEW }> = {}
+  for (const [id, charts] of Object.entries(allConfigCharts.value)) {
+    result[id] = {
+      all: chartView(charts, 'series'),
+      anomalous: chartView(charts.filter(m => m.anomalyCount > 0), 'anomalous series'),
+    }
+  }
+  return result
+})
+
+function detectorChartsFor(configId: string) {
+  return configChartViews.value[configId]?.all ?? EMPTY_CHART_VIEW
+}
+
 // ═══ Filter to only anomalous series for the Anomalous tab ═══
 function anomalousChartsFor(configId: string) {
-  return (allConfigCharts.value[configId] || []).filter(m => m.anomalyCount > 0)
+  return configChartViews.value[configId]?.anomalous ?? EMPTY_CHART_VIEW
 }
 
 // Optional service filter (deep-linked from a service page via ?service=).
@@ -1033,8 +1080,8 @@ onUnmounted(() => {
           </div>
         </div>
         <p v-if="configErrors[config.id]" class="empty-sub" role="alert">{{ configErrors[config.id] }}</p>
-        <div class="charts-grid" v-if="anomalousChartsFor(config.id).length">
-          <div v-for="(m, mi) in anomalousChartsFor(config.id)" :key="formatSeriesName(m.name, m.labels)" class="chart-card card" :data-chart-metric="formatSeriesName(m.name, m.labels)">
+        <div class="charts-grid" v-if="anomalousChartsFor(config.id).charts.length">
+          <div v-for="(m, mi) in anomalousChartsFor(config.id).charts" :key="formatSeriesName(m.name, m.labels)" class="chart-card card" :data-chart-metric="formatSeriesName(m.name, m.labels)">
             <div class="chart-header">
               <div class="chart-header-left">
                 <span class="chart-color-dot" :style="{ background: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []) }"></span>
@@ -1057,25 +1104,25 @@ onUnmounted(() => {
               @mousemove="onChartMouseMove"
               @mouseleave="onChartMouseLeave"
             >
-              <template v-for="t in yTicks(m.maxVal)" :key="'y' + t.label">
+              <template v-for="t in m.ticks" :key="'y' + t.label">
                 <line :x1="pad.left" :y1="t.y" :x2="W - pad.right" :y2="t.y" class="grid-line" />
                 <text :x="pad.left - 4" :y="t.y + 3" class="axis-label" text-anchor="end">{{ t.label }}</text>
               </template>
-              <template v-for="l in timeLabels(m.timestamps)" :key="'x' + l.label">
+              <template v-for="l in m.times" :key="'x' + l.label">
                 <text :x="l.x" :y="H - 4" class="axis-label" text-anchor="middle">{{ l.label }}</text>
               </template>
               <rect
-                v-for="(r, ri) in anomalyRects(m.bands.anomalies, m.values.length)"
+                v-for="(r, ri) in m.rects"
                 :key="'a' + ri"
                 :x="r.x" :y="pad.top" :width="r.w" :height="iH"
                 class="anomaly-region"
               />
-              <path :d="bandPath(m.bands.upper, m.bands.lower, m.maxVal)" class="band-fill" />
-              <path :d="linePath(m.bands.upper, m.maxVal)" class="band-edge" />
-              <path :d="linePath(m.bands.lower, m.maxVal)" class="band-edge" />
-              <path :d="linePath(m.bands.ewma, m.maxVal)" class="baseline-line" />
-              <path :d="areaPath(m.values, m.maxVal)" :style="{ fill: config.splitLabels?.length ? seriesColor(mi, 0.10) : metricColor(m.name, configData[config.id] || [], 0.10) }" />
-              <path :d="linePath(m.values, m.maxVal)" class="ch-line" :style="{ stroke: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []) }" />
+              <path :d="m.paths.band" class="band-fill" />
+              <path :d="m.paths.upper" class="band-edge" />
+              <path :d="m.paths.lower" class="band-edge" />
+              <path :d="m.paths.ewma" class="baseline-line" />
+              <path :d="m.paths.area" :style="{ fill: config.splitLabels?.length ? seriesColor(mi, 0.10) : metricColor(m.name, configData[config.id] || [], 0.10) }" />
+              <path :d="m.paths.line" class="ch-line" :style="{ stroke: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []) }" />
               <template v-if="cursorX !== null">
                 <line :x1="cursorX" :y1="pad.top" :x2="cursorX" :y2="pad.top + iH" class="crosshair" />
                 <circle :cx="cursorX" :cy="dotY(m.values, m.maxVal)" r="3.5" class="crosshair-dot" :style="{ fill: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []), stroke: 'var(--bg-surface)' }" />
@@ -1083,6 +1130,7 @@ onUnmounted(() => {
             </svg>
           </div>
         </div>
+        <p v-if="anomalousChartsFor(config.id).capNote" class="empty-sub">{{ anomalousChartsFor(config.id).capNote }}</p>
       </div>
       </template>
 
@@ -1325,8 +1373,8 @@ onUnmounted(() => {
         </div>
       </template>
       <p v-if="isDetectorExpanded(config.id) && configErrors[config.id]" class="empty-sub" role="alert">{{ configErrors[config.id] }}</p>
-      <div class="charts-grid detector-charts" v-if="isDetectorExpanded(config.id) && (allConfigCharts[config.id] || []).length">
-        <div v-for="(m, mi) in allConfigCharts[config.id]" :key="formatSeriesName(m.name, m.labels)" class="chart-card card" :data-chart-metric="formatSeriesName(m.name, m.labels)">
+      <div class="charts-grid detector-charts" v-if="isDetectorExpanded(config.id) && detectorChartsFor(config.id).charts.length">
+        <div v-for="(m, mi) in detectorChartsFor(config.id).charts" :key="formatSeriesName(m.name, m.labels)" class="chart-card card" :data-chart-metric="formatSeriesName(m.name, m.labels)">
           <div class="chart-header">
             <div class="chart-header-left">
               <span class="chart-color-dot" :style="{ background: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []) }"></span>
@@ -1396,25 +1444,25 @@ onUnmounted(() => {
             @mousemove="onChartMouseMove"
             @mouseleave="onChartMouseLeave"
           >
-            <template v-for="t in yTicks(m.maxVal)" :key="'y' + t.label">
+            <template v-for="t in m.ticks" :key="'y' + t.label">
               <line :x1="pad.left" :y1="t.y" :x2="W - pad.right" :y2="t.y" class="grid-line" />
               <text :x="pad.left - 4" :y="t.y + 3" class="axis-label" text-anchor="end">{{ t.label }}</text>
             </template>
-            <template v-for="l in timeLabels(m.timestamps)" :key="'x' + l.label">
+            <template v-for="l in m.times" :key="'x' + l.label">
               <text :x="l.x" :y="H - 4" class="axis-label" text-anchor="middle">{{ l.label }}</text>
             </template>
             <rect
-              v-for="(r, ri) in anomalyRects(m.bands.anomalies, m.values.length)"
+              v-for="(r, ri) in m.rects"
               :key="'a' + ri"
               :x="r.x" :y="pad.top" :width="r.w" :height="iH"
               class="anomaly-region"
             />
-            <path :d="bandPath(m.bands.upper, m.bands.lower, m.maxVal)" class="band-fill" />
-            <path :d="linePath(m.bands.upper, m.maxVal)" class="band-edge" />
-            <path :d="linePath(m.bands.lower, m.maxVal)" class="band-edge" />
-            <path :d="linePath(m.bands.ewma, m.maxVal)" class="baseline-line" />
-            <path :d="areaPath(m.values, m.maxVal)" :style="{ fill: config.splitLabels?.length ? seriesColor(mi, 0.10) : metricColor(m.name, configData[config.id] || [], 0.10) }" />
-            <path :d="linePath(m.values, m.maxVal)" class="ch-line" :style="{ stroke: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []) }" />
+            <path :d="m.paths.band" class="band-fill" />
+            <path :d="m.paths.upper" class="band-edge" />
+            <path :d="m.paths.lower" class="band-edge" />
+            <path :d="m.paths.ewma" class="baseline-line" />
+            <path :d="m.paths.area" :style="{ fill: config.splitLabels?.length ? seriesColor(mi, 0.10) : metricColor(m.name, configData[config.id] || [], 0.10) }" />
+            <path :d="m.paths.line" class="ch-line" :style="{ stroke: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []) }" />
             <template v-if="cursorX !== null">
               <line :x1="cursorX" :y1="pad.top" :x2="cursorX" :y2="pad.top + iH" class="crosshair" />
               <circle :cx="cursorX" :cy="dotY(m.values, m.maxVal)" r="3.5" class="crosshair-dot" :style="{ fill: config.splitLabels?.length ? seriesColor(mi) : metricColor(m.name, configData[config.id] || []), stroke: 'var(--bg-surface)' }" />
@@ -1430,6 +1478,7 @@ onUnmounted(() => {
         <span class="empty-text">No recent signal data</span>
         <span class="empty-sub">Check the source, metric, and scope for this detector.</span>
       </div>
+      <p v-if="isDetectorExpanded(config.id) && detectorChartsFor(config.id).capNote" class="empty-sub">{{ detectorChartsFor(config.id).capNote }}</p>
     </div>
     </template>
 

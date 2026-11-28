@@ -7,6 +7,7 @@ import { PanelCard, TablePanel, TimeSeriesPanel } from '../components/panels'
 import type { TimeSeriesPanelSeries } from '../components/panels'
 import type { AnomalyRule, AnomalyEvent, CorrelationResponse, LogRecord, RushEvent, TimeseriesBucket } from '../types'
 import { metricNameInBraces, metricSelector } from '../lib/promqlNames'
+import { MAX_CHART_SERIES } from '../lib/chart'
 
 const props = defineProps<{ ruleId: string }>()
 const route = useRoute()
@@ -464,6 +465,28 @@ function panelSeries(series: ChartSeries, index: number): TimeSeriesPanelSeries[
   }]
 }
 
+// The crosshair re-renders every chart on each mouse move, so geometry and
+// panel series are built once per data change. A split rule draws at most
+// MAX_CHART_SERIES charts.
+const mainCharts = computed(() => chartData.value.slice(0, MAX_CHART_SERIES).map((m, mi) => ({
+  ...m,
+  ticks: yTicks(m.maxVal),
+  times: timeLabels(m.timestamps),
+  rects: anomalyRects(m.bands.anomalies, m.values.length),
+  paths: {
+    band: bandPath(m.bands.upper, m.bands.lower, m.maxVal),
+    upper: linePath(m.bands.upper, m.maxVal),
+    lower: linePath(m.bands.lower, m.maxVal),
+    ewma: linePath(m.bands.ewma, m.maxVal),
+    area: areaPath(m.values, m.maxVal),
+    line: linePath(m.values, m.maxVal),
+  },
+  panel: panelSeries(m, mi),
+})))
+const chartCapNote = computed(() => chartData.value.length > MAX_CHART_SERIES
+  ? `Showing the first ${MAX_CHART_SERIES} of ${chartData.value.length.toLocaleString()} series. Narrow the rule to see the rest.`
+  : '')
+
 // ═══ Colors ═══
 const PALETTE = ['#3b82f6', '#e5584f', '#9b7dd4', '#47b881', '#5b8dd9', '#e0965c', '#6bc9c4', '#d47da0']
 
@@ -608,6 +631,21 @@ function cAnomalyRects(flags: boolean[], total: number): Array<{ x: number; w: n
 }
 
 const corrChartSeries = ref<CorrChartData[]>([])
+const corrCharts = computed(() => corrChartSeries.value.map((svc, si) => ({
+  ...svc,
+  ticks: cYTicks(svc.maxVal),
+  times: cTimeLabels(svc.timestamps),
+  rects: cAnomalyRects(svc.bands.anomalies, svc.values.length),
+  paths: {
+    band: cBandPath(svc.bands.upper, svc.bands.lower, svc.maxVal),
+    upper: cLinePath(svc.bands.upper, svc.maxVal),
+    lower: cLinePath(svc.bands.lower, svc.maxVal),
+    ewma: cLinePath(svc.bands.ewma, svc.maxVal),
+    area: cAreaPath(svc.values, svc.maxVal),
+    line: cLinePath(svc.values, svc.maxVal),
+  },
+  panel: correlationPanelSeries(svc, si),
+})))
 
 // Build a per-service PromQL query by injecting service_name into the metric selector
 function buildServiceQuery(metricStr: string, serviceName: string): string {
@@ -1029,14 +1067,14 @@ onMounted(async () => {
     <!-- Charts -->
     <div class="charts-section" v-if="rule">
       <TimeSeriesPanel
-        v-for="(m, mi) in chartData"
+        v-for="(m, mi) in mainCharts"
         :key="formatSeriesName(m.name, m.labels)"
         class="chart-card"
         :title="formatSeriesName(m.name, m.labels)"
         description="Observed metric (line) vs. EWMA baseline and ±band; shaded regions mark detected anomalies."
         :caption="chartCaption"
         :source-label="ruleSourceLabel"
-        :series="panelSeries(m, mi)"
+        :series="m.panel"
         :loading="chartLoading"
         :error="chartError"
       >
@@ -1057,25 +1095,25 @@ onMounted(async () => {
           @mousemove="onChartMouseMove"
           @mouseleave="onChartMouseLeave"
         >
-          <template v-for="t in yTicks(m.maxVal)" :key="'y' + t.label">
+          <template v-for="t in m.ticks" :key="'y' + t.label">
             <line :x1="pad.left" :y1="t.y" :x2="W - pad.right" :y2="t.y" class="grid-line" />
             <text :x="pad.left - 4" :y="t.y + 3" class="axis-label" text-anchor="end">{{ t.label }}</text>
           </template>
-          <template v-for="l in timeLabels(m.timestamps)" :key="'x' + l.label">
+          <template v-for="l in m.times" :key="'x' + l.label">
             <text :x="l.x" :y="H - 4" class="axis-label" text-anchor="middle">{{ l.label }}</text>
           </template>
           <rect
-            v-for="(r, ri) in anomalyRects(m.bands.anomalies, m.values.length)"
+            v-for="(r, ri) in m.rects"
             :key="'a' + ri"
             :x="r.x" :y="pad.top" :width="r.w" :height="iH"
             class="anomaly-region"
           />
-          <path :d="bandPath(m.bands.upper, m.bands.lower, m.maxVal)" class="band-fill" />
-          <path :d="linePath(m.bands.upper, m.maxVal)" class="band-edge" />
-          <path :d="linePath(m.bands.lower, m.maxVal)" class="band-edge" />
-          <path :d="linePath(m.bands.ewma, m.maxVal)" class="baseline-line" />
-          <path :d="areaPath(m.values, m.maxVal)" :style="{ fill: seriesColor(mi, 0.10) }" />
-          <path :d="linePath(m.values, m.maxVal)" class="ch-line" :style="{ stroke: seriesColor(mi) }" />
+          <path :d="m.paths.band" class="band-fill" />
+          <path :d="m.paths.upper" class="band-edge" />
+          <path :d="m.paths.lower" class="band-edge" />
+          <path :d="m.paths.ewma" class="baseline-line" />
+          <path :d="m.paths.area" :style="{ fill: seriesColor(mi, 0.10) }" />
+          <path :d="m.paths.line" class="ch-line" :style="{ stroke: seriesColor(mi) }" />
           <!-- Event marker -->
           <template v-if="eventMarkerX(m.timestamps) !== null">
             <line
@@ -1092,6 +1130,7 @@ onMounted(async () => {
           </template>
         </svg>
       </TimeSeriesPanel>
+      <p v-if="chartCapNote" class="section-subtitle">{{ chartCapNote }}</p>
 
       <TimeSeriesPanel
         v-if="chartData.length === 0"
@@ -1116,14 +1155,14 @@ onMounted(async () => {
       </div>
       <div class="corr-charts">
         <TimeSeriesPanel
-          v-for="(svc, si) in corrChartSeries"
+          v-for="(svc, si) in corrCharts"
           :key="svc.name"
           class="corr-chart-card"
           :title="svc.name"
           description="Suspected service's request volume vs. EWMA baseline and ±band; shaded regions mark detected anomalies."
           caption="Correlated request volume around the selected anomaly event."
           source-label="Metrics"
-          :series="correlationPanelSeries(svc, si)"
+          :series="svc.panel"
         >
           <template #actions>
             <span class="chart-color-dot" :style="{ background: seriesColor(si) }"></span>
@@ -1143,25 +1182,25 @@ onMounted(async () => {
             @mousemove="onCorrChartMouseMove"
             @mouseleave="onCorrChartMouseLeave"
           >
-            <template v-for="t in cYTicks(svc.maxVal)" :key="'cy' + t.label">
+            <template v-for="t in svc.ticks" :key="'cy' + t.label">
               <line :x1="cPad.left" :y1="t.y" :x2="cW - cPad.right" :y2="t.y" class="grid-line" />
               <text :x="cPad.left - 4" :y="t.y + 3" class="axis-label" text-anchor="end">{{ t.label }}</text>
             </template>
-            <template v-for="l in cTimeLabels(svc.timestamps)" :key="'cx' + l.label">
+            <template v-for="l in svc.times" :key="'cx' + l.label">
               <text :x="l.x" :y="cH - 4" class="axis-label" text-anchor="middle">{{ l.label }}</text>
             </template>
             <!-- Anomaly regions -->
             <rect
-              v-for="(r, ri) in cAnomalyRects(svc.bands.anomalies, svc.values.length)"
+              v-for="(r, ri) in svc.rects"
               :key="'ca' + ri"
               :x="r.x" :y="cPad.top" :width="r.w" :height="ciH"
               class="anomaly-region"
             />
             <!-- EWMA bands -->
-            <path :d="cBandPath(svc.bands.upper, svc.bands.lower, svc.maxVal)" class="band-fill" />
-            <path :d="cLinePath(svc.bands.upper, svc.maxVal)" class="band-edge" />
-            <path :d="cLinePath(svc.bands.lower, svc.maxVal)" class="band-edge" />
-            <path :d="cLinePath(svc.bands.ewma, svc.maxVal)" class="baseline-line" />
+            <path :d="svc.paths.band" class="band-fill" />
+            <path :d="svc.paths.upper" class="band-edge" />
+            <path :d="svc.paths.lower" class="band-edge" />
+            <path :d="svc.paths.ewma" class="baseline-line" />
             <!-- Event marker -->
             <template v-if="cEventMarkerX(svc.timestamps) !== null">
               <line
@@ -1172,8 +1211,8 @@ onMounted(async () => {
               <circle :cx="cEventMarkerX(svc.timestamps)!" :cy="cPad.top + 6" r="4" class="event-marker-dot" />
             </template>
             <!-- Metric line -->
-            <path :d="cAreaPath(svc.values, svc.maxVal)" :style="{ fill: seriesColor(si, 0.10) }" />
-            <path :d="cLinePath(svc.values, svc.maxVal)" class="ch-line" :style="{ stroke: seriesColor(si) }" />
+            <path :d="svc.paths.area" :style="{ fill: seriesColor(si, 0.10) }" />
+            <path :d="svc.paths.line" class="ch-line" :style="{ stroke: seriesColor(si) }" />
             <!-- Crosshair -->
             <template v-if="corrCursorX !== null">
               <line :x1="corrCursorX" :y1="cPad.top" :x2="corrCursorX" :y2="cPad.top + ciH" class="crosshair" />
