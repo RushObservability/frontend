@@ -203,10 +203,11 @@ watch([theme, storageUserId], ([t, userId]) => {
   try { localStorage.setItem(key, t) } catch { /* storage may be unavailable */ }
 })
 
+// Features and license load once tenants resolve (below). A load issued here,
+// before the session check, ran as no user and was discarded when the user id
+// was set. The public login and SSO setup views do not read either.
 onMounted(async () => {
   document.documentElement.setAttribute('data-theme', theme.value)
-  loadFeatures()
-  loadLicense()
   if (!checked.value) {
     await checkSession()
   }
@@ -222,8 +223,7 @@ watch(isAuthenticated, async (authed) => {
     // Tenant validation may replace a stale localStorage value. Refresh the
     // tenant-aware feature flags after that resolution so SRE entry points do
     // not briefly reflect the wrong tenant policy.
-    await loadFeatures()
-    await loadLicense()
+    await Promise.all([loadFeatures(), loadLicense()])
   }
 }, { immediate: true })
 </script>

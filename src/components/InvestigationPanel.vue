@@ -21,6 +21,10 @@ interface AgentEvent {
   model?: string
   kind?: 'final' | 'preliminary' | 'question'
   session_id?: string
+  /** Set once by addDisplayFields when the event lands in a turn. */
+  html?: string
+  argsText?: string
+  preview?: string
 }
 
 interface Turn {
@@ -205,6 +209,7 @@ function currentTurn(): Turn | null {
 function pushEventToCurrentTurn(event: AgentEvent) {
   const t = currentTurn()
   if (!t) return
+  addDisplayFields(event)
   t.events.push(event)
 }
 
@@ -437,16 +442,19 @@ async function loadSession(id: string) {
         const lastTurn = turns.value[turns.value.length - 1]!
         for (const event of parseStoredActivity(t.tool_calls)) {
           const eventIndex = lastTurn.events.length
+          addDisplayFields(event)
           lastTurn.events.push(event)
           if (event.type === 'tool_result' && (event.data || '').length > 500) {
             collapsedResults.value.add(resultKey(turns.value.length - 1, eventIndex))
           }
         }
-        lastTurn.events.push({
+        const summary: AgentEvent = {
           type: 'summary',
           text: t.content,
           kind: (t.report_kind as 'final' | 'preliminary' | 'question') || 'final',
-        })
+        }
+        addDisplayFields(summary)
+        lastTurn.events.push(summary)
         lastTurn.reportKind = (t.report_kind as 'final' | 'preliminary' | 'question') || 'final'
         lastTurn.done = true
       }
@@ -807,7 +815,7 @@ onMounted(async () => {
                 <div class="stream-icon stream-icon--tool" aria-hidden="true">RUN</div>
                 <div class="stream-content">
                   <span class="tool-badge">{{ event.name }}</span>
-                  <pre class="tool-args">{{ JSON.stringify(event.args, null, 2) }}</pre>
+                  <pre class="tool-args">{{ event.argsText }}</pre>
                 </div>
               </div>
 
@@ -822,7 +830,7 @@ onMounted(async () => {
                     </span>
                   </div>
                   <pre v-if="!collapsedResults.has(resultKey(tIdx, ei))" class="tool-result-data">{{ event.data }}</pre>
-                  <span v-else class="result-collapsed">{{ (event.data || '').split('\n')[0] }}...</span>
+                  <span v-else class="result-collapsed">{{ event.preview }}...</span>
                 </div>
               </div>
 
@@ -837,7 +845,7 @@ onMounted(async () => {
                     Preliminary findings
                   </div>
                   <div v-else class="summary-kind final">Final report</div>
-                  <div class="summary-text" v-html="renderMarkdown(event.text || '')"></div>
+                  <div class="summary-text" v-html="event.html"></div>
                 </div>
               </div>
 
@@ -996,6 +1004,17 @@ function renderMarkdown(md: string): string {
     ALLOWED_TAGS: ['p', 'h1', 'h2', 'h3', 'strong', 'code', 'pre', 'ul', 'li'],
     ALLOWED_ATTR: [],
   })
+}
+
+/**
+ * The panel re-renders on every streamed thinking delta, so the summary HTML,
+ * the tool-call arguments and the collapsed-result preview are derived once
+ * per event instead of on every render.
+ */
+export function addDisplayFields(event: { type: string; text?: string; args?: unknown; data?: string; html?: string; argsText?: string; preview?: string }): void {
+  if (event.type === 'summary') event.html = renderMarkdown(event.text || '')
+  else if (event.type === 'tool_call') event.argsText = JSON.stringify(event.args, null, 2)
+  else if (event.type === 'tool_result') event.preview = (event.data || '').split('\n', 1)[0]
 }
 </script>
 

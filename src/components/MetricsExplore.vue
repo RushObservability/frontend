@@ -55,8 +55,22 @@ const prefixChips = computed(() => {
 })
 
 // ═══ Filtered + sorted metrics ═══
+// Sort once per name list and sort mode; filtering keeps that order, so a
+// keystroke only filters.
+const sortedMetrics = computed(() => {
+  if (sortMode.value === 'type') {
+    return [...props.metricNames].sort((a, b) => {
+      const ta = metricType(a)
+      const tb = metricType(b)
+      if (ta === tb) return a.localeCompare(b)
+      return ta === 'gauge' ? -1 : 1
+    })
+  }
+  return [...props.metricNames].sort((a, b) => a.localeCompare(b))
+})
+
 const filteredMetrics = computed(() => {
-  let list = props.metricNames
+  let list = sortedMetrics.value
 
   if (activePrefix.value) {
     list = list.filter(m => m.startsWith(activePrefix.value!))
@@ -65,17 +79,6 @@ const filteredMetrics = computed(() => {
   if (search.value) {
     const lower = search.value.toLowerCase()
     list = list.filter(m => m.toLowerCase().includes(lower))
-  }
-
-  if (sortMode.value === 'type') {
-    list = [...list].sort((a, b) => {
-      const ta = metricType(a)
-      const tb = metricType(b)
-      if (ta === tb) return a.localeCompare(b)
-      return ta === 'gauge' ? -1 : 1
-    })
-  } else {
-    list = [...list].sort((a, b) => a.localeCompare(b))
   }
 
   return list
@@ -266,6 +269,9 @@ function isLoadingSparkline(metricName: string): boolean {
 function setCardRef(el: any, metric: string) {
   if (el) {
     cardRefs.value.set(metric, el as HTMLElement)
+  } else {
+    // Vue passes null on unmount; keeping the card would re-observe a detached node.
+    cardRefs.value.delete(metric)
   }
 }
 

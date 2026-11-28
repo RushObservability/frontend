@@ -16,10 +16,12 @@ export interface ProfileQuery {
 }
 export interface FlameNode {
   name: string; path: string[]; total: number; self: number; children: FlameNode[]
+  /** JSON of path, built once so renders can key frames without re-serializing. */
+  id: string
 }
 
 export function buildFlameTree(stacks: ProfileStack[]): FlameNode {
-  const root: FlameNode = { name: 'All CPU samples', path: [], total: 0, self: 0, children: [] }
+  const root: FlameNode = { name: 'All CPU samples', path: [], id: '[]', total: 0, self: 0, children: [] }
   for (const stack of stacks) {
     if (!Number.isFinite(stack.cpu_seconds) || stack.cpu_seconds <= 0 || !stack.frames.length) continue
     let node = root
@@ -27,7 +29,8 @@ export function buildFlameTree(stacks: ProfileStack[]): FlameNode {
     for (const name of stack.frames) {
       let child = node.children.find(c => c.name === name)
       if (!child) {
-        child = { name, path: [...node.path, name], total: 0, self: 0, children: [] }
+        const path = [...node.path, name]
+        child = { name, path, id: JSON.stringify(path), total: 0, self: 0, children: [] }
         node.children.push(child)
       }
       child.total += stack.cpu_seconds
@@ -82,8 +85,11 @@ export function profileFunctions(current: ProfileStack[], baseline: ProfileStack
   return [...rows.values()].sort((a, b) => b.self - a.self || a.name.localeCompare(b.name))
 }
 
+// toLocaleString with options builds a new Intl.NumberFormat on every call.
+const msFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+const secondsFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 })
 export function cpuTime(seconds: number): string {
-  return seconds < 1 ? `${(seconds * 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} ms` : `${seconds.toLocaleString(undefined, { maximumFractionDigits: 3 })} s`
+  return seconds < 1 ? `${msFormat.format(seconds * 1000)} ms` : `${secondsFormat.format(seconds)} s`
 }
 
 export function relatedProfileLocation(service: string, timestamp: string | number, durationNs: number) {

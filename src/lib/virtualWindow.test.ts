@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { buildVirtualOffsets, nextVirtualIndex, virtualIndexAtOffset, virtualScrollTarget, virtualWindow } from './virtualWindow'
+import { describe, expect, it, vi } from 'vitest'
+import { buildVirtualOffsets, nextVirtualIndex, recordRowHeights, virtualIndexAtOffset, virtualScrollTarget, virtualWindow, type VirtualKey } from './virtualWindow'
 
 describe('virtual collection window', () => {
   it('keeps a 10,000-row collection bounded at the beginning, middle, and end', () => {
@@ -86,5 +86,37 @@ describe('virtual scroll target', () => {
   it('ignores an out-of-range index', () => {
     expect(virtualScrollTarget(offsets, -1, 250, 400)).toBe(250)
     expect(virtualScrollTarget(offsets, 100, 250, 400)).toBe(250)
+  })
+})
+
+describe('row height measurement', () => {
+  const row = (isConnected: boolean) => ({ isConnected }) as Element
+  const entry = (target: Element, height: number) =>
+    ({ target, borderBoxSize: [{ blockSize: height }], contentRect: { height } }) as unknown as ResizeObserverEntry
+
+  it('unobserves a detached row instead of storing its 0x0 size', () => {
+    const live = row(true)
+    const gone = row(false)
+    const keys = new WeakMap<Element, VirtualKey>([[live, 'a'], [gone, 'b']])
+    const heights = new Map<VirtualKey, number>([['b', 48]])
+    const observer = { unobserve: vi.fn() }
+
+    expect(recordRowHeights([entry(live, 40.2), entry(gone, 0)], keys, heights, observer)).toBe(true)
+    expect(heights.get('a')).toBe(41)
+    expect(heights.get('b')).toBe(48)
+    expect(observer.unobserve).toHaveBeenCalledExactlyOnceWith(gone)
+    expect(keys.has(gone)).toBe(false)
+  })
+
+  it('measures a recycled row for the same key and reports no change for an unchanged height', () => {
+    const recycled = row(true)
+    const keys = new WeakMap<Element, VirtualKey>([[recycled, 'b']])
+    const heights = new Map<VirtualKey, number>([['b', 48]])
+    const observer = { unobserve: vi.fn() }
+
+    expect(recordRowHeights([entry(recycled, 120)], keys, heights, observer)).toBe(true)
+    expect(heights.get('b')).toBe(120)
+    expect(recordRowHeights([entry(recycled, 120)], keys, heights, observer)).toBe(false)
+    expect(observer.unobserve).not.toHaveBeenCalled()
   })
 })

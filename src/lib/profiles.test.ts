@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildFlameTree, layoutFlameTree, profileFunctions, relatedProfileLocation } from './profiles'
+import { buildFlameTree, cpuTime, layoutFlameTree, profileFunctions, relatedProfileLocation } from './profiles'
 describe('profiles', () => {
   const stacks = [{ frames: ['main', 'parse'], cpu_seconds: 3 }, { frames: ['main', 'encode'], cpu_seconds: 1 }]
   it('merges shared ancestors without summing inclusive CPU twice', () => {
@@ -17,6 +17,17 @@ describe('profiles', () => {
     const rows = profileFunctions(stacks, [{ frames: ['main', 'gone'], cpu_seconds: 40 }])
     expect(rows.find(r => r.name === 'parse')?.delta).toBe(75)
     expect(rows.find(r => r.name === 'gone')?.delta).toBe(-100)
+  })
+  it('gives every frame its serialized path as a stable id', () => {
+    for (const { node } of layoutFlameTree(buildFlameTree(stacks))) expect(node.id).toBe(JSON.stringify(node.path))
+  })
+  it('formats CPU time exactly as toLocaleString did', () => {
+    for (const seconds of [0, 0.000_012_345, 0.123_456, 0.999_999, 1, 12.345_678, 1234.567_89, 98_765_432.1]) {
+      const expected = seconds < 1
+        ? `${(seconds * 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} ms`
+        : `${seconds.toLocaleString(undefined, { maximumFractionDigits: 3 })} s`
+      expect(cpuTime(seconds)).toBe(expected)
+    }
   })
   it('handles empty and zero CPU without invalid geometry', () => {
     expect(layoutFlameTree(buildFlameTree([]))).toEqual([])

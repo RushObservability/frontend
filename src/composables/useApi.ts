@@ -279,6 +279,14 @@ async function executeApiRequest<T>(path: string, requestOptions?: ApiRequestOpt
   const variant = sent.get('X-Rush-Workload-Source') || workload
   const unified = method === 'POST' && typeof options.body === 'string'
     ? adaptQuery(path, JSON.parse(options.body)) : undefined
+  // A unified response is decoded once in execute. That caller reuses the
+  // result; callers handed the shared cached or deduplicated text parse it once.
+  let decoded: { raw: string; data: unknown } | undefined
+  const parseBody = (body: string): T => {
+    if (!unified) return parseResponseBody<T>(body)
+    if (decoded?.raw === body) return decoded.data as T
+    return decodeQuery<T>(JSON.parse(body), unified)
+  }
 
   const execute = async (signal?: AbortSignal): Promise<string> => {
     const res = await authenticatedFetch(`${API_BASE}${unified ? QUERY_ENDPOINT : path}`, {
@@ -306,14 +314,13 @@ async function executeApiRequest<T>(path: string, requestOptions?: ApiRequestOpt
       if (error instanceof Error) Object.defineProperty(error, 'apiBodyFailure', { value: true })
       throw error
     }
-    let body: string
-    try { body = unified ? JSON.stringify(decodeQuery(JSON.parse(raw), unified)) : raw }
+    try { if (unified) decoded = { raw, data: decodeQuery(JSON.parse(raw), unified) } }
     catch (error) {
       if (error instanceof Error) Object.defineProperty(error, 'apiDecodeFailure', { value: true })
       throw error
     }
     assertCurrentSession(generation)
-    return body
+    return raw
   }
 
   if (analytics) {
@@ -338,7 +345,7 @@ async function executeApiRequest<T>(path: string, requestOptions?: ApiRequestOpt
       staleMs: path === QUERY_ENDPOINT ? 0 : workload === 'dashboard' ? 8_000 : 0,
     })
     assertCurrentSession(generation)
-    return parseResponseBody<T>(body)
+    return parseBody(body)
   }
 
   const operation = execute(options?.signal ?? undefined)
@@ -351,7 +358,7 @@ async function executeApiRequest<T>(path: string, requestOptions?: ApiRequestOpt
     if (invalidatesAnalytics && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
       invalidateAnalyticsRequests({ userId })
     }
-    return parseResponseBody<T>(body)
+    return parseBody(body)
   } finally {
     if (requestKey && inFlightReads.get(requestKey) === operation) {
       inFlightReads.delete(requestKey)
