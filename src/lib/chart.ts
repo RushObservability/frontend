@@ -6,6 +6,9 @@ import type { TimeDomain } from '../types'
 
 export type Pt = [number, number] // [x, y] in viewBox coordinates
 
+/** Most series a time-series chart draws; the rest are listed as hidden. */
+export const MAX_CHART_SERIES = 50
+
 /**
  * Prefer the requested query window over sample bounds. This leaves gaps blank
  * when retention or a new data source covers only part of the selected range.
