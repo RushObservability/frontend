@@ -36,6 +36,8 @@ interface AnomalyConfig {
   apmMetric: string
   sensitivity: number
   alpha: number
+  evalIntervalSecs: number
+  windowSecs: number
   state: string
   lastTriggeredAt: number | null
   splitLabels?: string[]
@@ -218,6 +220,8 @@ function fromApiRule(rule: AnomalyRule): AnomalyConfig {
     apmMetric: rule.apm_metric,
     sensitivity: rule.sensitivity,
     alpha: rule.alpha,
+    evalIntervalSecs: rule.eval_interval_secs,
+    windowSecs: rule.window_secs,
     state: rule.state,
     lastTriggeredAt: rule.last_triggered_at ? new Date(rule.last_triggered_at).getTime() : null,
     splitLabels: rule.split_labels.length ? rule.split_labels : undefined,
@@ -268,9 +272,11 @@ const editDescription = ref('')
 const editSensitivity = ref(3.0)
 const editAlpha = ref(0.25)
 const editChannels = ref<string[]>([])
+const editError = ref('')
 
 function startEdit(config: AnomalyConfig) {
   editingId.value = config.id
+  editError.value = ''
   editName.value = config.name || ''
   editDescription.value = config.description || ''
   editSensitivity.value = config.sensitivity
@@ -293,10 +299,12 @@ async function saveEdit() {
   if (!config) return
   const newName = editName.value.trim() || config.pattern || config.name
   const newDesc = editDescription.value.trim()
+  editError.value = ''
   try {
     await api.updateAnomalyRule(config.id, {
       name: newName,
       description: newDesc,
+      enabled: config.enabled,
       source: config.source,
       pattern: config.pattern,
       query: '',
@@ -304,12 +312,15 @@ async function saveEdit() {
       apm_metric: config.apmMetric,
       sensitivity: editSensitivity.value,
       alpha: editAlpha.value,
-      eval_interval_secs: 300,
-      window_secs: 3600,
+      eval_interval_secs: config.evalIntervalSecs,
+      window_secs: config.windowSecs,
       split_labels: config.splitLabels || [],
       notification_channel_ids: editChannels.value,
     })
-  } catch { /* best effort */ }
+  } catch (e) {
+    editError.value = e instanceof Error ? e.message : 'The detector could not be saved.'
+    return
+  }
   config.name = newName
   config.description = newDesc
   config.sensitivity = editSensitivity.value
@@ -1324,6 +1335,7 @@ onUnmounted(() => {
           <div class="edit-row edit-actions">
             <span class="section-pattern mono">{{ config.source === 'apm' ? `${config.serviceName}:${config.apmMetric}` : config.pattern }}</span>
             <div class="section-header-actions">
+              <span v-if="editError" class="edit-error" role="alert">{{ editError }}</span>
               <button class="save-btn" @click="saveEdit">Save</button>
               <button class="discard-btn" @click="cancelEdit">Cancel</button>
             </div>
