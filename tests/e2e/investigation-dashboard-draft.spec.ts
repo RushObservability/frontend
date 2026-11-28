@@ -36,6 +36,7 @@ async function stub(page: Page, role = 'admin', emptyMetric = false) {
 test('generates, previews and explicitly saves a private dashboard', async ({ page }, info) => {
   const state = await stub(page)
   await page.goto('/investigate?q=Investigate%20payments')
+  await page.getByRole('button', { name: 'Start Investigation', exact: true }).click()
   await page.getByRole('button', { name: 'Build dashboard from investigation' }).click()
   await page.getByLabel('What should it show?').fill('Payments latency and CPU')
   expect(state.saves).toHaveLength(0)
@@ -57,6 +58,7 @@ test('generates, previews and explicitly saves a private dashboard', async ({ pa
 test('requires excluding empty panels before saving and keeps the remaining panels', async ({ page }) => {
   const state = await stub(page, 'admin', true)
   await page.goto('/investigate?q=Investigate%20payments')
+  await page.getByRole('button', { name: 'Start Investigation', exact: true }).click()
   await page.getByRole('button', { name: 'Build dashboard from investigation' }).click()
   await page.getByRole('button', { name: 'Generate draft', exact: true }).click()
   await expect(page.getByText('No samples in the preview range. Exclude this panel or try a wider range.')).toBeVisible()
@@ -73,6 +75,7 @@ test('requires excluding empty panels before saving and keeps the remaining pane
 test('viewers cannot generate or save dashboards', async ({ page }) => {
   const state = await stub(page, 'viewer')
   await page.goto('/investigate?q=Investigate%20payments')
+  await page.getByRole('button', { name: 'Start Investigation', exact: true }).click()
   await expect(page.getByText('Payments latency rose after deployment.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Build dashboard from investigation' })).toHaveCount(0)
   expect(state.generations).toHaveLength(0)
@@ -83,6 +86,7 @@ test('draft controls and save remain reachable on a narrow viewport', async ({ p
   await page.setViewportSize({ width: 500, height: 900 })
   await stub(page)
   await page.goto('/investigate?q=Investigate%20payments')
+  await page.getByRole('button', { name: 'Start Investigation', exact: true }).click()
   await page.getByRole('button', { name: 'Build dashboard from investigation' }).click()
   await page.getByRole('button', { name: 'Generate draft', exact: true }).click()
   const save = page.getByRole('button', { name: 'Save private dashboard' })
