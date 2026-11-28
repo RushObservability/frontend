@@ -7,7 +7,7 @@ import { useTenant } from './useTenant'
 import { encodePathSegment } from '../lib/url'
 import { authenticatedFetch, assertCurrentSession, getSessionGeneration, onSessionChanged } from './authSession'
 import { storageUserId } from './storageScope'
-import { safeApiErrorMessage } from '../lib/apiError'
+import { publicApiErrorMessage, safeApiErrorMessage } from '../lib/apiError'
 import { apiOperation, recordApiMetric, requestOutcome } from '../lib/apiTelemetry'
 import { adaptQuery, decodeQuery, metricsQuery, QUERY_ENDPOINT } from '../lib/queryContract'
 import {
@@ -177,8 +177,16 @@ function parseResponseBody<T>(body: string): T {
   return (body ? JSON.parse(body) : null) as T
 }
 
-function responseError(response: Response, context?: string): Error & { status: number; retryAfterMs?: number } {
-  const error = new Error(safeApiErrorMessage(response.status, context)) as Error & {
+async function responseError(response: Response, context?: string): Promise<Error & { status: number; retryAfterMs?: number }> {
+  let message = safeApiErrorMessage(response.status, context)
+  // Only a 4xx JSON error envelope is read, for its public message. Other bodies
+  // may contain stack traces, SQL, internal paths, or integration details.
+  if (response.status >= 400 && response.status < 500 && response.headers.get('Content-Type')?.includes('application/json')) {
+    try { message = publicApiErrorMessage(response.status, await response.text()) ?? message } catch { /* keep the status copy */ }
+  } else {
+    try { await response.body?.cancel() } catch { /* best effort: release the body */ }
+  }
+  const error = new Error(message) as Error & {
     status: number
     retryAfterMs?: number
   }
@@ -301,12 +309,7 @@ async function executeApiRequest<T>(path: string, requestOptions?: ApiRequestOpt
       ignoreUnauthorized: path === '/auth/login' || path === '/auth/logout',
       requestKey: method === 'GET' ? `api:${userId}:${tenant}:${path}` : undefined,
     })
-    if (!res.ok) {
-      // Do not surface or log the response body: it may contain stack traces,
-      // SQL, internal paths, or sensitive integration details.
-      try { await res.body?.cancel() } catch { /* best effort: release the body */ }
-      throw responseError(res)
-    }
+    if (!res.ok) throw await responseError(res)
     // Tolerate empty bodies (e.g. 204 No Content from DELETE endpoints).
     let raw: string
     try { raw = await res.text() }
@@ -1127,7 +1130,7 @@ export function useApi() {
       },
       signal,
     }, { requestKey: `system-metrics:${activeTenant.value}` })
-    if (!res.ok) throw responseError(res)
+    if (!res.ok) throw await responseError(res)
     return await res.text()
   }
 
@@ -1778,10 +1781,7 @@ export function useApi() {
         headers: { 'X-Rush-Tenant': tenant, ...workloadHeader },
         signal: requestSignal,
       })
-      if (!response.ok) {
-        try { await response.body?.cancel() } catch { /* release the body */ }
-        throw responseError(response, context)
-      }
+      if (!response.ok) throw await responseError(response, context)
       const text = await response.text()
       assertCurrentSession(generation)
       return text

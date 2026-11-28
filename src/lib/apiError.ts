@@ -24,3 +24,18 @@ export function safeApiErrorMessage(status: number, operation = 'Request'): stri
       return `${operation} failed (${status}). Please try again.`
   }
 }
+
+/**
+ * The message of a 4xx `{error: {code, message}}` envelope, else undefined.
+ * query-api builds that envelope only from fixed public copy, such as a PromQL
+ * limit, so it is safe to show. Other bodies and every 5xx keep the copy above.
+ */
+export function publicApiErrorMessage(status: number, body: string): string | undefined {
+  if (status < 400 || status >= 500) return undefined
+  try {
+    const error = (JSON.parse(body) as { error?: { code?: unknown; message?: unknown } } | null)?.error
+    if (typeof error?.code === 'string' && typeof error.message === 'string'
+      && error.message.trim() && error.message.length <= 300) return error.message
+  } catch { /* not an envelope */ }
+  return undefined
+}
