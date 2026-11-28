@@ -19,6 +19,7 @@ import { directoryRole, filterDirectoryUsers, type UserRole, type UserStatus } f
 import EmptyState from '../components/EmptyState.vue'
 import DataTable, { type DataTableColumn } from '../components/DataTable.vue'
 import { getAddon } from '../integrations/catalog'
+import { settleWithLimit } from '../lib/settleWithLimit'
 import { isAddonEnabled, setAddonEnabled, addonNamespace, saveAddonNamespace, namespaceValid } from '../composables/useIntegrationEnabled'
 import {
   SETTINGS_INTEGRATIONS,
@@ -1405,9 +1406,8 @@ const SIGNAL_DEFS: { key: 'logs' | 'apm' | 'metrics' | 'rum' | 'profiles'; label
 ]
 
 async function loadAllTenantSignals() {
-  const results = await Promise.allSettled(
-    tenants.value.map(async (t) => ({ id: t.id, signals: await api.getTenantSignals(t.id) })),
-  )
+  const results = await settleWithLimit(tenants.value, TENANT_DETAIL_CONCURRENCY,
+    async (t) => ({ id: t.id, signals: await api.getTenantSignals(t.id) }))
   const next = { ...tenantSignalsMap.value }
   for (const result of results) {
     if (result.status === 'fulfilled') next[result.value.id] = result.value.signals
@@ -1450,9 +1450,8 @@ const retentionLogs = ref<string>('')
 const retentionSaving = ref(false)
 
 async function loadAllTenantRetention() {
-  const results = await Promise.allSettled(
-    tenants.value.map(async (t) => ({ id: t.id, retention: await api.getTenantRetention(t.id) })),
-  )
+  const results = await settleWithLimit(tenants.value, TENANT_DETAIL_CONCURRENCY,
+    async (t) => ({ id: t.id, retention: await api.getTenantRetention(t.id) }))
   const next = { ...tenantRetentionMap.value }
   for (const result of results) {
     if (result.status === 'fulfilled') next[result.value.id] = result.value.retention
@@ -1461,6 +1460,17 @@ async function loadAllTenantRetention() {
 }
 
 const retentionSaveError = ref<string | null>(null)
+
+// Per-tenant signals and retention are one request each, so load them only
+// once the Tenants section is shown, a few at a time.
+const TENANT_DETAIL_CONCURRENCY = 4
+let tenantDetailsLoaded = false
+watch([activeTab, tenants], () => {
+  if (tenantDetailsLoaded || activeTab.value !== 'tenants' || !tenants.value.length) return
+  tenantDetailsLoaded = true
+  void loadAllTenantRetention()
+  void loadAllTenantSignals()
+})
 
 function openRetentionModal(tenant: Tenant) {
   retentionEditTenantId.value = tenant.id
@@ -2670,7 +2680,7 @@ onMounted(async () => {
   window.addEventListener('hashchange', onHashChange)
 
   await Promise.all([loadKeys(), loadServiceLinks(), loadServiceSuggestions(), loadCustomSkills(), loadTenants(), loadGroups(), loadUsers(), loadSsoConfig(), loadAlertChannels()])
-  await Promise.all([loadAllTenantRetention(), loadAllTenantSignals(), loadExportMaxRows(), loadGlobalRetention()])
+  await Promise.all([loadExportMaxRows(), loadGlobalRetention()])
   if (isAdmin.value) loadDeployMarkersSetting()
   if (isAdmin.value) loadRumSetting()
   if (isAdmin.value) loadCloudwatchSetting()
