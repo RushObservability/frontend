@@ -40,6 +40,23 @@ describe('useApi analytics request policy', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('parses a unified query response once and gives each caller its own copy', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(response())))
+    const parse = vi.spyOn(JSON, 'parse')
+    const api = useApi()
+
+    const [first, second] = await Promise.all([api.queryEvents(query), api.queryEvents(query)])
+    const parsedResponses = parse.mock.calls.filter(([text]) => String(text).includes('"rows"'))
+    parse.mockRestore()
+
+    expect(first).toEqual({ rows: [], total: 0 })
+    expect(second).toEqual(first)
+    expect(second).not.toBe(first)
+    // The fetching caller reuses its decoded envelope; the deduplicated caller parses the shared text.
+    expect(parsedResponses).toHaveLength(2)
+    expect(parsedResponses.every(([text]) => String(text).startsWith('{"version":"v1"'))).toBe(true)
+  })
+
   it('invalidates analytics results after a successful mutation', async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input)
