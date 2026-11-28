@@ -11,7 +11,20 @@ watch(root, () => { focus.value = null; hovered.value = null })
 const selected = computed(() => focus.value ?? root.value)
 const inspected = computed(() => hovered.value ?? selected.value)
 const allRects = computed(() => layoutFlameTree(selected.value))
-const rects = computed(() => allRects.value.filter(r => r.width >= .1).slice(0, 5000))
+// Hover re-renders every frame, so each frame's strings are built here once.
+const rects = computed(() => {
+  const needle = props.search?.toLowerCase()
+  return allRects.value.filter(r => r.width >= .1).slice(0, 5000).map(rect => {
+    const { node } = rect
+    const hit = needle ? node.name.toLowerCase().includes(needle) : false
+    return {
+      ...rect,
+      class: [band(node), { dimmed: needle && !hit, matched: needle && hit }],
+      title: `${node.name}\nTotal: ${cpuTime(node.total)} · Self: ${cpuTime(node.self)}\n${share(node).toFixed(1)}% of all CPU`,
+      label: `${node.name}, ${cpuTime(node.total)} total CPU. Zoom into this stack.`,
+    }
+  })
+})
 const height = computed(() => Math.max(260, (Math.max(0, ...rects.value.map(r => r.depth)) + 1) * 26))
 const ancestors = computed(() => {
   const nodes: FlameNode[] = [root.value]
@@ -46,7 +59,7 @@ function band(node: FlameNode) {
   <section class="profile-flame" aria-label="CPU flame graph">
     <div class="flame-toolbar">
       <nav class="stack-breadcrumbs" aria-label="Focused call stack">
-        <template v-for="(node, index) in ancestors" :key="JSON.stringify(node.path)">
+        <template v-for="(node, index) in ancestors" :key="node.id">
           <span v-if="index" aria-hidden="true">/</span>
           <button type="button" :disabled="node === selected" :title="node.name" @click="zoom(node)">{{ index === 0 ? 'All stacks' : node.name }}</button>
         </template>
@@ -55,11 +68,11 @@ function band(node: FlameNode) {
     </div>
     <div class="flame-scroll" @mouseleave="hovered = null">
       <div class="flame-canvas" :style="{ height: `${height}px` }">
-        <button v-for="rect in rects" :key="JSON.stringify(rect.node.path)" type="button"
-          class="flame-frame" :class="[band(rect.node), { dimmed: search && !rect.node.name.toLowerCase().includes(search.toLowerCase()), matched: search && rect.node.name.toLowerCase().includes(search.toLowerCase()) }]"
+        <button v-for="rect in rects" :key="rect.node.id" type="button"
+          class="flame-frame" :class="rect.class"
           :style="{ left: `${rect.x}%`, width: `${rect.width}%`, top: `${rect.depth * 26}px` }"
-          :title="`${rect.node.name}\nTotal: ${cpuTime(rect.node.total)} · Self: ${cpuTime(rect.node.self)}\n${share(rect.node).toFixed(1)}% of all CPU`"
-          :aria-label="`${rect.node.name}, ${cpuTime(rect.node.total)} total CPU. Zoom into this stack.`"
+          :title="rect.title"
+          :aria-label="rect.label"
           @mouseenter="hovered = rect.node" @focus="hovered = rect.node" @blur="hovered = null"
           @click="zoom(rect.node)">
           <span>{{ rect.node.name }}</span><small v-if="rect.width > 24">{{ (rect.node.total / selected.total * 100).toFixed(1) }}%</small>

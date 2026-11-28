@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useTenant } from '../composables/useTenant'
@@ -12,8 +12,8 @@ const api = useApi()
 const route = useRoute()
 const router = useRouter()
 const { activeTenant } = useTenant()
-const result = ref<ProfileResult | null>(null)
-const baseline = ref<ProfileResult | null>(null)
+const result = shallowRef<ProfileResult | null>(null)
+const baseline = shallowRef<ProfileResult | null>(null)
 const series = ref<ProfileSeries[]>([])
 const seriesTruncated = ref(false)
 const loading = ref(false)
@@ -69,14 +69,17 @@ const columns = computed(() => [
   { key: 'share', label: 'Self share', align: 'right' as const, sortable: true },
   ...(comparing.value ? [{ key: 'baseline', label: 'Baseline self', align: 'right' as const, sortable: true }, { key: 'delta', label: 'Share change', align: 'right' as const, sortable: true }] : []),
 ])
-const rows = computed(() => profileFunctions(result.value?.stacks ?? [], baseline.value?.stacks ?? [])
-  .filter(r => r.name.toLowerCase().includes(search.value.toLowerCase()))
-  .sort((a, b) => {
+// Aggregating every stack is the expensive step; typing in the search box only refilters.
+const functionRows = computed(() => profileFunctions(result.value?.stacks ?? [], baseline.value?.stacks ?? []))
+const rows = computed(() => {
+  const needle = search.value.toLowerCase()
+  return functionRows.value.filter(r => r.name.toLowerCase().includes(needle)).sort((a, b) => {
     const key = sort.value as keyof typeof a
     const first = a[key]; const second = b[key]
     const diff = typeof first === 'number' && typeof second === 'number' ? first - second : String(first).localeCompare(String(second))
     return descending.value ? -diff : diff
-  }))
+  })
+})
 const hasCpu = computed(() => (result.value?.total_cpu_seconds ?? 0) > 0)
 const averageCores = computed(() => result.value ? result.value.total_cpu_seconds / ((result.value.to - result.value.from) / 1000) : 0)
 const canNarrowRange = computed(() => customRange.value
