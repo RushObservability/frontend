@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { useFeatures } from '../composables/useFeatures'
@@ -160,11 +160,15 @@ function svcFilters(): Filter[] {
 // a section that's already been revealed without waking ones still unseen.
 const tracesSeen = ref(false)
 const tracesLoading = ref(false)
-const logTraces = ref<RushEvent[]>([])
+// Rows are only replaced, so skip deep proxies over every span.
+const logTraces = shallowRef<RushEvent[]>([])
 const logsSeen = ref(false)
 const logsLoading = ref(false)
 const logsLoadingMore = ref(false)
 const logNextCursor = ref<string | null>(null)
+// Source spans fetched for the log console, counting the ones without events.
+const logSpansScanned = ref(0)
+let logsGeneration = 0
 const funnelsSeen = ref(false)
 const funnelsRef = ref<HTMLElement | null>(null)
 // Combined Endpoints / Top Errors tabbed card (APM Logs is now its own top-level tab).
@@ -296,7 +300,7 @@ async function loadData() {
   if (endpointsSeen.value) loadEndpoints()
   if (errorsSeen.value) loadErrors()
   if (tracesSeen.value && !tracesLoading.value) loadTraces()
-  if (logsSeen.value && !logsLoading.value && !logsLoadingMore.value) loadLogTraces()
+  if (logsSeen.value) loadLogTraces()
   if (funnelsSeen.value) loadSvcFunnels()
 }
 
@@ -353,14 +357,22 @@ async function loadTraces() {
 // The log console gets five times the source-event depth of the Spans tab.
 // This stays below the query API's 1,000-row cap and remains lazy/non-critical.
 const LOG_SOURCE_PAGE_SIZE = 500
+// Infinite scroll stops here. Most spans carry no events, so a sparse page
+// leaves the sentinel in view and the next page would load straight away.
+const MAX_LOG_SOURCE_SPANS = 5_000
+const logsCapped = computed(() => !!logNextCursor.value && logSpansScanned.value >= MAX_LOG_SOURCE_SPANS)
 
 async function loadLogTraces(append = false) {
   if (append && (!logNextCursor.value || logsLoadingMore.value)) return
+  // A fresh load supersedes every request of the previous window, appends included.
+  const generation = append ? logsGeneration : ++logsGeneration
   logsSeen.value = true
   if (append) logsLoadingMore.value = true
   else {
     logsLoading.value = true
+    logsLoadingMore.value = false
     logNextCursor.value = null
+    logSpansScanned.value = 0
   }
   const { from, to } = windowRange()
   try {
@@ -370,16 +382,21 @@ async function loadLogTraces(append = false) {
       limit: LOG_SOURCE_PAGE_SIZE,
       ...(append && logNextCursor.value ? { cursor: logNextCursor.value } : {}),
     })
+    if (generation !== logsGeneration) return
+    // Only spans with events produce log lines.
+    const rows = res.rows.filter((row) => row.event_names?.length)
     if (append) {
       // Cursor pages should not overlap, but de-dupe defensively in case older
       // servers fall back to offset behavior for a malformed/stale cursor.
       const seen = new Set(logTraces.value.map((row) => `${row.timestamp}:${row.span_id}`))
-      logTraces.value = [...logTraces.value, ...res.rows.filter((row) => !seen.has(`${row.timestamp}:${row.span_id}`))]
+      logTraces.value = [...logTraces.value, ...rows.filter((row) => !seen.has(`${row.timestamp}:${row.span_id}`))]
     } else {
-      logTraces.value = res.rows
+      logTraces.value = rows
     }
+    logSpansScanned.value += res.rows.length
     logNextCursor.value = res.rows.length === LOG_SOURCE_PAGE_SIZE ? (res.next_cursor ?? null) : null
   } catch {
+    if (generation !== logsGeneration) return
     if (append) {
       // Stop auto-retry loops while the sentinel remains visible. Refreshing or
       // changing the time window starts a fresh cursor chain.
@@ -389,8 +406,10 @@ async function loadLogTraces(append = false) {
       logNextCursor.value = null
     }
   } finally {
-    if (append) logsLoadingMore.value = false
-    else logsLoading.value = false
+    if (generation === logsGeneration) {
+      if (append) logsLoadingMore.value = false
+      else logsLoading.value = false
+    }
   }
 }
 
@@ -1701,7 +1720,8 @@ function sfTotalLoss(steps: FunnelResult['steps']): number {
             :service-name="serviceName"
             :minutes="minutes"
             :result-limit="500"
-            :has-more="!!logNextCursor"
+            :has-more="!!logNextCursor && !logsCapped"
+            :capped="logsCapped"
             :loading-more="logsLoadingMore"
             @load-more="loadLogTraces(true)"
             @click-span="(span) => router.push(`/trace/${span.trace_id}`)"

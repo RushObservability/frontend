@@ -15,6 +15,8 @@ const props = withDefaults(defineProps<{
   resultLimit?: number
   hasMore?: boolean
   loadingMore?: boolean
+  // The parent stopped paging before the end of the time window.
+  capped?: boolean
   // When set, pins the view to spans or logs and hides the internal toggle —
   // used when Spans and Logs are surfaced as separate top-level tabs.
   forceMode?: 'spans' | 'logs'
@@ -25,6 +27,7 @@ const props = withDefaults(defineProps<{
   resultLimit: 100,
   hasMore: false,
   loadingMore: false,
+  capped: false,
 })
 
 const emit = defineEmits<{
@@ -267,7 +270,7 @@ watch(() => props.minutes, () => {
 })
 
 // ═══ Log extraction from span events ═══
-interface LogEntry {
+type LogEntry = {
   id: string
   timestamp: number
   level: string
@@ -290,13 +293,28 @@ const selectedLogId = ref<string | null>(null)
 const loadMoreRef = ref<HTMLElement | null>(null)
 let loadMoreObserver: IntersectionObserver | null = null
 
+// Appended pages keep the earlier span objects, so parse each span's event
+// attributes once instead of on every rebuild.
+const spanEventAttributesCache = new WeakMap<RushEvent, Record<string, unknown>[]>()
+
+function spanEventAttributes(row: RushEvent): Record<string, unknown>[] {
+  let parsed = spanEventAttributesCache.get(row)
+  if (!parsed) {
+    parsed = row.event_names.map((_, i) => {
+      try { return JSON.parse(row.event_attributes[i] || '{}') } catch { return {} }
+    })
+    spanEventAttributesCache.set(row, parsed)
+  }
+  return parsed
+}
+
 const logs = computed<LogEntry[]>(() => {
   const entries: LogEntry[] = []
   for (const row of displaySpans.value) {
     if (!row.event_names?.length) continue
+    const eventAttributes = spanEventAttributes(row)
     for (let i = 0; i < row.event_names.length; i++) {
-      let attrs: Record<string, unknown> = {}
-      try { attrs = JSON.parse(row.event_attributes[i] || '{}') } catch { /* skip */ }
+      const attrs = eventAttributes[i]!
       const message = (attrs['log.message'] as string) || (attrs['exception.message'] as string) || row.event_names[i] || ''
       const level = ((attrs['log.level'] as string) || (attrs['log.severity'] as string) || '').toLowerCase()
       entries.push({
@@ -355,8 +373,6 @@ const logTableColumns = computed<DataTableColumn[]>(() => {
   )
   return columns
 })
-
-const logTableRows = computed(() => logs.value.map((log) => ({ ...log })))
 
 function spanRow(row: Record<string, unknown>): RushEvent {
   return row as unknown as RushEvent
@@ -607,7 +623,7 @@ onBeforeUnmount(() => loadMoreObserver?.disconnect())
         class="slt-data-table"
         bare
         :columns="logTableColumns"
-        :rows="logTableRows"
+        :rows="logs"
         row-key="id"
         :loading="isLoading"
         :empty-label="searchActive ? 'No logs match your search' : 'No log events found in this time range'"
@@ -666,6 +682,7 @@ onBeforeUnmount(() => loadMoreObserver?.disconnect())
           <span>{{ loadingMore ? 'Loading older logs…' : 'More logs available' }}</span>
           <button v-if="hasMore && !loadingMore" @click="emit('load-more')">Load older logs</button>
         </div>
+        <div v-else-if="!searchActive && capped" class="slt-log-end">Showing the newest {{ logs.length.toLocaleString() }} logs. Narrow the time range to see the rest.</div>
         <div v-else-if="!searchActive && logs.length" class="slt-log-end">End of selected time window · {{ logs.length }} logs</div>
       </template>
     </template>
