@@ -310,6 +310,24 @@
   text-overflow: ellipsis;
 }
 
+.alert-picker-item:has(.alert-picker-error) {
+  flex-wrap: wrap;
+}
+
+.alert-picker-error {
+  flex-basis: 100%;
+  white-space: normal;
+  font-size: 10px;
+  color: var(--error);
+}
+
+.alert-picker-notice {
+  max-width: 240px;
+  padding: 6px 10px 4px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
 .alert-picker-all {
   border-top: 1px solid var(--border-subtle);
   margin-top: 2px;

@@ -9,3 +9,12 @@ describe('anomaly live refresh', () => {
     expect(source).not.toContain('Promise.allSettled(visible.map(')
   })
 })
+
+describe('anomaly detector writes', () => {
+  it('sends to every channel in turn and reports failures', () => {
+    expect(source).not.toContain('failed silently')
+    expect(source).not.toContain('await Promise.all(channels.value.map(')
+    expect(source).toContain('await sendInTurn(targets, ch => api.notifyChannel(')
+    expect(source).toContain('class="alert-picker-notice" role="status"')
+  })
+})
