@@ -315,7 +315,12 @@ function shortFileName(path: string): string {
 }
 
 // ═══ Fetch data ═══
+// Range changes and session clicks can overlap; only the newest request may write.
+let dataGeneration = 0
+let sessionGeneration = 0
+
 async function fetchData() {
+  const generation = ++dataGeneration
   loadingData.value = true
   const req = { time_range: timeRange.value, filters: effectiveFilters.value }
 
@@ -326,6 +331,7 @@ async function fetchData() {
       api.rumErrors({ ...req, limit: 20 }).catch(() => ({ errors: [] })),
       api.rumSessions({ ...req, limit: 50 }).catch(() => ({ sessions: [] })),
     ])
+    if (generation !== dataGeneration) return
 
     vitals.value = vitalsRes.vitals
     pages.value = pagesRes.pages
@@ -339,11 +345,12 @@ async function fetchData() {
       ? pagesRes.pages.reduce((s: number, p: RumPageStats) => s + p.avg_load_ms * p.views, 0) / (totalPageViews.value || 1)
       : 0
   } finally {
-    loadingData.value = false
+    if (generation === dataGeneration) loadingData.value = false
   }
 }
 
 async function openSession(id: string) {
+  const generation = ++sessionGeneration
   sessionDetailId.value = id
   sessionDetailOpen.value = true
   sessionDetailLoading.value = true
@@ -352,11 +359,11 @@ async function openSession(id: string) {
   syncUrlState()
   try {
     const res = await api.rumSession(id)
-    sessionEvents.value = res.events
+    if (generation === sessionGeneration) sessionEvents.value = res.events
   } catch {
-    sessionEvents.value = []
+    if (generation === sessionGeneration) sessionEvents.value = []
   } finally {
-    sessionDetailLoading.value = false
+    if (generation === sessionGeneration) sessionDetailLoading.value = false
   }
 }
 

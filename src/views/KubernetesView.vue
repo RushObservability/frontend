@@ -49,13 +49,17 @@ async function loadSummary() {
 async function loadNamespaces() {
   try { namespaces.value = (await api.getK8sNamespaces()).map((n) => n.name).sort() } catch { /* ignore */ }
 }
+// A slower reply for the previous namespace or page must not overwrite the newer one.
+let groupGeneration = 0
 async function loadGroup() {
+  const generation = ++groupGeneration
   loading.value = true
   const next: Record<string, K8sResource[]> = {}
   await Promise.all(kinds.value.map(async (k) => {
     const ns = KINDS[k]!.namespaced ? (selectedNs.value || undefined) : undefined
     try { next[k] = await api.getK8sResources(k, ns) } catch { next[k] = [] }
   }))
+  if (generation !== groupGeneration) return
   data.value = next
   loading.value = false
 }
