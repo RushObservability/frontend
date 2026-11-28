@@ -146,6 +146,16 @@ const expandedApmEventMs = ref(0) // event timestamp in ms, for marker position
 const expandedTrace = ref<TraceResponse | null>(null)
 const expandedTraceLoading = ref(false)
 const timelineExpandedSpan = ref<string | null>(null)
+// Bumped on every open and close, so a slow trace or APM response for the
+// previous row cannot land in the next row's modal.
+let detailGeneration = 0
+function resetDetailData() {
+  detailGeneration++
+  expandedApm.value = null
+  expandedApmLoading.value = false
+  expandedTrace.value = null
+  expandedTraceLoading.value = false
+}
 
 const expandedRowData = computed(() => {
   if (expandedRow.value === null) return null
@@ -198,6 +208,7 @@ const apmResultMode = ref<'individual' | 'groups'>('individual')
 const otelLogs = shallowRef<LogRecord[]>([])
 // Infinite scroll stops here: every loaded row is rebuilt, sorted and faceted on each page.
 const MAX_LOADED_LOG_ROWS = 10_000
+const MAX_LOADED_SPAN_ROWS = 10_000
 // Reuse a record's entry while the record and its index are unchanged, so an
 // appended page or one hydrated row does not rebuild every other entry.
 const otelLogEntryCache = new WeakMap<LogRecord, LogEntry>()
@@ -1414,6 +1425,7 @@ async function loadMore() {
       nextCursor.value = page.next_cursor || null
       paginationHasMore.value = page.has_more && Boolean(page.next_cursor) && otelLogs.value.length < MAX_LOADED_LOG_ROWS
     } else {
+      const rows = results.value
       const page = await api.queryEvents({
         time_range: timeRange.value,
         filters: activeFilters,
@@ -1421,9 +1433,11 @@ async function loadMore() {
         cursor: nextCursor.value || undefined,
         search: searchParam,
       })
+      // A new search (filters, mode, tenant or time) replaced the rows while this page loaded.
+      if (results.value !== rows) return
       results.value.push(...page.rows)
       nextCursor.value = page.next_cursor || null
-      paginationHasMore.value = Boolean(page.next_cursor)
+      paginationHasMore.value = Boolean(page.next_cursor) && results.value.length < MAX_LOADED_SPAN_ROWS
       total.value = page.total
       totalKind.value = page.total >= 10_000 ? 'capped' : 'exact'
     }
@@ -2431,8 +2445,7 @@ function toggleRow(index: number) {
 function openDetailModal(index: number) {
   expandedRow.value = index
   expandedTab.value = null
-  expandedApm.value = null
-  expandedTrace.value = null
+  resetDetailData()
   selectedSpanId.value = null
   timelineExpandedSpan.value = null
   modalOpen.value = true
@@ -2458,8 +2471,7 @@ async function openLogDetailModal(logIdx: number) {
   modalRowIndex.value = entry._sourceRowIndex >= 0 ? entry._sourceRowIndex : null
   expandedRow.value = entry._sourceRowIndex >= 0 ? entry._sourceRowIndex : null
   expandedTab.value = null
-  expandedApm.value = null
-  expandedTrace.value = null
+  resetDetailData()
   selectedSpanId.value = null
   expandedLogRow.value = logIdx
   // Seed the context-stream scope with the log's service so "Show surrounding
@@ -2477,13 +2489,14 @@ async function openLogDetailModal(logIdx: number) {
     }
   } else if (entry.trace_id) {
     // Standalone log with trace_id — try loading trace
+    const generation = detailGeneration
     expandedTraceLoading.value = true
     api.getTrace(entry.trace_id).then(t => {
-      expandedTrace.value = t
+      if (generation === detailGeneration) expandedTrace.value = t
     }).catch(() => {
-      expandedTrace.value = null
+      if (generation === detailGeneration) expandedTrace.value = null
     }).finally(() => {
-      expandedTraceLoading.value = false
+      if (generation === detailGeneration) expandedTraceLoading.value = false
     })
   }
 }
@@ -2510,8 +2523,7 @@ const modalK8sMeta = computed(() => {
 
 function closeDetailPanel() {
   expandedRow.value = null
-  expandedApm.value = null
-  expandedTrace.value = null
+  resetDetailData()
   selectedSpanId.value = null
   expandedLogRow.value = null
   timelineExpandedSpan.value = null
@@ -3053,6 +3065,7 @@ function formatCtxTimestamp(ns: number): string {
 
 async function loadApmData(row: RushEvent) {
   if (expandedApm.value) return
+  const generation = detailGeneration
   expandedApmLoading.value = true
   try {
     const eventTime = new Date(Number(row.timestamp) / 1_000_000)
@@ -3064,11 +3077,11 @@ async function loadApmData(row: RushEvent) {
       filters: [{ field: 'service_name', op: '=', value: row.service_name }],
       interval: '1m',
     })
-    expandedApm.value = (res.buckets || []) as TimeseriesBucket[]
+    if (generation === detailGeneration) expandedApm.value = (res.buckets || []) as TimeseriesBucket[]
   } catch {
-    expandedApm.value = []
+    if (generation === detailGeneration) expandedApm.value = []
   } finally {
-    expandedApmLoading.value = false
+    if (generation === detailGeneration) expandedApmLoading.value = false
   }
 }
 
@@ -3096,13 +3109,15 @@ async function loadApmFromSpanNode(span: import('../types').SpanNode) {
 
 async function loadTraceData(row: RushEvent) {
   if (expandedTrace.value) return
+  const generation = detailGeneration
   expandedTraceLoading.value = true
   try {
-    expandedTrace.value = await api.getTrace(row.trace_id)
+    const trace = await api.getTrace(row.trace_id)
+    if (generation === detailGeneration) expandedTrace.value = trace
   } catch {
-    expandedTrace.value = null
+    if (generation === detailGeneration) expandedTrace.value = null
   } finally {
-    expandedTraceLoading.value = false
+    if (generation === detailGeneration) expandedTraceLoading.value = false
   }
 }
 
@@ -5789,6 +5804,9 @@ watch(() => route.query.log_view, (id) => {
             </div>
             <div v-else-if="hasMore" class="loading-more text-muted">
               Showing {{ results.length.toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}
+            </div>
+            <div v-else-if="results.length >= MAX_LOADED_SPAN_ROWS" class="loading-more text-muted">
+              Showing the first {{ MAX_LOADED_SPAN_ROWS.toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}. Narrow your query or time range to see the rest.
             </div>
             <div v-else-if="results.length && !hasMore" class="loading-more text-muted">
               All {{ formattedTotal }} {{ resultCountLabel }} loaded

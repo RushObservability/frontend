@@ -62,19 +62,24 @@ function buildParams(): AuditQueryParams {
   return p
 }
 
+// Filter, time and page changes can overlap; only the newest request may write.
+let loadGeneration = 0
 async function loadEvents() {
+  const generation = ++loadGeneration
   loading.value = true
   errorMsg.value = null
   try {
     const res = await api.getAuditEvents(buildParams())
+    if (generation !== loadGeneration) return
     events.value = res.events ?? []
     hasMore.value = events.value.length === PAGE_SIZE
   } catch (e: any) {
+    if (generation !== loadGeneration) return
     errorMsg.value = e?.message || 'Failed to load audit events'
     events.value = []
     hasMore.value = false
   } finally {
-    loading.value = false
+    if (generation === loadGeneration) loading.value = false
   }
 }
 
