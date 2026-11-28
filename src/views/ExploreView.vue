@@ -146,6 +146,16 @@ const expandedApmEventMs = ref(0) // event timestamp in ms, for marker position
 const expandedTrace = ref<TraceResponse | null>(null)
 const expandedTraceLoading = ref(false)
 const timelineExpandedSpan = ref<string | null>(null)
+// Bumped on every open and close, so a slow trace or APM response for the
+// previous row cannot land in the next row's modal.
+let detailGeneration = 0
+function resetDetailData() {
+  detailGeneration++
+  expandedApm.value = null
+  expandedApmLoading.value = false
+  expandedTrace.value = null
+  expandedTraceLoading.value = false
+}
 
 const expandedRowData = computed(() => {
   if (expandedRow.value === null) return null
@@ -2435,8 +2445,7 @@ function toggleRow(index: number) {
 function openDetailModal(index: number) {
   expandedRow.value = index
   expandedTab.value = null
-  expandedApm.value = null
-  expandedTrace.value = null
+  resetDetailData()
   selectedSpanId.value = null
   timelineExpandedSpan.value = null
   modalOpen.value = true
@@ -2462,8 +2471,7 @@ async function openLogDetailModal(logIdx: number) {
   modalRowIndex.value = entry._sourceRowIndex >= 0 ? entry._sourceRowIndex : null
   expandedRow.value = entry._sourceRowIndex >= 0 ? entry._sourceRowIndex : null
   expandedTab.value = null
-  expandedApm.value = null
-  expandedTrace.value = null
+  resetDetailData()
   selectedSpanId.value = null
   expandedLogRow.value = logIdx
   // Seed the context-stream scope with the log's service so "Show surrounding
@@ -2481,13 +2489,14 @@ async function openLogDetailModal(logIdx: number) {
     }
   } else if (entry.trace_id) {
     // Standalone log with trace_id — try loading trace
+    const generation = detailGeneration
     expandedTraceLoading.value = true
     api.getTrace(entry.trace_id).then(t => {
-      expandedTrace.value = t
+      if (generation === detailGeneration) expandedTrace.value = t
     }).catch(() => {
-      expandedTrace.value = null
+      if (generation === detailGeneration) expandedTrace.value = null
     }).finally(() => {
-      expandedTraceLoading.value = false
+      if (generation === detailGeneration) expandedTraceLoading.value = false
     })
   }
 }
@@ -2514,8 +2523,7 @@ const modalK8sMeta = computed(() => {
 
 function closeDetailPanel() {
   expandedRow.value = null
-  expandedApm.value = null
-  expandedTrace.value = null
+  resetDetailData()
   selectedSpanId.value = null
   expandedLogRow.value = null
   timelineExpandedSpan.value = null
@@ -3057,6 +3065,7 @@ function formatCtxTimestamp(ns: number): string {
 
 async function loadApmData(row: RushEvent) {
   if (expandedApm.value) return
+  const generation = detailGeneration
   expandedApmLoading.value = true
   try {
     const eventTime = new Date(Number(row.timestamp) / 1_000_000)
@@ -3068,11 +3077,11 @@ async function loadApmData(row: RushEvent) {
       filters: [{ field: 'service_name', op: '=', value: row.service_name }],
       interval: '1m',
     })
-    expandedApm.value = (res.buckets || []) as TimeseriesBucket[]
+    if (generation === detailGeneration) expandedApm.value = (res.buckets || []) as TimeseriesBucket[]
   } catch {
-    expandedApm.value = []
+    if (generation === detailGeneration) expandedApm.value = []
   } finally {
-    expandedApmLoading.value = false
+    if (generation === detailGeneration) expandedApmLoading.value = false
   }
 }
 
@@ -3100,13 +3109,15 @@ async function loadApmFromSpanNode(span: import('../types').SpanNode) {
 
 async function loadTraceData(row: RushEvent) {
   if (expandedTrace.value) return
+  const generation = detailGeneration
   expandedTraceLoading.value = true
   try {
-    expandedTrace.value = await api.getTrace(row.trace_id)
+    const trace = await api.getTrace(row.trace_id)
+    if (generation === detailGeneration) expandedTrace.value = trace
   } catch {
-    expandedTrace.value = null
+    if (generation === detailGeneration) expandedTrace.value = null
   } finally {
-    expandedTraceLoading.value = false
+    if (generation === detailGeneration) expandedTraceLoading.value = false
   }
 }
 
