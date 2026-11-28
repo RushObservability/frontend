@@ -198,6 +198,7 @@ const apmResultMode = ref<'individual' | 'groups'>('individual')
 const otelLogs = shallowRef<LogRecord[]>([])
 // Infinite scroll stops here: every loaded row is rebuilt, sorted and faceted on each page.
 const MAX_LOADED_LOG_ROWS = 10_000
+const MAX_LOADED_SPAN_ROWS = 10_000
 // Reuse a record's entry while the record and its index are unchanged, so an
 // appended page or one hydrated row does not rebuild every other entry.
 const otelLogEntryCache = new WeakMap<LogRecord, LogEntry>()
@@ -1414,6 +1415,7 @@ async function loadMore() {
       nextCursor.value = page.next_cursor || null
       paginationHasMore.value = page.has_more && Boolean(page.next_cursor) && otelLogs.value.length < MAX_LOADED_LOG_ROWS
     } else {
+      const rows = results.value
       const page = await api.queryEvents({
         time_range: timeRange.value,
         filters: activeFilters,
@@ -1421,9 +1423,11 @@ async function loadMore() {
         cursor: nextCursor.value || undefined,
         search: searchParam,
       })
+      // A new search (filters, mode, tenant or time) replaced the rows while this page loaded.
+      if (results.value !== rows) return
       results.value.push(...page.rows)
       nextCursor.value = page.next_cursor || null
-      paginationHasMore.value = Boolean(page.next_cursor)
+      paginationHasMore.value = Boolean(page.next_cursor) && results.value.length < MAX_LOADED_SPAN_ROWS
       total.value = page.total
       totalKind.value = page.total >= 10_000 ? 'capped' : 'exact'
     }
@@ -5789,6 +5793,9 @@ watch(() => route.query.log_view, (id) => {
             </div>
             <div v-else-if="hasMore" class="loading-more text-muted">
               Showing {{ results.length.toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}
+            </div>
+            <div v-else-if="results.length >= MAX_LOADED_SPAN_ROWS" class="loading-more text-muted">
+              Showing the first {{ MAX_LOADED_SPAN_ROWS.toLocaleString() }} of {{ formattedTotal }} {{ resultCountLabel }}. Narrow your query or time range to see the rest.
             </div>
             <div v-else-if="results.length && !hasMore" class="loading-more text-muted">
               All {{ formattedTotal }} {{ resultCountLabel }} loaded
