@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { buildVirtualOffsets, nextVirtualIndex, virtualScrollTarget, virtualWindow } from '../lib/virtualWindow'
+import { buildVirtualOffsets, nextVirtualIndex, recordRowHeights, virtualScrollTarget, virtualWindow } from '../lib/virtualWindow'
 
 const props = withDefaults(defineProps<{
   count: number
@@ -168,18 +168,10 @@ onMounted(async () => {
   measureViewport()
   viewportResizeObserver = new ResizeObserver(measureViewport)
   if (viewport.value) viewportResizeObserver.observe(viewport.value)
-  resizeObserver = new ResizeObserver((entries) => {
-    let changed = false
-    for (const entry of entries) {
-      const key = observedKeys.get(entry.target)
-      if (key === undefined) continue
-      const height = Math.max(1, Math.ceil(entry.borderBoxSize?.[0]?.blockSize || entry.contentRect.height))
-      if (measuredHeights.get(key) !== height) {
-        measuredHeights.set(key, height)
-        changed = true
-      }
-    }
-    if (changed) measurementVersion.value++
+  // Row refs never unobserve (the null ref call carries no element), so rows
+  // that leave the window are released here once they report as detached.
+  resizeObserver = new ResizeObserver((entries, observer) => {
+    if (recordRowHeights(entries, observedKeys, measuredHeights, observer)) measurementVersion.value++
   })
   // Template refs run before onMounted, so register the initially rendered
   // window after the observer exists. Later recycled rows register via ref.

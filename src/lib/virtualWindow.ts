@@ -27,6 +27,37 @@ export function buildVirtualOffsets(
   return offsets
 }
 
+/**
+ * Store measured row heights from a ResizeObserver batch. A row that scrolled
+ * out of the window is detached and reports 0x0, which would otherwise be kept
+ * as a 1px height; it is unobserved and forgotten instead, and a row rendered
+ * for that key later is observed and measured afresh. Returns whether any
+ * height changed.
+ */
+export function recordRowHeights(
+  entries: readonly ResizeObserverEntry[],
+  rowKeys: WeakMap<Element, VirtualKey>,
+  heights: Map<VirtualKey, number>,
+  observer: Pick<ResizeObserver, 'unobserve'>,
+): boolean {
+  let changed = false
+  for (const entry of entries) {
+    if (!entry.target.isConnected) {
+      observer.unobserve(entry.target)
+      rowKeys.delete(entry.target)
+      continue
+    }
+    const key = rowKeys.get(entry.target)
+    if (key === undefined) continue
+    const height = Math.max(1, Math.ceil(entry.borderBoxSize?.[0]?.blockSize || entry.contentRect.height))
+    if (heights.get(key) !== height) {
+      heights.set(key, height)
+      changed = true
+    }
+  }
+  return changed
+}
+
 export function virtualIndexAtOffset(offsets: readonly number[], offset: number): number {
   const count = Math.max(0, offsets.length - 1)
   if (count === 0) return 0
