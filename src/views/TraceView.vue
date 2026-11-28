@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { shallowRef, ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import { relatedProfileLocation } from '../lib/profiles'
@@ -7,7 +7,7 @@ import { useFeatures } from '../composables/useFeatures'
 import type { TraceResponse, SpanNode, NotebookCellDraft } from '../types'
 import VirtualTable from '../components/VirtualTable.vue'
 import TraceWaterfall from '../components/TraceWaterfall.vue'
-import { serviceColor as traceServiceColor } from '../lib/traceWaterfall'
+import { errorSpanInsights, serviceColor as traceServiceColor } from '../lib/traceWaterfall'
 import { isErrorSpan, isErrorStatus } from '../lib/spanStatus'
 import { parseUtcTimestamp } from '../lib/utcTimestamp'
 import AddToNotebookButton from '../components/notebook/AddToNotebookButton.vue'
@@ -17,7 +17,8 @@ const router = useRouter()
 
 const api = useApi()
 const { features } = useFeatures()
-const trace = ref<TraceResponse | null>(null)
+// Read-only after load; a deep ref would proxy every span of a large trace.
+const trace = shallowRef<TraceResponse | null>(null)
 const selectedSpan = ref<SpanNode | null>(null)
 const relatedProfile = computed(() => selectedSpan.value ? relatedProfileLocation(selectedSpan.value.service_name, selectedSpan.value.timestamp, selectedSpan.value.duration_ns) : null)
 
@@ -184,10 +185,8 @@ const traceInsights = computed(() => {
   }
 
   // Error detection
-  for (const { span } of flatSpans.value) {
-    if (isErrorSpan(span)) {
-      insights.push({ text: `Error in ${span.service_name}: ${span.http_method} ${span.http_path} returned ${span.http_status_code}`, type: 'error' })
-    }
+  for (const text of errorSpanInsights(flatSpans.value.map(({ span }) => span))) {
+    insights.push({ text, type: 'error' })
   }
 
   // Span count

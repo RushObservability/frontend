@@ -5,6 +5,7 @@ import {
   spanTraceWindow,
   buildWaterfallRows,
   durationClass,
+  errorSpanInsights,
   flattenSpans,
   formatSpanDuration,
   isSpanError,
@@ -142,5 +143,31 @@ describe('trace waterfall', () => {
     reads = 0
     buildWaterfallRows(roots, new Set())
     expect(reads).toBe(501)
+  })
+})
+
+describe('trace error insights', () => {
+  const failing = (i: number, path = '/checkout') =>
+    span({ span_id: `s${i}`, timestamp: '2026-01-01 10:00:00.000000000', service_name: 'api', http_method: 'POST', http_path: path, http_status_code: 503 })
+
+  it('keeps the one-line-per-span text when nothing repeats', () => {
+    const spans = [failing(1, '/a'), span({ span_id: 'ok', timestamp: '2026-01-01 10:00:00.000000000' }), failing(2, '/b')]
+    expect(errorSpanInsights(spans)).toEqual([
+      'Error in api: POST /a returned 503',
+      'Error in api: POST /b returned 503',
+    ])
+  })
+
+  it('groups repeated failures and folds groups past the limit into one count', () => {
+    const spans = [
+      ...Array.from({ length: 5_000 }, (_, i) => failing(i)),
+      ...Array.from({ length: 12 }, (_, i) => failing(5_000 + i, `/item/${i}`)),
+      failing(6_000, '/item/11'),
+    ]
+    const lines = errorSpanInsights(spans, 10)
+    expect(lines).toHaveLength(11)
+    expect(lines[0]).toBe('Error in api: POST /checkout returned 503 (5,000 spans)')
+    expect(lines[1]).toBe('Error in api: POST /item/0 returned 503')
+    expect(lines[10]).toBe('4 more failing spans not listed')
   })
 })

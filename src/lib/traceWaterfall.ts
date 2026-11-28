@@ -1,5 +1,5 @@
 import type { SpanNode } from '../types'
-import { isErrorStatus } from './spanStatus'
+import { isErrorSpan, isErrorStatus } from './spanStatus'
 
 /** One rendered line of the waterfall: a span, its indent, and its child count. */
 export interface WaterfallRow {
@@ -96,6 +96,25 @@ export function clipTraceWindow(span: TraceWindow, range: TraceWindow): TraceWin
 
 export function isSpanError(span: SpanNode): boolean {
   return isErrorStatus(span.status) || span.http_status_code >= 400
+}
+
+/**
+ * One insight line per failing service, method, path and status, in the order
+ * first seen, with a count when it repeats. A trace can hold thousands of
+ * failing spans, so lines past `limit` are folded into one closing count.
+ */
+export function errorSpanInsights(spans: readonly SpanNode[], limit = 10): string[] {
+  const counts = new Map<string, number>()
+  for (const span of spans) {
+    if (!isErrorSpan(span)) continue
+    const text = `Error in ${span.service_name}: ${span.http_method} ${span.http_path} returned ${span.http_status_code}`
+    counts.set(text, (counts.get(text) ?? 0) + 1)
+  }
+  const groups = [...counts]
+  const lines = groups.slice(0, limit).map(([text, count]) => count > 1 ? `${text} (${count.toLocaleString()} spans)` : text)
+  const hidden = groups.slice(limit).reduce((sum, [, count]) => sum + count, 0)
+  if (hidden) lines.push(`${hidden.toLocaleString()} more failing ${hidden === 1 ? 'span' : 'spans'} not listed`)
+  return lines
 }
 
 /** Human label for a span: HTTP route, else its name attribute, else a short id. */
