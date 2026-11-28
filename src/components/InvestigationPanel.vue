@@ -192,7 +192,9 @@ function scrollToBottom() {
   })
 }
 
-watch(turns, scrollToBottom, { deep: true })
+// New events only land on the last turn; a deep watch would walk every event
+// of every turn on each one.
+watch([() => turns.value.length, () => turns.value.at(-1)?.events.length, () => turns.value.at(-1)?.done], scrollToBottom)
 watch(thinking, scrollToBottom)
 
 function currentTurn(): Turn | null {

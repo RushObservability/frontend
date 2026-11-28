@@ -4089,6 +4089,8 @@ function openExport() {
   showExportDialog.value = true
 }
 
+const exportController = new AbortController()
+onUnmounted(() => exportController.abort())
 async function doExport() {
   exportError.value = null
   exporting.value = true
@@ -4107,7 +4109,7 @@ async function doExport() {
       search: searchText.value || undefined,
       format: exportFormat.value,
       query_text: currentQueryText() || undefined,
-    })
+    }, exportController.signal)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

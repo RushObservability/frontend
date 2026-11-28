@@ -2161,13 +2161,14 @@ export function useApi() {
     search?: string
     format: 'csv' | 'json'
     query_text?: string
-  }): Promise<{ blob: Blob; filename: string }> {
+  }, abortSignal?: AbortSignal): Promise<{ blob: Blob; filename: string }> {
     const { activeTenant } = useTenant()
     const path = opts.signal === 'logs' ? '/logs/export' : '/query/export'
     const res = await authenticatedFetch(`${API_BASE}${path}`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-Rush-Tenant': activeTenant.value },
+      signal: abortSignal,
       body: JSON.stringify({
         time_range: opts.time_range,
         filters: opts.filters,
@@ -2202,6 +2203,7 @@ export function useApi() {
         await new Promise(resolve => window.setTimeout(resolve, 1000))
         const statusResponse = await authenticatedFetch(safeJobPath(job.status_url), {
           credentials: 'same-origin',
+          signal: abortSignal,
           headers: { 'X-Rush-Tenant': activeTenant.value },
         })
         if (!statusResponse.ok) {
@@ -2215,6 +2217,7 @@ export function useApi() {
       }
       downloadResponse = await authenticatedFetch(safeJobPath(job.download_url), {
         credentials: 'same-origin',
+        signal: abortSignal,
         headers: { 'X-Rush-Tenant': activeTenant.value },
       })
       if (!downloadResponse.ok) {
