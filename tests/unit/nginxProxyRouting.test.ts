@@ -11,4 +11,19 @@ describe('nginx backend proxy routing', () => {
       expect(nginx).not.toContain(`location ${prefix} {`)
     }
   })
+
+  it('forwards the raw request URI for backend prefixes', () => {
+    // A URI part on proxy_pass makes nginx forward the decoded, normalized path,
+    // so an encoded "/" or ".." inside one path segment reaches a different route.
+    const proxyPassIn = (location: string) => {
+      const start = nginx.indexOf(`location ${location} {`)
+      expect(start).toBeGreaterThan(-1)
+      return nginx.slice(start, nginx.indexOf('\n    }', start)).match(/proxy_pass\s+([^;]+);/)?.[1]
+    }
+    for (const prefix of ['/api/', '/auth/', '/prom/']) {
+      expect(proxyPassIn(`^~ ${prefix}`)).toBe('http://${QUERY_API_HOST}')
+    }
+    // The exact match keeps its URI so query-api always receives /metrics.
+    expect(proxyPassIn('= /metrics')).toBe('http://${QUERY_API_HOST}/metrics')
+  })
 })
