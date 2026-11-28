@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useApi } from '../composables/useApi'
 import type { RumAppEntry, RumVitalsSummary, Filter } from '../types'
 import { useTimeRangePreference } from '../composables/useTimeRangePreference'
+import { settleWithLimit } from '../lib/settleWithLimit'
 
 const router = useRouter()
 const api = useApi()
@@ -12,11 +13,15 @@ const apps = ref<RumAppEntry[]>([])
 const appVitals = ref<Record<string, RumVitalsSummary[]>>({})
 const loading = ref(true)
 const timeRangeMinutes = useTimeRangePreference()
+// A slower reply for an older time range must not overwrite the newer one.
+let loadGeneration = 0
 
 async function loadApps() {
+  const generation = ++loadGeneration
   loading.value = true
   try {
     const res = await api.rumApps()
+    if (generation !== loadGeneration) return
     apps.value = res.apps
 
     // Fetch vitals for each app over the user's shared lookback window.
@@ -24,15 +29,19 @@ async function loadApps() {
     const from = new Date(now.getTime() - timeRangeMinutes.value * 60 * 1000)
     const timeRange = { from: from.toISOString(), to: now.toISOString() }
 
-    await Promise.all(apps.value.map(async (app) => {
-      try {
-        const filters: Filter[] = [{ field: 'AppName', op: '=', value: app.AppName }]
-        const vRes = await api.rumVitals({ time_range: timeRange, filters })
-        appVitals.value[app.AppName] = vRes.vitals
-      } catch { /* skip */ }
-    }))
-  } catch { /* empty state */ }
-  loading.value = false
+    const results = await settleWithLimit(res.apps, 4, (app) => {
+      const filters: Filter[] = [{ field: 'AppName', op: '=', value: app.AppName }]
+      return api.rumVitals({ time_range: timeRange, filters })
+    })
+    if (generation !== loadGeneration) return
+    const next: Record<string, RumVitalsSummary[]> = {}
+    results.forEach((result, i) => {
+      if (result.status === 'fulfilled') next[res.apps[i]!.AppName] = result.value.vitals
+    })
+    appVitals.value = next
+  } catch { /* empty state */ } finally {
+    if (generation === loadGeneration) loading.value = false
+  }
 }
 
 onMounted(loadApps)
