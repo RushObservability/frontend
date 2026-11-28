@@ -3326,6 +3326,8 @@ function dpChartMouseMove(e: MouseEvent, chartType: string) {
   const relX = mouseX - dpChartPad.left
   const idx = Math.round(relX / stepX)
   if (idx >= 0 && idx < buckets.length) {
+    // A new object re-renders the panel; most moves stay within one bucket.
+    if (chartHover.value?.bucketIdx === idx && chartHover.value.chartType === chartType) return
     chartHover.value = { bucketIdx: idx, chartType }
   }
 }
