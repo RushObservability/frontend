@@ -31,6 +31,9 @@ for (const action of ['stop', 'navigate', 'logout'] as const) {
       const address = server.address() as { port: number }
       await stub(page, `http://127.0.0.1:${address.port}/api/v1/investigate`)
       await page.goto('/investigate?q=Investigate%20CPU')
+      // A link opened from outside the app only fills the form.
+      await expect(page.getByLabel('Ask a question about your system')).toHaveValue('Investigate CPU')
+      await page.getByRole('button', { name: 'Start Investigation', exact: true }).click()
       await expect(page.getByText('Collecting evidence', { exact: false })).toBeVisible()
       if (action === 'stop') await page.getByRole('button', { name: 'Stop', exact: true }).click()
       else if (action === 'navigate') await page.getByRole('link', { name: 'Services', exact: true }).click()

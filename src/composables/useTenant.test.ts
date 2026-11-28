@@ -36,6 +36,24 @@ describe('tenant links', () => {
     expect(tenant.linkedTenantNotice.value).toBe('')
   })
 
+  it('says which tenant a link switched to once the page reloads', async () => {
+    const session = new Map<string, string>()
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => session.get(key) ?? null,
+      setItem: (key: string, value: string) => session.set(key, value),
+      removeItem: (key: string) => session.delete(key),
+    })
+    const { tenant } = await setup(json(list))
+    expect(await tenant.applyLinkedTenant('prod')).toBe('switched')
+
+    vi.resetModules()
+    const reloaded = (await import('./useTenant')).useTenant()
+    expect(reloaded.linkedTenantNotice.value).toBe('Switched to tenant "prod" from a link.')
+
+    vi.resetModules()
+    expect((await import('./useTenant')).useTenant().linkedTenantNotice.value).toBe('')
+  })
+
   it('reports the current tenant without switching', async () => {
     const { tenant } = await setup(json(list))
     expect(await tenant.applyLinkedTenant('default')).toBe('current')
@@ -46,7 +64,7 @@ describe('tenant links', () => {
     const { tenant } = await setup(json(list))
     expect(await tenant.applyLinkedTenant('acme')).toBe('denied')
     expect(tenant.activeTenant.value).toBe('default')
-    expect(tenant.linkedTenantNotice.value).toContain('"acme"')
+    expect(tenant.linkedTenantNotice.value).not.toContain('acme')
     expect(tenant.linkedTenantNotice.value).toContain('Showing "default"')
     tenant.dismissLinkedTenantNotice()
     expect(tenant.linkedTenantNotice.value).toBe('')
@@ -57,6 +75,7 @@ describe('tenant links', () => {
     expect(await tenant.applyLinkedTenant('prod')).toBe('unavailable')
     expect(tenant.activeTenant.value).toBe('default')
     expect(tenant.linkedTenantNotice.value).toContain("Couldn't check access")
+    expect(tenant.linkedTenantNotice.value).not.toContain('prod')
   })
 
   it('shares one tenant request between concurrent loads', async () => {

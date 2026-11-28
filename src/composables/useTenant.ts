@@ -14,8 +14,10 @@ import { stopPollingTasks } from './usePollingTask'
 const activeTenant = ref<string>('default')
 const tenants = ref<Tenant[]>([])
 const loaded = ref(false)
-// Shown by the app shell when a `?tenant=` link could not be honored.
-const linkedTenantNotice = ref('')
+// A `?tenant=` switch reloads the page, so its notice is carried in sessionStorage.
+const LINK_SWITCHED_TENANT_KEY = 'rush_link_tenant_switched'
+// Shown by the app shell after a `?tenant=` link switched tenant or could not be honored.
+const linkedTenantNotice = ref(takeSwitchedTenantNotice())
 let loadPromise: Promise<void> | null = null
 function resetTenants(): void {
   tenants.value = []
@@ -126,17 +128,29 @@ export type LinkedTenantOutcome = 'current' | 'switched' | 'denied' | 'unavailab
 async function applyLinkedTenant(name: string): Promise<LinkedTenantOutcome> {
   linkedTenantNotice.value = ''
   if (!loaded.value) await loadTenants()
+  // Never echo the link's tenant name unless it is one of the user's own tenants.
   if (!loaded.value) {
-    linkedTenantNotice.value = `Couldn't check access to tenant "${name}". Showing "${activeTenant.value}".`
+    linkedTenantNotice.value = `Couldn't check access to the tenant in this link. Showing "${activeTenant.value}".`
     return 'unavailable'
   }
   if (name === activeTenant.value) return 'current'
   if (!tenants.value.some((t) => t.name === name)) {
-    linkedTenantNotice.value = `This link is for tenant "${name}", which you can't access or doesn't exist. Showing "${activeTenant.value}" instead.`
+    linkedTenantNotice.value = `This link is for a tenant you can't access or that doesn't exist. Showing "${activeTenant.value}" instead.`
     return 'denied'
   }
   persistActiveTenant(name)
+  try { sessionStorage.setItem(LINK_SWITCHED_TENANT_KEY, name) } catch { /* storage may be unavailable */ }
   return 'switched'
+}
+
+function takeSwitchedTenantNotice(): string {
+  try {
+    const name = sessionStorage.getItem(LINK_SWITCHED_TENANT_KEY)
+    sessionStorage.removeItem(LINK_SWITCHED_TENANT_KEY)
+    return name ? `Switched to tenant "${name}" from a link.` : ''
+  } catch {
+    return ''
+  }
 }
 
 function dismissLinkedTenantNotice(): void {

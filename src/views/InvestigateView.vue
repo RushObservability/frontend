@@ -2,16 +2,19 @@
 import { ref } from 'vue'
 import { useRoute } from 'vue-router'
 import InvestigationPanel from '../components/InvestigationPanel.vue'
+import { openedInApp } from '../lib/investigateLink'
 
 const route = useRoute()
 const eventId = ref((route.query.event as string) || '')
 const question = ref((route.query.q as string) || '')
 const additionalContext = ref((route.query.ctx as string) || '')
-const started = ref(!!(eventId.value || question.value))
-const inputQuestion = ref('')
+// Only in-app navigation starts from the URL; a link from elsewhere just fills the form.
+const inApp = openedInApp(window.history.state)
+const started = ref(inApp && !!(eventId.value || question.value))
+const inputQuestion = ref(inApp ? '' : question.value)
 
 function startInvestigation() {
-  if (!inputQuestion.value.trim()) return
+  if (!inputQuestion.value.trim() && !eventId.value) return
   question.value = inputQuestion.value.trim()
   started.value = true
 }
@@ -44,7 +47,12 @@ function reset() {
           @keydown.ctrl.enter="startInvestigation"
         ></textarea>
       </div>
-      <button class="btn btn-primary" @click="startInvestigation" :disabled="!inputQuestion.trim()">
+      <div v-if="additionalContext" class="form-group">
+        <label for="investigation-context">Context</label>
+        <textarea id="investigation-context" v-model="additionalContext" rows="4"></textarea>
+      </div>
+      <p v-if="eventId" class="form-group investigate-subtitle">Anomaly event {{ eventId }}</p>
+      <button class="btn btn-primary" @click="startInvestigation" :disabled="!inputQuestion.trim() && !eventId">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
         </svg>
