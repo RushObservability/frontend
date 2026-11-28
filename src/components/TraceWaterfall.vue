@@ -7,8 +7,15 @@
  * host considers current, and listen to `select` to react. Branch collapse and
  * the inline detail row are local, since neither host needs to drive them.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { SpanNode, TraceResponse } from '../types'
+import {
+  buildVirtualOffsets,
+  nextVirtualIndex,
+  virtualScrollTarget,
+  virtualWindow,
+  type VirtualNavigationKey,
+} from '../lib/virtualWindow'
 import {
   WATERFALL_TICKS,
   clipTraceWindow,
@@ -47,12 +54,29 @@ const expandedSpanId = ref<string | null>(null)
 const localSpanId = ref<string | null>(null)
 const focusedWindow = ref<TraceWindow | null>(null)
 
+// Rows are windowed so a 20k-span trace renders a screenful, not 20k rows.
+// Every row is ROW_HEIGHT tall (pinned in CSS); only the open detail panel varies.
+const ROW_HEIGHT = 26
+const HEAD_HEIGHT = 24
+const OVERSCAN = 8
+const grid = ref<HTMLElement | null>(null)
+const scrollTop = ref(0)
+const viewportHeight = ref(760)
+const detailHeight = ref(0)
+const focusIndex = ref(0)
+let resizeObserver: ResizeObserver | null = null
+let observedDetail: HTMLElement | null = null
+let frame: number | null = null
+
 // A new trace starts fully expanded and with no open detail row.
 watch(() => props.trace?.trace_id, () => {
   collapsed.value = new Set()
   expandedSpanId.value = null
   localSpanId.value = null
   focusedWindow.value = null
+  focusIndex.value = 0
+  scrollTop.value = 0
+  if (grid.value) grid.value.scrollTop = 0
 })
 
 const orderedSpans = computed(() => flattenSpans(props.trace?.spans ?? []))
@@ -90,6 +114,27 @@ const visibleRows = computed(() => {
     }]
   })
   return props.compact ? visible.slice(0, 20) : visible
+})
+const rowOffsets = computed(() => {
+  const rows = visibleRows.value
+  const open = expandedSpanId.value
+  const heights = new Map(open ? [[open, ROW_HEIGHT + detailHeight.value]] : [])
+  return buildVirtualOffsets(rows.length, ROW_HEIGHT, index => rows[index]!.span.span_id, heights)
+})
+const rowRange = computed(() => virtualWindow(rowOffsets.value, scrollTop.value, viewportHeight.value, ROW_HEIGHT, OVERSCAN))
+const renderedRows = computed(() => {
+  const { start, end } = rowRange.value
+  return visibleRows.value.slice(start, end).map((row, offset) => ({ ...row, index: start + offset }))
+})
+const topPadding = computed(() => rowOffsets.value[rowRange.value.start] ?? 0)
+const bottomPadding = computed(() => {
+  const offsets = rowOffsets.value
+  return Math.max(0, offsets[offsets.length - 1]! - offsets[rowRange.value.end]!)
+})
+// Roving tab stop: one rendered row stays tabbable even when the focused one scrolled away.
+const tabStopIndex = computed(() => {
+  const { start, end } = rowRange.value
+  return Math.min(Math.max(focusIndex.value, start), Math.max(start, end - 1))
 })
 const hiddenCount = computed(() => orderedSpans.value.length - visibleRows.value.length)
 const hiddenErrors = computed(() => errorCount.value - visibleRows.value.filter(row => isSpanError(row.span)).length)
@@ -150,6 +195,57 @@ function selectSpan(spanId: string) {
 function attrsFor(span: SpanNode): Record<string, unknown> {
   return displayableSpanAttrs(span)
 }
+
+function measureGrid() {
+  if (grid.value) viewportHeight.value = Math.max(0, grid.value.clientHeight - HEAD_HEIGHT)
+}
+
+function onGridScroll() {
+  if (frame !== null) return
+  frame = requestAnimationFrame(() => {
+    frame = null
+    scrollTop.value = grid.value?.scrollTop ?? 0
+  })
+}
+
+function observeDetail(element: unknown) {
+  const next = element instanceof HTMLElement ? element : null
+  if (next === observedDetail) return
+  if (observedDetail) resizeObserver?.unobserve(observedDetail)
+  observedDetail = next
+  if (next) resizeObserver?.observe(next)
+}
+
+function onRowKeydown(event: KeyboardEvent, index: number) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const target = nextVirtualIndex(event.key as VirtualNavigationKey, index, visibleRows.value.length)
+  focusIndex.value = target
+  const node = grid.value
+  if (node) {
+    const next = virtualScrollTarget(rowOffsets.value, target, node.scrollTop, viewportHeight.value)
+    if (next !== node.scrollTop) node.scrollTop = next
+    scrollTop.value = node.scrollTop
+  }
+  void nextTick(() => grid.value?.querySelector<HTMLElement>(`[data-row-index="${target}"]`)?.focus())
+}
+
+onMounted(() => {
+  measureGrid()
+  resizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.target === grid.value) measureGrid()
+      else detailHeight.value = Math.ceil(entry.borderBoxSize?.[0]?.blockSize || entry.contentRect.height)
+    }
+  })
+  if (grid.value) resizeObserver.observe(grid.value)
+  if (observedDetail) resizeObserver.observe(observedDetail)
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  if (frame !== null) cancelAnimationFrame(frame)
+})
 </script>
 
 <template>
@@ -195,8 +291,15 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
       </svg>
     </div>
 
-    <div class="tw-grid" role="treegrid" aria-label="Trace span waterfall">
-      <div class="tw-head-row" role="row">
+    <div
+      ref="grid"
+      class="tw-grid"
+      role="treegrid"
+      aria-label="Trace span waterfall"
+      :aria-rowcount="visibleRows.length + 1"
+      @scroll="onGridScroll"
+    >
+      <div class="tw-head-row" role="row" aria-rowindex="1">
         <div class="tw-col-span" role="columnheader">Span</div>
         <div class="tw-col-bar" role="columnheader">
           <span
@@ -210,7 +313,8 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
         <div class="tw-col-dur" role="columnheader">Duration</div>
       </div>
 
-      <template v-for="row in visibleRows" :key="'tw-' + row.span.span_id">
+      <div aria-hidden="true" role="presentation" :style="{ height: topPadding + 'px' }"></div>
+      <template v-for="row in renderedRows" :key="'tw-' + row.span.span_id">
         <div
           class="tw-row"
           :class="{
@@ -219,9 +323,13 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
             'tw-row-current': row.span.span_id === selectedSpanId,
           }"
           role="row"
-          tabindex="0"
+          :tabindex="row.index === tabStopIndex ? 0 : -1"
+          :data-row-index="row.index"
+          :aria-rowindex="row.index + 2"
           :aria-level="row.depth + 1"
           :aria-selected="row.span.span_id === selectedSpanId"
+          @focus="focusIndex = row.index"
+          @keydown="onRowKeydown($event, row.index)"
           @click.stop="selectSpan(row.span.span_id)"
           @keydown.enter.prevent="selectSpan(row.span.span_id)"
           @keydown.space.prevent="selectSpan(row.span.span_id)"
@@ -282,7 +390,7 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
           </div>
         </div>
 
-        <div v-if="expandedSpanId === row.span.span_id" class="tw-detail" @click.stop>
+        <div v-if="expandedSpanId === row.span.span_id" :ref="observeDetail" class="tw-detail" @click.stop>
           <div class="tw-detail-meta">
             <span><b>span</b> <span class="mono">{{ row.span.span_id }}</span></span>
             <span><b>parent</b> <span class="mono">{{ row.span.parent_span_id || '—' }}</span></span>
@@ -299,6 +407,7 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
           </div>
         </div>
       </template>
+      <div aria-hidden="true" role="presentation" :style="{ height: bottomPadding + 'px' }"></div>
     </div>
     <div v-if="selectedSpan || hiddenCount" class="tw-readout">
       <span v-if="selectedSpan">Selected span <strong>{{ spanOperation(selectedSpan) }}</strong>
@@ -356,7 +465,10 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
 .tw-overview-range { fill: var(--accent-soft); stroke: var(--text-secondary); vector-effect: non-scaling-stroke; }
 .tw-readout { padding: var(--sp-2) 0 0; overflow-wrap: anywhere; }
 .tw-readout strong { color: var(--text-primary); }
-.tw-grid { border: 1px solid var(--border-subtle); border-radius: var(--r-md); overflow: hidden; }
+.tw-grid {
+  max-height: min(68vh, 760px); overflow: auto; overscroll-behavior: contain; overflow-anchor: none;
+  border: 1px solid var(--border-subtle); border-radius: var(--r-md);
+}
 .tw--compact .tw-grid { max-height: 300px; overflow-y: auto; }
 .tw--compact .tw-overview svg { height: 28px; }
 .tw-head-row, .tw-row {
@@ -365,7 +477,7 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
   align-items: center;
 }
 .tw-head-row {
-  position: sticky; top: 0; z-index: 1; height: 24px;
+  position: sticky; top: 0; z-index: 1; box-sizing: border-box; height: 24px;
   background: var(--bg-raised);
   border-bottom: 1px solid var(--border-subtle);
   font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-tertiary);
@@ -382,11 +494,10 @@ function attrsFor(span: SpanNode): Record<string, unknown> {
 .tw-col-dur { padding-right: 10px; text-align: right; }
 
 .tw-row {
-  min-height: 26px; cursor: pointer;
+  box-sizing: border-box; height: 26px; cursor: pointer;
   border-bottom: 1px solid var(--border-subtle);
   transition: background .08s;
 }
-.tw-row:last-of-type { border-bottom: none; }
 .tw-row:hover { background: var(--bg-hover); }
 .tw-row:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: -2px; }
 .tw-row-open { background: var(--bg-raised); }
